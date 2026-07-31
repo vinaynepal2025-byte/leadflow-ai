@@ -805,4 +805,4 @@ class ApiService {
     final res = await http.patch(Uri.parse('$baseUrl/meetings/$id'), headers: _headers, body: jsonEncode(fields));
     _checkOk(res);
   }
-nano mobile/lib/services/api_service.dart
+}

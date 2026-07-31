@@ -226,7 +226,7 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: TextFormField(
-        value: currentValue?.toString() ?? '',
+        initialValue: currentValue?.toString() ?? '',
         keyboardType: def['field_type'] == 'number' ? TextInputType.number : TextInputType.text,
         decoration: InputDecoration(labelText: def['label'], isDense: true, border: const OutlineInputBorder()),
         onFieldSubmitted: (v) async => await _api.setLeadCustomField(lead.id, key, v),

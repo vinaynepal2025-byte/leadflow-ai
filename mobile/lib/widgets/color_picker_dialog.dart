@@ -69,7 +69,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
                         decoration: BoxDecoration(
                           color: c,
                           shape: BoxShape.circle,
-                          border: !_customMode && c.toARGB32() == _current.toARGB32()
+                          border: !_customMode && c.value == _current.value
                               ? Border.all(color: Colors.black, width: 2.5)
                               : null,
                         ),
