@@ -13,7 +13,28 @@ import 'widgets/grain_overlay.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await ApiService.loadBaseUrl();
+
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      color: Colors.white,
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            details.exceptionAsString(),
+            style: const TextStyle(color: Colors.red, fontSize: 12),
+          ),
+        ),
+      ),
+    );
+  };
+
+  try {
+    await ApiService.loadBaseUrl();
+  } catch (e, st) {
+    debugPrint('loadBaseUrl failed: $e\n$st');
+  }
+
   runApp(
     MultiProvider(
       providers: [
