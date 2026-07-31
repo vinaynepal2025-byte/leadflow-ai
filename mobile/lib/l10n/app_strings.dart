@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'locale_settings.dart';
+import '../theme/locale_settings.dart';
 
 /// Real translations, not machine-generated placeholders — covers the
 /// screens a counselor looks at constantly (navigation, login, dashboard,

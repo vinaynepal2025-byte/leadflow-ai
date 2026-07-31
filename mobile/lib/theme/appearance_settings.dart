@@ -1,3 +1,15 @@
+c.value
+c.value
+c.value
+c.value
+c.value
+c.value
+preset.primary.value
+preset.primary.value
+preset.accent.value
+preset.accent.value
+preset.glowColor!.value
+preset.glowColor!.value
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -260,13 +272,13 @@ class AppearanceSettings extends ChangeNotifier {
   Future<void> setPrimaryColor(Color c) async {
     _primaryColor = c;
     notifyListeners();
-    (await SharedPreferences.getInstance()).setInt(_primaryKey, c.);
+    (await SharedPreferences.getInstance()).setInt(_primaryKey, c.value);
   }
 
   Future<void> setAccentColor(Color c) async {
     _accentColor = c;
     notifyListeners();
-    (await SharedPreferences.getInstance()).setInt(_accentKey, c.);
+    (await SharedPreferences.getInstance()).setInt(_accentKey, c.value);
   }
 
   Future<void> setFontPairing(FontPairing f) async {
@@ -355,7 +367,7 @@ class AppearanceSettings extends ChangeNotifier {
   Future<void> setGlowColor(Color c) async {
     _glowColor = c;
     notifyListeners();
-    (await SharedPreferences.getInstance()).setInt(_glowColorKey, c.);
+    (await SharedPreferences.getInstance()).setInt(_glowColorKey, c.value);
   }
 
   Future<void> setGlowIntensity(double v) async {
@@ -377,7 +389,7 @@ class AppearanceSettings extends ChangeNotifier {
     if (c == null) {
       await prefs.remove(_outlineColorKey);
     } else {
-      await prefs.setInt(_outlineColorKey, c.);
+      await prefs.setInt(_outlineColorKey, c.value);
     }
   }
 
@@ -427,8 +439,8 @@ class AppearanceSettings extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await Future.wait([
-      prefs.setInt(_primaryKey, preset.primary.),
-      prefs.setInt(_accentKey, preset.accent.),
+      prefs.setInt(_primaryKey, preset.primary.value),
+      prefs.setInt(_accentKey, preset.accent.value),
       prefs.setInt(_fontKey, preset.font.index),
       prefs.setDouble(_radiusKey, preset.radius),
       prefs.setBool(_darkModeKey, preset.dark),
@@ -436,7 +448,7 @@ class AppearanceSettings extends ChangeNotifier {
       prefs.setBool(_glowEnabledKey, preset.glow),
       prefs.setBool(_floatingEnabledKey, preset.floating),
       prefs.setBool(_textureKey, preset.texture),
-      if (preset.glowColor != null) prefs.setInt(_glowColorKey, preset.glowColor!.),
+      if (preset.glowColor != null) prefs.setInt(_glowColorKey, preset.glowColor!.value),
     ]);
     setGlassEnabled(preset.styleMode == UIStyleMode.glass || preset.styleMode == UIStyleMode.liquid);
   }
@@ -496,5 +508,3 @@ class AppearanceSettings extends ChangeNotifier {
     ]);
   }
 }
-\
-
