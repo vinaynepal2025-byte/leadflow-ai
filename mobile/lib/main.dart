@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
@@ -11,41 +13,67 @@ import 'theme/locale_settings.dart';
 import 'services/api_service.dart';
 import 'widgets/grain_overlay.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+const String _logPath =
+    '/storage/emulated/0/Android/data/com.leadflowai.leadflow_ai/files/crash_log.txt';
 
-  ErrorWidget.builder = (FlutterErrorDetails details) {
-    return Material(
-      color: Colors.white,
-      child: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            details.exceptionAsString(),
-            style: const TextStyle(color: Colors.red, fontSize: 12),
+void _log(String message) {
+  try {
+    final file = File(_logPath);
+    file.createSync(recursive: true, exclusive: false);
+    file.writeAsStringSync('${DateTime.now()}: $message\n', mode: FileMode.append);
+  } catch (_) {
+    // Logging must never itself crash the app.
+  }
+}
+
+void main() {
+  runZonedGuarded(() async {
+    _log('main() entered');
+    WidgetsFlutterBinding.ensureInitialized();
+    _log('WidgetsFlutterBinding initialized');
+
+    FlutterError.onError = (FlutterErrorDetails details) {
+      _log('FlutterError: ${details.exceptionAsString()}\n${details.stack}');
+    };
+
+    ErrorWidget.builder = (FlutterErrorDetails details) {
+      _log('ErrorWidget shown: ${details.exceptionAsString()}');
+      return Material(
+        color: Colors.white,
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              details.exceptionAsString(),
+              style: const TextStyle(color: Colors.red, fontSize: 12),
+            ),
           ),
         ),
+      );
+    };
+
+    ApiService.loadBaseUrl().timeout(
+      const Duration(seconds: 5),
+      onTimeout: () => _log('loadBaseUrl timed out'),
+    ).catchError((e) {
+      _log('loadBaseUrl failed: $e');
+    });
+
+    _log('about to call runApp');
+    runApp(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => GlassSettings()..load()),
+          ChangeNotifierProvider(create: (_) => AppearanceSettings()..load()),
+          ChangeNotifierProvider(create: (_) => LocaleSettings()..load()),
+        ],
+        child: const LeadFlowApp(),
       ),
     );
-  };
-
-  ApiService.loadBaseUrl().timeout(
-    const Duration(seconds: 5),
-    onTimeout: () => debugPrint('loadBaseUrl timed out, using default'),
-  ).catchError((e) {
-    debugPrint('loadBaseUrl failed: $e');
+    _log('runApp returned');
+  }, (error, stack) {
+    _log('Uncaught zone error: $error\n$stack');
   });
-
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => GlassSettings()..load()),
-        ChangeNotifierProvider(create: (_) => AppearanceSettings()..load()),
-        ChangeNotifierProvider(create: (_) => LocaleSettings()..load()),
-      ],
-      child: const LeadFlowApp(),
-    ),
-  );
 }
 
 class LeadFlowApp extends StatelessWidget {
@@ -53,11 +81,7 @@ class LeadFlowApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Every screen using theme-derived colors/fonts/cards (rather than a
-    // hardcoded value) re-renders automatically the instant the user
-    // changes anything in Customize App Look — no restart needed. This
-    // single Consumer2 is what makes the customization genuinely
-    // app-wide instead of only affecting a couple of hand-wired screens.
+    _log('LeadFlowApp.build() called');
     return Consumer3<AppearanceSettings, GlassSettings, LocaleSettings>(
       builder: (context, appearance, glass, locale, _) {
         return MaterialApp(
@@ -80,9 +104,6 @@ class LeadFlowApp extends StatelessWidget {
               child: child ?? const SizedBox.shrink(),
             );
 
-            // Rough Texture is independent of style mode — it can layer
-            // on top of Solid, Corporate, Cartoon, anything. Painted once
-            // here so it covers every screen automatically.
             if (appearance.textureEnabled) {
               result = Stack(
                 children: [
@@ -92,13 +113,6 @@ class LeadFlowApp extends StatelessWidget {
               );
             }
 
-            // The one place that wraps every screen in the app — painting
-            // the gradient backdrop here, once, is what makes Glass UI
-            // apply everywhere rather than only on screens that manually
-            // opted in. Individual screens (Login, Dashboard) still layer
-            // their own real BackdropFilter blur on top for extra depth
-            // on hero surfaces; everywhere else just sits on this
-            // gradient with translucent theme-driven cards/buttons.
             if (glass.enabled) {
               result = Stack(
                 children: [
@@ -131,19 +145,20 @@ class LeadFlowApp extends StatelessWidget {
   }
 }
 
-/// Decides whether to show the Login screen or go straight into the app,
-/// based on whether a saved session token exists.
 class _StartupGate extends StatelessWidget {
   const _StartupGate();
 
   @override
   Widget build(BuildContext context) {
+    _log('_StartupGate.build() called');
     return FutureBuilder<bool>(
-      future: AuthService().isLoggedIn(),
+      future: AuthService().isLoggedIn().timeout(const Duration(seconds: 5), onTimeout: () => false),
       builder: (context, snapshot) {
+        _log('_StartupGate FutureBuilder state: ${snapshot.connectionState}');
         if (snapshot.connectionState != ConnectionState.done) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
+        _log('_StartupGate resolved: loggedIn=${snapshot.data}');
         return (snapshot.data ?? false) ? const HomeShell() : const LoginScreen();
       },
     );
