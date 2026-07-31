@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,6 +8,15 @@ class AuthService {
   static const _tokenKey = 'leadflow_token';
   static const _tenantKey = 'leadflow_tenant_id';
   static const _userNameKey = 'leadflow_user_name';
+
+  // In-memory cache so the current session keeps working even if the
+  // SharedPreferences plugin is slow or unresponsive on a given device —
+  // login and session checks never hang the UI. Persistence to disk below
+  // is best-effort and timeout-bounded so it can only ever be a bonus,
+  // never a blocker.
+  static String? _cachedToken;
+  static String? _cachedTenantId;
+  static String? _cachedUserName;
 
   Future<Map<String, dynamic>> login({
     required String tenantId,
@@ -51,20 +61,44 @@ class AuthService {
   }
 
   Future<void> _saveSession(Map<String, dynamic> data) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tokenKey, data['token']);
-    await prefs.setString(_tenantKey, data['user']['tenant_id']);
-    await prefs.setString(_userNameKey, data['user']['full_name']);
+    // Update the in-memory cache first and immediately — this is what the
+    // rest of the app reads, so login always "takes" for this app run even
+    // if the disk write below is slow.
+    _cachedToken = data['token'] as String?;
+    _cachedTenantId = data['user']['tenant_id'] as String?;
+    _cachedUserName = data['user']['full_name'] as String?;
+
+    try {
+      final prefs = await SharedPreferences.getInstance().timeout(const Duration(seconds: 5));
+      await prefs.setString(_tokenKey, _cachedToken ?? '');
+      await prefs.setString(_tenantKey, _cachedTenantId ?? '');
+      await prefs.setString(_userNameKey, _cachedUserName ?? '');
+    } catch (_) {
+      // Session still works for this app run via the in-memory cache above;
+      // it just won't survive a full app restart on this device.
+    }
   }
 
   Future<String?> getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_tokenKey);
+    if (_cachedToken != null) return _cachedToken;
+    try {
+      final prefs = await SharedPreferences.getInstance().timeout(const Duration(seconds: 5));
+      _cachedToken = prefs.getString(_tokenKey);
+      return _cachedToken;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<String?> getUserName() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_userNameKey);
+    if (_cachedUserName != null) return _cachedUserName;
+    try {
+      final prefs = await SharedPreferences.getInstance().timeout(const Duration(seconds: 5));
+      _cachedUserName = prefs.getString(_userNameKey);
+      return _cachedUserName;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<bool> isLoggedIn() async {
@@ -73,9 +107,14 @@ class AuthService {
   }
 
   Future<void> logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_tokenKey);
-    await prefs.remove(_tenantKey);
-    await prefs.remove(_userNameKey);
+    _cachedToken = null;
+    _cachedTenantId = null;
+    _cachedUserName = null;
+    try {
+      final prefs = await SharedPreferences.getInstance().timeout(const Duration(seconds: 5));
+      await prefs.remove(_tokenKey);
+      await prefs.remove(_tenantKey);
+      await prefs.remove(_userNameKey);
+    } catch (_) {}
   }
 }
