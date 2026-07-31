@@ -1,0 +1,87 @@
+name: Build and Release LeadFlow AI
+
+# Runs entirely on GitHub's own servers — the person pushing code never
+# needs Flutter installed. Every push to main produces:
+#   1. An Android APK, attached to a GitHub Release (direct download + install)
+#   2. A web build, deployed to GitHub Pages (installable PWA, just a URL)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # lets you trigger a rebuild manually from the Actions tab
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.0'
+          channel: 'stable'
+
+      - name: Generate Android/iOS/Web project folders
+        # This is the step that means nobody needs Flutter on their own
+        # computer — it runs here, once, on every push. It only adds the
+        # platform scaffolding around the existing lib/ and pubspec.yaml;
+        # it does not touch your app's own code.
+        run: flutter create . --org com.leadflowai --project-name leadflow_ai
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate app icon
+        run: dart run flutter_launcher_icons
+
+      - name: Generate splash screen
+        run: dart run flutter_native_splash:create
+
+      - name: Brand the web app (name, theme color, install prompt)
+        run: |
+          python3 - <<'EOF'
+          import json
+          with open('web/manifest.json') as f:
+              m = json.load(f)
+          m['name'] = 'LeadFlow AI'
+          m['short_name'] = 'LeadFlow AI'
+          m['description'] = 'Powered by VertiCore MetaOS — Lead Intelligence & Consultancy Operating System'
+          m['theme_color'] = '#1B2A4A'
+          m['background_color'] = '#1B2A4A'
+          with open('web/manifest.json', 'w') as f:
+              json.dump(m, f, indent=2)
+          EOF
+
+      - name: Build Android APK
+        run: flutter build apk --release
+
+      - name: Build Web app (installable PWA)
+        run: flutter build web --release --base-href /${{ github.event.repository.name }}/
+
+      - name: Publish APK to a GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: LeadFlow AI — build ${{ github.run_number }}
+          files: mobile/build/app/outputs/flutter-apk/app-release.apk
+          body: |
+            Automatic build from the latest code.
+            **Android**: download `app-release.apk` below, open it on your phone, allow "install from unknown sources" if asked.
+            **Any phone/browser**: use the web install link instead — see the repository's GitHub Pages URL.
+
+      - name: Deploy web app to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: mobile/build/web

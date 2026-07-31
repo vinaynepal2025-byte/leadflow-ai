@@ -1,0 +1,57 @@
+name: leadflow_ai
+description: "LeadFlow AI — Powered by VertiCore MetaOS. Lead Intelligence & Consultancy Operating System."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  http: ^1.2.0
+  intl: ^0.19.0
+  url_launcher: ^6.2.5
+  shared_preferences: ^2.2.2
+  provider: ^6.1.2
+  file_picker: ^8.1.2
+  google_fonts: ^6.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icon/
+    - assets/splash/
+
+# Run once, after `flutter create .` and `flutter pub get`, on a machine
+# with the Flutter SDK: `dart run flutter_launcher_icons` then
+# `dart run flutter_native_splash:create` — this generates the real
+# per-platform icon/splash files into android/ and ios/, which can't be
+# produced without the SDK this chat sandbox doesn't have.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  web:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+  image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#1B2A4A"
+  adaptive_icon_foreground: "assets/icon/app_icon.png"
+  remove_alpha_ios: true
+
+flutter_native_splash:
+  color: "#1B2A4A"
+  image: "assets/splash/splash_logo.png"
+  android_12:
+    image: "assets/splash/splash_logo.png"
+    icon_background_color: "#1B2A4A"
