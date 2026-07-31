@@ -52,13 +52,13 @@ class _SocialLinksScreenState extends State<SocialLinksScreen> {
               children: [
                 TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title (e.g. "Instagram bio link")')),
                 DropdownButtonFormField<String>(
-                  initialValue: platform,
+                  value: platform,
                   decoration: const InputDecoration(labelText: 'Platform'),
                   items: platforms.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
                   onChanged: (v) => setDialogState(() => platform = v ?? platform),
                 ),
                 DropdownButtonFormField<String>(
-                  initialValue: formId,
+                  value: formId,
                   decoration: const InputDecoration(labelText: 'Sends leads to which form?'),
                   items: forms.map<DropdownMenuItem<String>>((f) => DropdownMenuItem(value: f['id'] as String, child: Text(f['name']))).toList(),
                   onChanged: (v) => setDialogState(() => formId = v),

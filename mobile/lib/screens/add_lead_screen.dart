@@ -107,7 +107,7 @@ class _AddLeadScreenState extends State<AddLeadScreen> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              initialValue: _source,
+              value: _source,
               decoration: const InputDecoration(labelText: 'Source', border: OutlineInputBorder()),
               items: sources.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
               onChanged: (v) => setState(() => _source = v ?? _source),

@@ -40,7 +40,7 @@ class _AutomationsScreenState extends State<AutomationsScreen> {
                 TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Rule Name')),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  initialValue: trigger,
+                  value: trigger,
                   decoration: const InputDecoration(labelText: 'When this happens'),
                   items: triggers.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
                   onChanged: (v) => setDialogState(() => trigger = v ?? trigger),

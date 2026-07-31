@@ -54,7 +54,7 @@ class _CallLogTabState extends State<_CallLogTab> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
-                initialValue: outcome,
+                value: outcome,
                 items: outcomes.map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
                 onChanged: (v) => setDialogState(() => outcome = v ?? outcome),
                 decoration: const InputDecoration(labelText: 'Outcome'),

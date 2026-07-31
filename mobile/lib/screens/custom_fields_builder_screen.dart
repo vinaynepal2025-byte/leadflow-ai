@@ -40,7 +40,7 @@ class _CustomFieldsBuilderScreenState extends State<CustomFieldsBuilderScreen> {
                 TextField(controller: labelCtrl, decoration: const InputDecoration(labelText: 'Field Label (e.g. IELTS Score)')),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  initialValue: type,
+                  value: type,
                   decoration: const InputDecoration(labelText: 'Type'),
                   items: types.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
                   onChanged: (v) => setDialogState(() => type = v ?? type),

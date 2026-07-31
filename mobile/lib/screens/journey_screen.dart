@@ -246,7 +246,7 @@ class _StudentTabState extends State<_StudentTab> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
-                initialValue: wellbeing,
+                value: wellbeing,
                 items: const ['good', 'okay', 'struggling'].map((w) => DropdownMenuItem(value: w, child: Text(w))).toList(),
                 onChanged: (v) => setDialogState(() => wellbeing = v ?? wellbeing),
                 decoration: const InputDecoration(labelText: 'Wellbeing'),

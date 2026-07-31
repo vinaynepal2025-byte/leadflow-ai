@@ -39,7 +39,7 @@ class _CaptureFormsScreenState extends State<CaptureFormsScreen> {
               children: [
                 TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Form Name')),
                 DropdownButtonFormField<String>(
-                  initialValue: channel,
+                  value: channel,
                   decoration: const InputDecoration(labelText: 'Channel'),
                   items: channels.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
                   onChanged: (v) => setDialogState(() => channel = v ?? channel),

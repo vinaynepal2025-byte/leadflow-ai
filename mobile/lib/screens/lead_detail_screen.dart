@@ -213,7 +213,7 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: DropdownButtonFormField<String>(
-          initialValue: options.contains(currentValue) ? currentValue as String : null,
+          value: options.contains(currentValue) ? currentValue as String : null,
           decoration: InputDecoration(labelText: def['label'], isDense: true, border: const OutlineInputBorder()),
           items: options.map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
           onChanged: (v) async {
@@ -226,7 +226,7 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: TextFormField(
-        initialValue: currentValue?.toString() ?? '',
+        value: currentValue?.toString() ?? '',
         keyboardType: def['field_type'] == 'number' ? TextInputType.number : TextInputType.text,
         decoration: InputDecoration(labelText: def['label'], isDense: true, border: const OutlineInputBorder()),
         onFieldSubmitted: (v) async => await _api.setLeadCustomField(lead.id, key, v),

@@ -260,13 +260,13 @@ class AppearanceSettings extends ChangeNotifier {
   Future<void> setPrimaryColor(Color c) async {
     _primaryColor = c;
     notifyListeners();
-    (await SharedPreferences.getInstance()).setInt(_primaryKey, c.toARGB32());
+    (await SharedPreferences.getInstance()).setInt(_primaryKey, c.);
   }
 
   Future<void> setAccentColor(Color c) async {
     _accentColor = c;
     notifyListeners();
-    (await SharedPreferences.getInstance()).setInt(_accentKey, c.toARGB32());
+    (await SharedPreferences.getInstance()).setInt(_accentKey, c.);
   }
 
   Future<void> setFontPairing(FontPairing f) async {
@@ -355,7 +355,7 @@ class AppearanceSettings extends ChangeNotifier {
   Future<void> setGlowColor(Color c) async {
     _glowColor = c;
     notifyListeners();
-    (await SharedPreferences.getInstance()).setInt(_glowColorKey, c.toARGB32());
+    (await SharedPreferences.getInstance()).setInt(_glowColorKey, c.);
   }
 
   Future<void> setGlowIntensity(double v) async {
@@ -377,7 +377,7 @@ class AppearanceSettings extends ChangeNotifier {
     if (c == null) {
       await prefs.remove(_outlineColorKey);
     } else {
-      await prefs.setInt(_outlineColorKey, c.toARGB32());
+      await prefs.setInt(_outlineColorKey, c.);
     }
   }
 
@@ -427,8 +427,8 @@ class AppearanceSettings extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await Future.wait([
-      prefs.setInt(_primaryKey, preset.primary.toARGB32()),
-      prefs.setInt(_accentKey, preset.accent.toARGB32()),
+      prefs.setInt(_primaryKey, preset.primary.),
+      prefs.setInt(_accentKey, preset.accent.),
       prefs.setInt(_fontKey, preset.font.index),
       prefs.setDouble(_radiusKey, preset.radius),
       prefs.setBool(_darkModeKey, preset.dark),
@@ -436,7 +436,7 @@ class AppearanceSettings extends ChangeNotifier {
       prefs.setBool(_glowEnabledKey, preset.glow),
       prefs.setBool(_floatingEnabledKey, preset.floating),
       prefs.setBool(_textureKey, preset.texture),
-      if (preset.glowColor != null) prefs.setInt(_glowColorKey, preset.glowColor!.toARGB32()),
+      if (preset.glowColor != null) prefs.setInt(_glowColorKey, preset.glowColor!.),
     ]);
     setGlassEnabled(preset.styleMode == UIStyleMode.glass || preset.styleMode == UIStyleMode.liquid);
   }
@@ -496,3 +496,5 @@ class AppearanceSettings extends ChangeNotifier {
     ]);
   }
 }
+\
+
