@@ -1,15 +1,3 @@
-c.value
-c.value
-c.value
-c.value
-c.value
-c.value
-preset.primary.value
-preset.primary.value
-preset.accent.value
-preset.accent.value
-preset.glowColor!.value
-preset.glowColor!.value
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
