@@ -29,11 +29,12 @@ void main() async {
     );
   };
 
-  try {
-    await ApiService.loadBaseUrl();
-  } catch (e, st) {
-    debugPrint('loadBaseUrl failed: $e\n$st');
-  }
+  ApiService.loadBaseUrl().timeout(
+    const Duration(seconds: 5),
+    onTimeout: () => debugPrint('loadBaseUrl timed out, using default'),
+  ).catchError((e) {
+    debugPrint('loadBaseUrl failed: $e');
+  });
 
   runApp(
     MultiProvider(
