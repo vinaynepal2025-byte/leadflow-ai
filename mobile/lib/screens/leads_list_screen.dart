@@ -190,7 +190,7 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         child: SizedBox(
           height: constraints.maxHeight,
-          child: const Center(
+          child: Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
