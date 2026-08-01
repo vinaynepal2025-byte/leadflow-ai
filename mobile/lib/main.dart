@@ -12,132 +12,44 @@ import 'theme/locale_settings.dart';
 import 'services/api_service.dart';
 import 'widgets/grain_overlay.dart';
 
-final List<String> _bootLog = [];
-final ValueNotifier<int> _bootLogTick = ValueNotifier<int>(0);
-
-void _log(String message) {
-  final line = '${DateTime.now().toIso8601String().substring(11, 19)}  $message';
-  _bootLog.add(line);
-  _bootLogTick.value++;
-  // ignore: avoid_print
-  print('[BOOT] $message');
-}
-
+/// Startup on this build must NEVER await any plugin (SharedPreferences,
+/// etc.) before the first frame — on some Android ROMs a plugin's native
+/// call can block the entire Dart isolate synchronously, which means even
+/// Future.timeout() can't fire because the event loop itself is stuck.
+/// So: zero awaits before runApp. Everything plugin-related happens in the
+/// background, purely fire-and-forget, and only updates the UI later via
+/// setState if/when it actually completes.
 void main() {
   runZonedGuarded(() {
     WidgetsFlutterBinding.ensureInitialized();
-    _log('main() entered, binding initialized');
-    runApp(const _BootScreen());
+
+    FlutterError.onError = (FlutterErrorDetails details) {
+      debugPrint('FlutterError: ${details.exceptionAsString()}');
+    };
+
+    // Fire-and-forget. baseUrl already has a sane default; if this
+    // resolves later it just updates the static field for later API calls.
+    ApiService.loadBaseUrl().catchError((e) {
+      debugPrint('loadBaseUrl failed: $e');
+    });
+
+    runApp(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => GlassSettings()..load()),
+          ChangeNotifierProvider(create: (_) => AppearanceSettings()..load()),
+          ChangeNotifierProvider(create: (_) => LocaleSettings()..load()),
+        ],
+        child: const LeadFlowApp(),
+      ),
+    );
   }, (error, stack) {
-    _log('ZONE ERROR: $error');
-    _log(stack.toString());
+    debugPrint('Uncaught zone error: $error\n$stack');
   });
 }
 
-/// Shown immediately on launch, before any async setup runs. Because this
-/// is the very first frame rendered, if setup below ever hangs or throws,
-/// the boot log stays visible on screen instead of a blank/gray/blue
-/// screen — the exact failure point is always readable without adb.
-class _BootScreen extends StatefulWidget {
-  const _BootScreen();
-
-  @override
-  State<_BootScreen> createState() => _BootScreenState();
-}
-
-class _BootScreenState extends State<_BootScreen> {
-  bool _ready = false;
-  bool _loggedIn = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _boot();
-  }
-
-  Future<void> _boot() async {
-    try {
-      FlutterError.onError = (FlutterErrorDetails details) {
-        _log('FlutterError: ${details.exceptionAsString()}');
-      };
-      ErrorWidget.builder = (FlutterErrorDetails details) {
-        _log('ErrorWidget: ${details.exceptionAsString()}');
-        return _buildLogView();
-      };
-
-      _log('loading base url...');
-      await ApiService.loadBaseUrl().timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => _log('loadBaseUrl TIMED OUT'),
-      );
-      _log('base url ready: ${ApiService.baseUrl}');
-
-      _log('checking login state...');
-      _loggedIn = await AuthService().isLoggedIn().timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => false,
-      );
-      _log('login state resolved: $_loggedIn');
-
-      _log('boot complete, switching to real app');
-      if (mounted) setState(() => _ready = true);
-    } catch (e, st) {
-      _log('BOOT EXCEPTION: $e');
-      _log(st.toString());
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_ready) {
-      return MaterialApp(debugShowCheckedModeBanner: false, home: _buildLogView());
-    }
-    return MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => GlassSettings()..load()),
-        ChangeNotifierProvider(create: (_) => AppearanceSettings()..load()),
-        ChangeNotifierProvider(create: (_) => LocaleSettings()..load()),
-      ],
-      child: LeadFlowApp(loggedIn: _loggedIn),
-    );
-  }
-
-  Widget _buildLogView() {
-    return ValueListenableBuilder<int>(
-      valueListenable: _bootLogTick,
-      builder: (context, _, __) {
-        return Material(
-          color: Colors.black,
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('LeadFlow AI — starting up…',
-                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: Text(
-                        _bootLog.join('\n'),
-                        style: const TextStyle(color: Colors.greenAccent, fontSize: 11, fontFamily: 'monospace'),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
 class LeadFlowApp extends StatelessWidget {
-  final bool loggedIn;
-  const LeadFlowApp({super.key, required this.loggedIn});
+  const LeadFlowApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -195,9 +107,46 @@ class LeadFlowApp extends StatelessWidget {
             }
             return result;
           },
-          home: loggedIn ? const HomeShell() : const LoginScreen(),
+          // No plugin-gated startup gate anymore. Always land on LoginScreen
+          // first — it's the safest, guaranteed-to-render default. If a
+          // saved session exists, we check for it here, in the background,
+          // AFTER the first frame is already on screen, and hand off to
+          // HomeShell only if/when that resolves.
+          home: const _PostFirstFrameAuthCheck(),
         );
       },
     );
+  }
+}
+
+class _PostFirstFrameAuthCheck extends StatefulWidget {
+  const _PostFirstFrameAuthCheck();
+
+  @override
+  State<_PostFirstFrameAuthCheck> createState() => _PostFirstFrameAuthCheckState();
+}
+
+class _PostFirstFrameAuthCheckState extends State<_PostFirstFrameAuthCheck> {
+  bool _checked = false;
+  bool _loggedIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Runs after the first frame is already visible, so even if this
+    // never completes, the person is never staring at a blank screen.
+    AuthService().isLoggedIn().then((value) {
+      if (mounted) setState(() => _loggedIn = value);
+    }).catchError((e) {
+      debugPrint('isLoggedIn failed: $e');
+    }).whenComplete(() {
+      if (mounted) setState(() => _checked = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_checked && _loggedIn) return const HomeShell();
+    return const LoginScreen();
   }
 }
