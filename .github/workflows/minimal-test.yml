@@ -1,0 +1,44 @@
+name: Build Minimal Test APK
+
+on:
+  push:
+    paths:
+      - 'minimal_test/**'
+      - '.github/workflows/minimal-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: minimal_test
+
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.0'
+          channel: 'stable'
+
+      - name: Generate Android project folder
+        run: flutter create . --org com.leadflowai --project-name minimal_test
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Android APK
+        run: flutter build apk --release
+
+      - name: Publish APK to a GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: minimal-test-${{ github.run_number }}
+          name: Minimal Test — build ${{ github.run_number }}
+          files: minimal_test/build/app/outputs/flutter-apk/app-release.apk
