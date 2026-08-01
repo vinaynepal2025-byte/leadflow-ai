@@ -39,6 +39,10 @@ jobs:
         # it does not touch your app's own code.
         run: flutter create . --org com.leadflowai --project-name leadflow_ai
 
+      - name: Add INTERNET permission (missing from flutter create output)
+        run: |
+          sed -i 's#<manifest xmlns:android="http://schemas.android.com/apk/res/android">#<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET" />#' android/app/src/main/AndroidManifest.xml
+
       - name: Disable Impeller renderer (compatibility fix for some Android GPUs)
         # Some Android GPU/driver combinations (seen on certain vivo/OriginOS
         # devices) fail to paint any frame under Flutter's newer Impeller
