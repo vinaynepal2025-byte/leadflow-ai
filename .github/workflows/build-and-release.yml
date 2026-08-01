@@ -39,6 +39,25 @@ jobs:
         # it does not touch your app's own code.
         run: flutter create . --org com.leadflowai --project-name leadflow_ai
 
+      - name: Disable Impeller renderer (compatibility fix for some Android GPUs)
+        # Some Android GPU/driver combinations (seen on certain vivo/OriginOS
+        # devices) fail to paint any frame under Flutter's newer Impeller
+        # renderer — the app stays alive but the screen never draws. Forcing
+        # the older, more broadly compatible Skia renderer fixes this.
+        run: |
+          python3 - <<'PYEOF'
+          path = 'android/app/src/main/AndroidManifest.xml'
+          with open(path) as f:
+              content = f.read()
+          meta_data = '        <meta-data\n            android:name="io.flutter.embedding.android.EnableImpeller"\n            android:value="false" />\n'
+          marker = '<application'
+          idx = content.index(marker)
+          end_of_open_tag = content.index('>', idx) + 1
+          content = content[:end_of_open_tag] + '\n' + meta_data + content[end_of_open_tag:]
+          with open(path, 'w') as f:
+              f.write(content)
+          PYEOF
+
       - name: Install dependencies
         run: flutter pub get
 
