@@ -90,6 +90,9 @@ jobs:
               json.dump(m, f, indent=2)
           EOF
 
+      - name: DEBUG - print AndroidManifest.xml
+        run: cat android/app/src/main/AndroidManifest.xml
+
       - name: Build Android APK
         run: flutter build apk --release
 
