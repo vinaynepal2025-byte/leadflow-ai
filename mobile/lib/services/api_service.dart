@@ -14,12 +14,12 @@ class ApiService {
   // is loaded from SharedPreferences at startup and changeable from
   // Settings, so pointing the installed app at your real deployed
   // backend never requires rebuilding the app.
-  static String baseUrl = 'http://localhost:3000';
+  static String baseUrl = 'https://leadflow-ai-backend-e50r.onrender.com';
   static const _baseUrlKey = 'api_base_url';
 
   static Future<void> loadBaseUrl() async {
     final prefs = await SharedPreferences.getInstance();
-    baseUrl = prefs.getString(_baseUrlKey) ?? 'http://localhost:3000';
+    baseUrl = prefs.getString(_baseUrlKey) ?? 'https://leadflow-ai-backend-e50r.onrender.com';
   }
 
   static Future<void> setBaseUrl(String url) async {
