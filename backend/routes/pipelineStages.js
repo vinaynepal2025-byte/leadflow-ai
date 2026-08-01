@@ -20,7 +20,8 @@ router.post('/', async (req, res) => {
   const { name, color } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
 
-  const maxPos = await db.prepare('SELECT COALESCE(MAX(position), -1) AS m FROM pipeline_stages WHERE tenant_id = ?').get(tid).m;
+  const maxPosRow = await db.prepare('SELECT COALESCE(MAX(position), -1) AS m FROM pipeline_stages WHERE tenant_id = ?').get(tid);
+  const maxPos = maxPosRow.m;
   const id = randomUUID();
   await db.prepare('INSERT INTO pipeline_stages (id, tenant_id, name, position, color) VALUES (?, ?, ?, ?, ?)')
     .run(id, tid, name, maxPos + 1, color || '#607D8B');
