@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
@@ -22,6 +23,7 @@ import 'widgets/grain_overlay.dart';
 void main() {
   runZonedGuarded(() {
     WidgetsFlutterBinding.ensureInitialized();
+    GoogleFonts.config.allowRuntimeFetching = false;
 
     FlutterError.onError = (FlutterErrorDetails details) {
       debugPrint('FlutterError: ${details.exceptionAsString()}');
