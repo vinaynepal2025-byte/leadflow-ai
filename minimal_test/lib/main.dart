@@ -6,6 +6,25 @@ import 'theme/glass_settings.dart';
 import 'theme/locale_settings.dart';
 
 void main() {
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      color: Colors.red,
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            'CRASH:\n${details.exceptionAsString()}\n\nSTACK:\n${details.stack}',
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+          ),
+        ),
+      ),
+    );
+  };
+
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+  };
+
   runApp(
     MultiProvider(
       providers: [
