@@ -20,7 +20,6 @@ void main() {
     WidgetsFlutterBinding.ensureInitialized();
     log('binding initialized');
 
-    GoogleFonts.config.allowRuntimeFetching = false;
     log('google fonts config set');
 
     FlutterError.onError = (FlutterErrorDetails details) {

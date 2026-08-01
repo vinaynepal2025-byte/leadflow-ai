@@ -23,7 +23,6 @@ import 'widgets/grain_overlay.dart';
 void main() {
   runZonedGuarded(() {
     WidgetsFlutterBinding.ensureInitialized();
-    GoogleFonts.config.allowRuntimeFetching = false;
 
     FlutterError.onError = (FlutterErrorDetails details) {
       debugPrint('FlutterError: ${details.exceptionAsString()}');
