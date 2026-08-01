@@ -58,6 +58,17 @@ jobs:
               f.write(content)
           PYEOF
 
+      - name: Allow cleartext HTTP traffic (needed for local/self-hosted backend testing)
+        run: |
+          python3 - <<'PYEOF2'
+          path = 'android/app/src/main/AndroidManifest.xml'
+          with open(path) as f:
+              content = f.read()
+          content = content.replace('<application', '<application\n        android:usesCleartextTraffic="true"', 1)
+          with open(path, 'w') as f:
+              f.write(content)
+          PYEOF2
+
       - name: Install dependencies
         run: flutter pub get
 
