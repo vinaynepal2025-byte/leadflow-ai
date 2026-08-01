@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'appearance_settings.dart';
 
 /// Original LeadFlow AI identity colors — used as sensible defaults and
@@ -33,31 +32,41 @@ class _FontPair {
   const _FontPair(this.display, this.body, this.headingStyle);
 }
 
+// Uses the device's own built-in system font families instead of
+// downloading fonts over the network — this removes any dependency on
+// internet access or a specific DNS/host being reachable at startup,
+// which previously caused a hard crash whenever fonts.gstatic.com
+// couldn't be resolved. Each pairing still reads as visually distinct
+// via the different generic system families Android ships with.
+TextTheme _themeWithFamily(String family) => Typography.material2021(platform: TargetPlatform.android)
+    .black
+    .apply(fontFamily: family);
+
 _FontPair _resolveFontPair(FontPairing pairing) {
   switch (pairing) {
     case FontPairing.playfairLato:
       return _FontPair(
-        GoogleFonts.playfairDisplayTextTheme,
-        GoogleFonts.latoTextTheme,
-        ({fontSize, fontWeight, color}) => GoogleFonts.playfairDisplay(fontSize: fontSize, fontWeight: fontWeight, color: color),
+        () => _themeWithFamily('serif'),
+        () => _themeWithFamily('serif'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'serif', fontSize: fontSize, fontWeight: fontWeight, color: color),
       );
     case FontPairing.poppinsRoboto:
       return _FontPair(
-        GoogleFonts.poppinsTextTheme,
-        GoogleFonts.robotoTextTheme,
-        ({fontSize, fontWeight, color}) => GoogleFonts.poppins(fontSize: fontSize, fontWeight: fontWeight, color: color),
+        () => _themeWithFamily('sans-serif-medium'),
+        () => _themeWithFamily('sans-serif'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'sans-serif-medium', fontSize: fontSize, fontWeight: fontWeight, color: color),
       );
     case FontPairing.montserratOpenSans:
       return _FontPair(
-        GoogleFonts.montserratTextTheme,
-        GoogleFonts.openSansTextTheme,
-        ({fontSize, fontWeight, color}) => GoogleFonts.montserrat(fontSize: fontSize, fontWeight: fontWeight, color: color),
+        () => _themeWithFamily('sans-serif-condensed'),
+        () => _themeWithFamily('sans-serif'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'sans-serif-condensed', fontSize: fontSize, fontWeight: fontWeight, color: color),
       );
     case FontPairing.spaceGroteskInter:
       return _FontPair(
-        GoogleFonts.spaceGroteskTextTheme,
-        GoogleFonts.interTextTheme,
-        ({fontSize, fontWeight, color}) => GoogleFonts.spaceGrotesk(fontSize: fontSize, fontWeight: fontWeight, color: color),
+        () => _themeWithFamily('sans-serif'),
+        () => _themeWithFamily('sans-serif'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'sans-serif', fontSize: fontSize, fontWeight: fontWeight, color: color),
       );
   }
 }
@@ -108,23 +117,14 @@ class AppTheme {
     final borderColor = settings.outlineColor ??
         (recipe.hardBorder ? (isDark ? Colors.white : settings.primaryColor) : (recipe.whiteTint ? Colors.white : settings.primaryColor));
 
-    // Edge Blur is a soft-edge look, approximated at theme level by
-    // fading the border and thickening it slightly — the true diffused
-    // blur (an actual soft-focus edge) renders on hero widgets that use
-    // GlassContainer, where a real blurred shadow can trace the shape.
     final edgeSoftenFactor = (1 - (settings.edgeBlur / 14)).clamp(0.15, 1.0);
     final effectiveBorderAlpha = recipe.borderAlpha * edgeSoftenFactor;
     final effectiveBorderWidth = recipe.borderWidthBase * settings.borderThickness + settings.edgeBlur * 0.25;
 
-    // Neon Glow: a colored, oversized elevation shadow — the app-wide
-    // approximation of "glow" (a true isotropic ring lives on hero
-    // widgets via a real multi-layer BoxShadow list).
     final glowShadow = settings.glowEnabled
         ? settings.glowColor
         : (recipe.hardBorder ? Colors.black.withValues(alpha: 0.4) : settings.primaryColor.withValues(alpha: 0.25));
     var glowElevation = settings.glowEnabled ? 4 + settings.glowIntensity * 14 : recipe.elevation;
-    // Floating adds extra neutral lift independent of glow/mode — a
-    // separate "how much does this sit above the page" control.
     if (settings.floatingEnabled) glowElevation += 3 + settings.floatingIntensity * 10;
 
     return CardThemeData(
@@ -168,13 +168,10 @@ class AppTheme {
           : BorderSide(color: borderColor.withValues(alpha: recipe.borderAlpha), width: recipe.borderWidthBase * settings.borderThickness),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(settings.cornerRadius * 0.75)),
       padding: EdgeInsets.symmetric(vertical: 14 * settings.componentScale, horizontal: 20 * settings.componentScale),
-      textStyle: GoogleFonts.getFont(bodyFont.bodyLarge?.fontFamily ?? 'Inter', fontWeight: FontWeight.w600),
+      textStyle: TextStyle(fontFamily: bodyFont.bodyLarge?.fontFamily, fontWeight: FontWeight.w600),
     );
   }
 
-  /// Builds a full ThemeData from the user's live AppearanceSettings — the
-  /// chosen UIStyleMode drives card/button/input rendering everywhere,
-  /// modulated by border thickness, opacity, and component scale.
   static ThemeData build(AppearanceSettings settings, {required Brightness brightness}) {
     final isDark = brightness == Brightness.dark;
     final pair = _resolveFontPair(settings.fontPairing);
@@ -190,8 +187,6 @@ class AppTheme {
         secondary: settings.accentColor,
         brightness: brightness,
       ),
-      // Glass/Liquid modes go transparent so the app-wide gradient backdrop
-      // (painted once, in main.dart's builder) shows through everywhere.
       scaffoldBackgroundColor: isGlassy ? Colors.transparent : (isDark ? const Color(0xFF14171F) : AppColors.paper),
     );
 
@@ -252,10 +247,6 @@ class AppTheme {
         backgroundColor: isGlassy ? Colors.white.withValues(alpha: isDark ? 0.08 : 0.4) : (isDark ? const Color(0xFF1E2230) : AppColors.paper),
         side: BorderSide(color: isGlassy ? Colors.white.withValues(alpha: 0.4) : settings.primaryColor.withValues(alpha: 0.1)),
       ),
-      // Dialogs previously used Flutter's stock white square look, which
-      // read as a jarring mismatch against every other themed surface —
-      // now they follow corner radius, dark mode, and glass translucency
-      // just like cards do.
       dialogTheme: DialogThemeData(
         backgroundColor: isGlassy
             ? (isDark ? const Color(0xFF1E2230).withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.92))
@@ -265,17 +256,12 @@ class AppTheme {
         titleTextStyle: pair.headingStyle(fontSize: 18, fontWeight: FontWeight.w700, color: textColor),
         contentTextStyle: bodyFont.bodyMedium,
       ),
-      // FAB now follows the same corner-radius language as everything
-      // else (previously always a fixed circle, regardless of Shape
-      // settings) and picks up Neon Glow / Floating.
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: settings.primaryColor,
         foregroundColor: Colors.white,
         elevation: settings.floatingEnabled ? 6 + settings.floatingIntensity * 8 : 4,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(settings.cornerRadius * 0.85)),
       ),
-      // SnackBars follow the same shape language too, instead of the
-      // default hard-cornered black bar.
       snackBarTheme: SnackBarThemeData(
         backgroundColor: isDark ? const Color(0xFF2E3546) : settings.primaryColor,
         contentTextStyle: bodyFont.bodyMedium?.copyWith(color: Colors.white),

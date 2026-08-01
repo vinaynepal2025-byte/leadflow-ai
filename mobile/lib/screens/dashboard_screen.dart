@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
@@ -83,7 +82,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 12),
                   Center(
                     child: Text('Could not load dashboard',
-                        style: GoogleFonts.inter(color: AppColors.slate), textAlign: TextAlign.center),
+                        style: TextStyle(color: AppColors.slate), textAlign: TextAlign.center),
                   ),
                 ],
               );
@@ -149,7 +148,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               SizedBox(
                                 width: 24,
                                 child: Text('${e.value}', textAlign: TextAlign.end,
-                                    style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                                    style: TextStyle(fontWeight: FontWeight.w600)),
                               ),
                             ],
                           ),
@@ -178,7 +177,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 12),
           Text(value, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 24)),
-          Text(label, style: GoogleFonts.inter(fontSize: 12, color: AppColors.slate)),
+          Text(label, style: TextStyle(fontSize: 12, color: AppColors.slate)),
         ],
       ),
     );

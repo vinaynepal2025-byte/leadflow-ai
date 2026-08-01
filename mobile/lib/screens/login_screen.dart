@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/journey_path_painter.dart';
@@ -97,7 +96,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             const SizedBox(height: 4),
                             Text(
                               context.tr('app_tagline'),
-                              style: GoogleFonts.inter(fontSize: 12, color: Colors.white.withValues(alpha: 0.7)),
+                              style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.7)),
                             ),
                           ],
                         ),
@@ -116,7 +115,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       Text(context.tr('welcome_back'), style: Theme.of(context).textTheme.headlineMedium),
                       const SizedBox(height: 4),
                       Text(context.tr('login_subtitle'),
-                          style: GoogleFonts.inter(fontSize: 13, color: AppColors.slate)),
+                          style: TextStyle(fontSize: 13, color: AppColors.slate)),
                       const SizedBox(height: 28),
                       TextFormField(
                         controller: _tenantCtrl,
@@ -146,7 +145,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(_error!,
-                              style: GoogleFonts.inter(color: AppColors.coralAlert, fontSize: 13)),
+                              style: TextStyle(color: AppColors.coralAlert, fontSize: 13)),
                         ),
                       ],
                       const SizedBox(height: 24),
@@ -164,7 +163,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           MaterialPageRoute(builder: (_) => const RegisterScreen()),
                         ),
                         child: Text(context.tr('create_account_prompt'),
-                            style: GoogleFonts.inter(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600)),
+                            style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600)),
                       ),
                       TextButton.icon(
                         onPressed: () => Navigator.push(
