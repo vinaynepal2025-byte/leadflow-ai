@@ -1,5 +1,5 @@
 name: minimal_test
-description: Minimal diagnostic app — no plugins, no fonts, no deps.
+description: Minimal diagnostic app — real deps, no app logic.
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -9,6 +9,16 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  http: ^1.2.0
+  intl: ^0.19.0
+  url_launcher: ^6.2.5
+  shared_preferences: ^2.2.2
+  provider: ^6.1.2
+  file_picker: ^8.1.2
+  google_fonts: ^6.2.1
 
 flutter:
   uses-material-design: true
