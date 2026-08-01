@@ -64,9 +64,6 @@ jobs:
       - name: Generate app icon
         run: dart run flutter_launcher_icons
 
-      - name: Generate splash screen
-        run: dart run flutter_native_splash:create
-
       - name: Brand the web app (name, theme color, install prompt)
         run: |
           python3 - <<'EOF'
