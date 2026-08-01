@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:google_fonts/google_fonts.dart';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
@@ -13,44 +13,160 @@ import 'theme/locale_settings.dart';
 import 'services/api_service.dart';
 import 'widgets/grain_overlay.dart';
 
-/// Startup on this build must NEVER await any plugin (SharedPreferences,
-/// etc.) before the first frame — on some Android ROMs a plugin's native
-/// call can block the entire Dart isolate synchronously, which means even
-/// Future.timeout() can't fire because the event loop itself is stuck.
-/// So: zero awaits before runApp. Everything plugin-related happens in the
-/// background, purely fire-and-forget, and only updates the UI later via
-/// setState if/when it actually completes.
+final List<String> _bootLog = [];
+final ValueNotifier<int> _tick = ValueNotifier<int>(0);
+
+void log(String msg) {
+  _bootLog.add(msg);
+  _tick.value++;
+}
+
 void main() {
   runZonedGuarded(() {
     WidgetsFlutterBinding.ensureInitialized();
+    log('binding initialized');
 
     FlutterError.onError = (FlutterErrorDetails details) {
-      debugPrint('FlutterError: ${details.exceptionAsString()}');
+      log('FlutterError: ${details.exceptionAsString()}');
+    };
+    PlatformDispatcher.instance.onError = (error, stack) {
+      log('PlatformDispatcher error: $error');
+      return true;
     };
 
-    // Fire-and-forget. baseUrl already has a sane default; if this
-    // resolves later it just updates the static field for later API calls.
     ApiService.loadBaseUrl().catchError((e) {
-      debugPrint('loadBaseUrl failed: $e');
+      log('loadBaseUrl failed: $e');
     });
 
-    runApp(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider(create: (_) => GlassSettings()..load()),
-          ChangeNotifierProvider(create: (_) => AppearanceSettings()..load()),
-          ChangeNotifierProvider(create: (_) => LocaleSettings()..load()),
-        ],
-        child: const LeadFlowApp(),
-      ),
-    );
+    runApp(const _DiagRoot());
+    log('runApp called');
   }, (error, stack) {
-    debugPrint('Uncaught zone error: $error\n$stack');
+    log('ZONE ERROR: $error');
+    log(stack.toString().split('\n').take(4).join(' | '));
   });
 }
 
-class LeadFlowApp extends StatelessWidget {
-  const LeadFlowApp({super.key});
+class _DiagRoot extends StatefulWidget {
+  const _DiagRoot();
+  @override
+  State<_DiagRoot> createState() => _DiagRootState();
+}
+
+class _DiagRootState extends State<_DiagRoot> {
+  bool _ready = false;
+  bool _loggedIn = false;
+  ThemeData? _lightTheme;
+  ThemeData? _darkTheme;
+  AppearanceSettings? _appearance;
+  GlassSettings? _glass;
+  LocaleSettings? _locale;
+
+  @override
+  void initState() {
+    super.initState();
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    try {
+      _glass = GlassSettings();
+      log('GlassSettings constructed');
+      _appearance = AppearanceSettings();
+      log('AppearanceSettings constructed');
+      _locale = LocaleSettings();
+      log('LocaleSettings constructed');
+    } catch (e) {
+      log('Settings construction FAILED: $e');
+      return;
+    }
+
+    try {
+      await _glass!.load();
+      log('glass.load() done');
+    } catch (e) {
+      log('glass.load() FAILED: $e');
+    }
+
+    try {
+      await _appearance!.load();
+      log('appearance.load() done');
+    } catch (e) {
+      log('appearance.load() FAILED: $e');
+    }
+
+    try {
+      await _locale!.load();
+      log('locale.load() done');
+    } catch (e) {
+      log('locale.load() FAILED: $e');
+    }
+
+    try {
+      _lightTheme = AppTheme.build(_appearance!, brightness: Brightness.light);
+      _darkTheme = AppTheme.build(_appearance!, brightness: Brightness.dark);
+      log('AppTheme.build() done for both brightnesses');
+    } catch (e, st) {
+      log('AppTheme.build() FAILED: $e');
+      log(st.toString().split('\n').take(4).join(' | '));
+      return;
+    }
+
+    try {
+      _loggedIn = await AuthService().isLoggedIn();
+      log('isLoggedIn resolved: $_loggedIn');
+    } catch (e) {
+      log('isLoggedIn FAILED: $e');
+    }
+
+    log('boot complete — switching to real app');
+    if (mounted) setState(() => _ready = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_ready || _appearance == null || _glass == null || _locale == null) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: ValueListenableBuilder<int>(
+          valueListenable: _tick,
+          builder: (context, _, __) => Material(
+            color: Colors.black,
+            child: SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('LeadFlow AI — DIAGNOSTIC BOOT',
+                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    Text(_bootLog.join('\n'),
+                        style: const TextStyle(color: Colors.greenAccent, fontSize: 12, fontFamily: 'monospace')),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: _glass!),
+        ChangeNotifierProvider.value(value: _appearance!),
+        ChangeNotifierProvider.value(value: _locale!),
+      ],
+      child: _RealApp(loggedIn: _loggedIn, lightTheme: _lightTheme!, darkTheme: _darkTheme!),
+    );
+  }
+}
+
+class _RealApp extends StatelessWidget {
+  final bool loggedIn;
+  final ThemeData lightTheme;
+  final ThemeData darkTheme;
+  const _RealApp({required this.loggedIn, required this.lightTheme, required this.darkTheme});
 
   @override
   Widget build(BuildContext context) {
@@ -66,8 +182,8 @@ class LeadFlowApp extends StatelessWidget {
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
-          theme: AppTheme.build(appearance, brightness: Brightness.light),
-          darkTheme: AppTheme.build(appearance, brightness: Brightness.dark),
+          theme: lightTheme,
+          darkTheme: darkTheme,
           themeMode: appearance.darkMode ? ThemeMode.dark : ThemeMode.light,
           builder: (context, child) {
             final mq = MediaQuery.of(context);
@@ -76,12 +192,7 @@ class LeadFlowApp extends StatelessWidget {
               child: child ?? const SizedBox.shrink(),
             );
             if (appearance.textureEnabled) {
-              result = Stack(
-                children: [
-                  result,
-                  const Positioned.fill(child: GrainOverlay(opacity: 0.05)),
-                ],
-              );
+              result = Stack(children: [result, const Positioned.fill(child: GrainOverlay(opacity: 0.05))]);
             }
             if (glass.enabled) {
               result = Stack(
@@ -108,46 +219,9 @@ class LeadFlowApp extends StatelessWidget {
             }
             return result;
           },
-          // No plugin-gated startup gate anymore. Always land on LoginScreen
-          // first — it's the safest, guaranteed-to-render default. If a
-          // saved session exists, we check for it here, in the background,
-          // AFTER the first frame is already on screen, and hand off to
-          // HomeShell only if/when that resolves.
-          home: const _PostFirstFrameAuthCheck(),
+          home: loggedIn ? const HomeShell() : const LoginScreen(),
         );
       },
     );
-  }
-}
-
-class _PostFirstFrameAuthCheck extends StatefulWidget {
-  const _PostFirstFrameAuthCheck();
-
-  @override
-  State<_PostFirstFrameAuthCheck> createState() => _PostFirstFrameAuthCheckState();
-}
-
-class _PostFirstFrameAuthCheckState extends State<_PostFirstFrameAuthCheck> {
-  bool _checked = false;
-  bool _loggedIn = false;
-
-  @override
-  void initState() {
-    super.initState();
-    // Runs after the first frame is already visible, so even if this
-    // never completes, the person is never staring at a blank screen.
-    AuthService().isLoggedIn().then((value) {
-      if (mounted) setState(() => _loggedIn = value);
-    }).catchError((e) {
-      debugPrint('isLoggedIn failed: $e');
-    }).whenComplete(() {
-      if (mounted) setState(() => _checked = true);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_checked && _loggedIn) return const HomeShell();
-    return const LoginScreen();
   }
 }
