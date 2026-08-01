@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'theme/app_theme.dart';
 import 'theme/appearance_settings.dart';
@@ -6,6 +7,7 @@ import 'theme/glass_settings.dart';
 import 'theme/locale_settings.dart';
 
 void main() {
+  GoogleFonts.config.allowRuntimeFetching = false;
   ErrorWidget.builder = (FlutterErrorDetails details) {
     return Material(
       color: Colors.red,
