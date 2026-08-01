@@ -21,7 +21,7 @@ function parseAttendees(row) {
 }
 
 // GET /meetings?lead_id=xxx&status=scheduled&upcoming=true
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const tid = tenantId(req);
   const { lead_id, status, upcoming } = req.query;
 
@@ -42,13 +42,13 @@ router.get('/', (req, res) => {
   }
   query += ' ORDER BY m.scheduled_at ASC';
 
-  res.json(db.prepare(query).all(...params).map(parseAttendees));
+  res.json(await db.prepare(query).all(...params).map(parseAttendees));
 });
 
 // POST /meetings — schedule a counseling session, campus tour, etc.
 // Also auto-creates a reminder for the counselor so a booked tour can't
 // quietly slip past — the single most common way these get missed.
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const tid = tenantId(req);
   const {
     lead_id, meeting_type, title, scheduled_at, duration_minutes, mode,
@@ -61,11 +61,11 @@ router.post('/', (req, res) => {
   if (!MEETING_TYPES.includes(meeting_type)) {
     return res.status(400).json({ error: `meeting_type must be one of: ${MEETING_TYPES.join(', ')}` });
   }
-  const lead = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, lead_id);
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, lead_id);
   if (!lead) return res.status(404).json({ error: 'Lead not found for this tenant' });
 
   const id = randomUUID();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO meetings (id, tenant_id, lead_id, meeting_type, title, scheduled_at, duration_minutes,
                           mode, meeting_link, location, campus_name, host_name, attendees, requested_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -77,24 +77,24 @@ router.post('/', (req, res) => {
 
   // Reminder 1 hour before, so nobody misses a scheduled tour
   const reminderTime = new Date(new Date(scheduled_at).getTime() - 60 * 60 * 1000).toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO reminders (id, tenant_id, lead_id, title, due_at, assigned_to)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(randomUUID(), tid, lead_id, `${meeting_type}: ${title}`, reminderTime, host_name || null);
 
   // Log it in the communication timeline too, so Audit Center picks it up
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body, created_by)
     VALUES (?, ?, ?, 'note', 'outbound', ?, ?)
   `).run(randomUUID(), tid, lead_id, `${meeting_type} scheduled for ${scheduled_at}${campus_name ? ` at ${campus_name}` : ''}`, host_name || null);
 
-  res.status(201).json(parseAttendees(db.prepare('SELECT * FROM meetings WHERE id = ?').get(id)));
+  res.status(201).json(parseAttendees(await db.prepare('SELECT * FROM meetings WHERE id = ?').get(id)));
 });
 
 // PATCH /meetings/:id — reschedule, cancel, or record the outcome
-router.patch('/:id', (req, res) => {
+router.patch('/:id', async (req, res) => {
   const tid = tenantId(req);
-  const existing = db.prepare('SELECT * FROM meetings WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const existing = await db.prepare('SELECT * FROM meetings WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Meeting not found' });
 
   if (req.body.status && !STATUSES.includes(req.body.status)) {
@@ -121,13 +121,13 @@ router.patch('/:id', (req, res) => {
 
   updates.push("updated_at = datetime('now')");
   values.push(tid, req.params.id);
-  db.prepare(`UPDATE meetings SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
+  await db.prepare(`UPDATE meetings SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
 
   // A no-show is the moment a lead most often goes cold — surface it
   // immediately rather than letting it sit unnoticed in a list.
   if (req.body.status === 'no-show') {
-    const lead = db.prepare('SELECT full_name FROM leads WHERE id = ?').get(existing.lead_id);
-    createNotification(tid, {
+    const lead = await db.prepare('SELECT full_name FROM leads WHERE id = ?').get(existing.lead_id);
+    await createNotification(tid, {
       title: `No-show: ${lead?.full_name || 'lead'}`,
       body: `${existing.meeting_type} — "${existing.title}" was missed. Follow up today.`,
       linkType: 'lead',
@@ -137,20 +137,20 @@ router.patch('/:id', (req, res) => {
 
   // Recording the outcome logs it to the lead's timeline
   if (req.body.outcome_notes) {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body, created_by)
       VALUES (?, ?, ?, 'note', 'outbound', ?, ?)
     `).run(randomUUID(), tid, existing.lead_id,
       `${existing.meeting_type} outcome: ${req.body.outcome_notes}`, existing.host_name || null);
   }
 
-  res.json(parseAttendees(db.prepare('SELECT * FROM meetings WHERE id = ?').get(req.params.id)));
+  res.json(parseAttendees(await db.prepare('SELECT * FROM meetings WHERE id = ?').get(req.params.id)));
 });
 
 // GET /meetings/stats — how campus tours actually convert
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   const tid = tenantId(req);
-  const byType = db.prepare(`
+  const byType = await db.prepare(`
     SELECT meeting_type,
            COUNT(*) AS total,
            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
@@ -160,7 +160,7 @@ router.get('/stats', (req, res) => {
 
   // Of the leads who completed a campus tour, how many reached Admission —
   // the number that tells you whether tours are actually worth running.
-  const tourConversion = db.prepare(`
+  const tourConversion = await db.prepare(`
     SELECT COUNT(DISTINCT m.lead_id) AS toured,
            COUNT(DISTINCT CASE WHEN l.stage = 'Admission' THEN m.lead_id END) AS converted
     FROM meetings m JOIN leads l ON l.id = m.lead_id

@@ -13,12 +13,12 @@ function tenantId(req) {
 
 // ---------- Form management (authenticated side) ----------
 
-router.get('/forms', (req, res) => {
+router.get('/forms', async (req, res) => {
   const tid = tenantId(req);
-  res.json(db.prepare('SELECT * FROM capture_forms WHERE tenant_id = ? ORDER BY created_at DESC').all(tid));
+  res.json(await db.prepare('SELECT * FROM capture_forms WHERE tenant_id = ? ORDER BY created_at DESC').all(tid));
 });
 
-router.post('/forms', (req, res) => {
+router.post('/forms', async (req, res) => {
   const tid = tenantId(req);
   const { name, channel, assign_to, default_stage, auto_reply_message } = req.body;
   if (!name || !channel) return res.status(400).json({ error: 'name and channel are required' });
@@ -28,12 +28,12 @@ router.post('/forms', (req, res) => {
   // forms by guessing — this URL is public by design.
   const publicKey = randomBytes(12).toString('hex');
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO capture_forms (id, tenant_id, public_key, name, channel, assign_to, default_stage, auto_reply_message)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, tid, publicKey, name, channel, assign_to || null, default_stage || 'New', auto_reply_message || null);
 
-  const created = db.prepare('SELECT * FROM capture_forms WHERE id = ?').get(id);
+  const created = await db.prepare('SELECT * FROM capture_forms WHERE id = ?').get(id);
   res.status(201).json({
     ...created,
     submit_url: `/capture/submit/${publicKey}`,
@@ -41,9 +41,9 @@ router.post('/forms', (req, res) => {
   });
 });
 
-router.patch('/forms/:id', (req, res) => {
+router.patch('/forms/:id', async (req, res) => {
   const tid = tenantId(req);
-  const existing = db.prepare('SELECT id FROM capture_forms WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const existing = await db.prepare('SELECT id FROM capture_forms WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Form not found' });
 
   const allowed = ['name', 'channel', 'assign_to', 'default_stage', 'auto_reply_message', 'active'];
@@ -57,8 +57,8 @@ router.patch('/forms/:id', (req, res) => {
   }
   if (updates.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
   values.push(tid, req.params.id);
-  db.prepare(`UPDATE capture_forms SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
-  res.json(db.prepare('SELECT * FROM capture_forms WHERE id = ?').get(req.params.id));
+  await db.prepare(`UPDATE capture_forms SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
+  res.json(await db.prepare('SELECT * FROM capture_forms WHERE id = ?').get(req.params.id));
 });
 
 // ---------- Public submission (NO auth — this is the point) ----------
@@ -67,8 +67,8 @@ router.patch('/forms/:id', (req, res) => {
 // Deliberately minimal and permissive: a public form that rejects real
 // enquiries over strict validation loses business. Duplicates are flagged
 // on the lead, not rejected, so a parent re-submitting doesn't vanish.
-router.post('/submit/:publicKey', (req, res) => {
-  const form = db.prepare('SELECT * FROM capture_forms WHERE public_key = ? AND active = 1').get(req.params.publicKey);
+router.post('/submit/:publicKey', async (req, res) => {
+  const form = await db.prepare('SELECT * FROM capture_forms WHERE public_key = ? AND active = 1').get(req.params.publicKey);
   if (!form) return res.status(404).json({ error: 'Form not found or inactive' });
 
   const { full_name, phone, email, message, course_interest } = req.body;
@@ -76,7 +76,7 @@ router.post('/submit/:publicKey', (req, res) => {
     return res.status(400).json({ error: 'Name and at least a phone or email are required' });
   }
 
-  const duplicates = findDuplicates(db, form.tenant_id, { full_name, phone });
+  const duplicates = await findDuplicates(db, form.tenant_id, { full_name, phone });
   const noteParts = [];
   if (message) noteParts.push(message);
   if (course_interest) noteParts.push(`Interested in: ${course_interest}`);
@@ -85,23 +85,23 @@ router.post('/submit/:publicKey', (req, res) => {
   }
 
   const id = randomUUID();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO leads (id, tenant_id, full_name, phone, email, source, stage, assigned_to, notes)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, form.tenant_id, full_name, phone || null, email || null,
     `${form.channel}: ${form.name}`, form.default_stage, form.assign_to || null,
     noteParts.join('\n') || null);
 
-  db.prepare('UPDATE capture_forms SET submission_count = submission_count + 1 WHERE id = ?').run(form.id);
+  await db.prepare('UPDATE capture_forms SET submission_count = submission_count + 1 WHERE id = ?').run(form.id);
 
-  createNotification(form.tenant_id, {
+  await createNotification(form.tenant_id, {
     title: `New enquiry: ${full_name}`,
     body: `Came in via ${form.name}${duplicates.length > 0 ? ' — possible duplicate, check before calling' : ''}`,
     linkType: 'lead',
     linkId: id,
   });
 
-  fireEvent('lead.created', { tenant_id: form.tenant_id, lead_id: id });
+  await fireEvent('lead.created', { tenant_id: form.tenant_id, lead_id: id });
 
   // The submitter gets a plain confirmation — never internal details.
   res.status(201).json({
@@ -113,11 +113,11 @@ router.post('/submit/:publicKey', (req, res) => {
 // GET /capture/form/:publicKey — a ready-to-use HTML form.
 // Lets a consultancy with no web developer paste one link/iframe on their
 // site or behind a QR code and start collecting leads the same day.
-router.get('/form/:publicKey', (req, res) => {
-  const form = db.prepare('SELECT * FROM capture_forms WHERE public_key = ? AND active = 1').get(req.params.publicKey);
+router.get('/form/:publicKey', async (req, res) => {
+  const form = await db.prepare('SELECT * FROM capture_forms WHERE public_key = ? AND active = 1').get(req.params.publicKey);
   if (!form) return res.status(404).send('Form not found');
 
-  const tenant = db.prepare('SELECT name, theme_color FROM tenants WHERE id = ?').get(form.tenant_id);
+  const tenant = await db.prepare('SELECT name, theme_color FROM tenants WHERE id = ?').get(form.tenant_id);
   const color = tenant?.theme_color || '#1B2A4A';
   const orgName = tenant?.name || 'Enquiry Form';
 

@@ -9,7 +9,7 @@ function tenantId(req) {
 }
 
 // GET /fees?lead_id=xxx&status=pending
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const tid = tenantId(req);
   const { lead_id, status } = req.query;
   let query = 'SELECT * FROM fee_payments WHERE tenant_id = ?';
@@ -23,47 +23,47 @@ router.get('/', (req, res) => {
     params.push(status);
   }
   query += ' ORDER BY due_date ASC';
-  res.json(db.prepare(query).all(...params));
+  res.json(await db.prepare(query).all(...params));
 });
 
 // GET /fees/summary — tenant-wide totals for the Fee dashboard
-router.get('/summary', (req, res) => {
+router.get('/summary', async (req, res) => {
   const tid = tenantId(req);
-  const totalDue = db.prepare(
+  const totalDue = await db.prepare(
     "SELECT COALESCE(SUM(amount),0) AS t FROM fee_payments WHERE tenant_id = ? AND status IN ('pending','overdue')"
   ).get(tid).t;
-  const totalCollected = db.prepare(
+  const totalCollected = await db.prepare(
     "SELECT COALESCE(SUM(amount),0) AS t FROM fee_payments WHERE tenant_id = ? AND status = 'paid'"
   ).get(tid).t;
-  const overdueCount = db.prepare(
+  const overdueCount = await db.prepare(
     "SELECT COUNT(*) AS c FROM fee_payments WHERE tenant_id = ? AND status = 'pending' AND due_date < date('now')"
   ).get(tid).c;
   res.json({ total_due: totalDue, total_collected: totalCollected, overdue_count: overdueCount });
 });
 
 // POST /fees — create an installment/payment record
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const tid = tenantId(req);
   const { lead_id, fee_type, amount, due_date, notes } = req.body;
   if (!lead_id || !fee_type || amount === undefined) {
     return res.status(400).json({ error: 'lead_id, fee_type, and amount are required' });
   }
-  const lead = db.prepare('SELECT id FROM leads WHERE tenant_id = ? AND id = ?').get(tid, lead_id);
+  const lead = await db.prepare('SELECT id FROM leads WHERE tenant_id = ? AND id = ?').get(tid, lead_id);
   if (!lead) return res.status(404).json({ error: 'Lead not found for this tenant' });
 
   const id = randomUUID();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO fee_payments (id, tenant_id, lead_id, fee_type, amount, due_date, notes)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(id, tid, lead_id, fee_type, amount, due_date || null, notes || null);
 
-  res.status(201).json(db.prepare('SELECT * FROM fee_payments WHERE id = ?').get(id));
+  res.status(201).json(await db.prepare('SELECT * FROM fee_payments WHERE id = ?').get(id));
 });
 
 // PATCH /fees/:id  — mark paid, change method, etc.
-router.patch('/:id', (req, res) => {
+router.patch('/:id', async (req, res) => {
   const tid = tenantId(req);
-  const existing = db.prepare('SELECT * FROM fee_payments WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const existing = await db.prepare('SELECT * FROM fee_payments WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Payment record not found' });
 
   const allowed = ['fee_type', 'amount', 'due_date', 'paid_date', 'status', 'payment_method', 'notes'];
@@ -82,8 +82,8 @@ router.patch('/:id', (req, res) => {
   if (updates.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
 
   values.push(tid, req.params.id);
-  db.prepare(`UPDATE fee_payments SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
-  res.json(db.prepare('SELECT * FROM fee_payments WHERE id = ?').get(req.params.id));
+  await db.prepare(`UPDATE fee_payments SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
+  res.json(await db.prepare('SELECT * FROM fee_payments WHERE id = ?').get(req.params.id));
 });
 
 module.exports = router;

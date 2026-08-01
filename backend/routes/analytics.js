@@ -8,28 +8,28 @@ function tenantId(req) {
 }
 
 // GET /analytics/summary — everything the dashboard needs in one call
-router.get('/summary', (req, res) => {
+router.get('/summary', async (req, res) => {
   const tid = tenantId(req);
 
-  const totalLeads = db.prepare('SELECT COUNT(*) AS c FROM leads WHERE tenant_id = ?').get(tid).c;
+  const totalLeads = await db.prepare('SELECT COUNT(*) AS c FROM leads WHERE tenant_id = ?').get(tid).c;
 
-  const byStage = db.prepare(
+  const byStage = await db.prepare(
     'SELECT stage, COUNT(*) AS count FROM leads WHERE tenant_id = ? GROUP BY stage'
   ).all(tid);
 
-  const bySource = db.prepare(
+  const bySource = await db.prepare(
     "SELECT COALESCE(source, 'Unknown') AS source, COUNT(*) AS count FROM leads WHERE tenant_id = ? GROUP BY source"
   ).all(tid);
 
-  const pendingReminders = db.prepare(
+  const pendingReminders = await db.prepare(
     "SELECT COUNT(*) AS c FROM reminders WHERE tenant_id = ? AND status = 'pending'"
   ).get(tid).c;
 
-  const overdueReminders = db.prepare(
+  const overdueReminders = await db.prepare(
     "SELECT COUNT(*) AS c FROM reminders WHERE tenant_id = ? AND status = 'pending' AND due_at < datetime('now')"
   ).get(tid).c;
 
-  const communicationsToday = db.prepare(
+  const communicationsToday = await db.prepare(
     "SELECT COUNT(*) AS c FROM communications WHERE tenant_id = ? AND date(created_at) = date('now')"
   ).get(tid).c;
 

@@ -17,7 +17,7 @@ router.post('/send', async (req, res) => {
   if (!lead_id || !subject || !message) {
     return res.status(400).json({ error: 'lead_id, subject, and message are required' });
   }
-  const lead = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, lead_id);
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, lead_id);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   if (!lead.email) return res.status(400).json({ error: 'This lead has no email address on file' });
 
@@ -28,12 +28,12 @@ router.post('/send', async (req, res) => {
   }
 
   const id = randomUUID();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body, created_by)
     VALUES (?, ?, ?, 'email', 'outbound', ?, ?)
   `).run(id, tid, lead_id, `Subject: ${subject}\n\n${message}`, created_by || null);
 
-  res.status(201).json({ sent: true, logged: db.prepare('SELECT * FROM communications WHERE id = ?').get(id) });
+  res.status(201).json({ sent: true, logged: await db.prepare('SELECT * FROM communications WHERE id = ?').get(id) });
 });
 
 module.exports = router;

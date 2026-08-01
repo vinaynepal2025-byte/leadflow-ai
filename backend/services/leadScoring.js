@@ -9,8 +9,6 @@
 // Every weight is tenant-configurable (see scoring_config table), because
 // what predicts a conversion genuinely differs between consultancies.
 
-/// The defaults. Every key here appears in Settings as an adjustable
-/// weight, with this value as its starting point.
 const DEFAULT_WEIGHTS = {
   has_phone: 8,
   has_email: 4,
@@ -45,11 +43,8 @@ const DEFAULT_WEIGHTS = {
 
 const DEFAULT_THRESHOLDS = { hot: 70, warm: 40 };
 
-/// Loads a tenant's saved weights, falling back to defaults for any key
-/// they haven't customized — so adding a new signal later never breaks an
-/// existing tenant's saved config.
-function loadConfig(db, tenantId) {
-  const row = db.prepare('SELECT weights, thresholds FROM scoring_config WHERE tenant_id = ?').get(tenantId);
+async function loadConfig(db, tenantId) {
+  const row = await db.prepare('SELECT weights, thresholds FROM scoring_config WHERE tenant_id = ?').get(tenantId);
   if (!row) return { weights: { ...DEFAULT_WEIGHTS }, thresholds: { ...DEFAULT_THRESHOLDS } };
   let saved = {};
   let savedThresholds = {};
@@ -57,7 +52,6 @@ function loadConfig(db, tenantId) {
     saved = JSON.parse(row.weights);
     savedThresholds = JSON.parse(row.thresholds);
   } catch {
-    // Corrupted config should degrade to defaults, not crash scoring
     return { weights: { ...DEFAULT_WEIGHTS }, thresholds: { ...DEFAULT_THRESHOLDS } };
   }
   return {
@@ -66,25 +60,23 @@ function loadConfig(db, tenantId) {
   };
 }
 
-function scoreLead(db, tenantId, lead, config) {
-  const cfg = config || loadConfig(db, tenantId);
+async function scoreLead(db, tenantId, lead, config) {
+  const cfg = config || await loadConfig(db, tenantId);
   const W = cfg.weights;
   const signals = [];
   let score = 0;
 
   const add = (points, reason) => {
-    if (!points) return; // a weight set to 0 means "this doesn't matter to us"
+    if (!points) return;
     score += points;
     signals.push({ points, reason });
   };
 
-  // --- Contactability ---
   if (lead.phone) add(W.has_phone, 'Phone number on file');
   if (lead.email) add(W.has_email, 'Email on file');
   if (lead.parent_name || lead.parent_phone) add(W.has_parent_contact, 'Parent/guardian contact captured');
 
-  // --- Engagement volume & recency ---
-  const comms = db.prepare(
+  const comms = await db.prepare(
     'SELECT channel, direction, created_at FROM communications WHERE tenant_id = ? AND lead_id = ?'
   ).all(tenantId, lead.id);
 
@@ -106,8 +98,7 @@ function scoreLead(db, tenantId, lead, config) {
     add(W.never_contacted, 'Never contacted');
   }
 
-  // --- Meetings ---
-  const meetings = db.prepare(
+  const meetings = await db.prepare(
     'SELECT meeting_type, status FROM meetings WHERE tenant_id = ? AND lead_id = ?'
   ).all(tenantId, lead.id);
   const completedMeetings = meetings.filter((m) => m.status === 'completed').length;
@@ -118,36 +109,38 @@ function scoreLead(db, tenantId, lead, config) {
   if (tours > 0) add(W.campus_tour_completed, 'Completed a campus tour');
   if (noShows > 0) add(noShows * W.per_no_show, `${noShows} no-show(s)`);
 
-  // --- Commitment actions ---
-  const docCount = db.prepare(
+  const docRow = await db.prepare(
     'SELECT COUNT(*) AS c FROM documents WHERE tenant_id = ? AND lead_id = ?'
-  ).get(tenantId, lead.id).c;
+  ).get(tenantId, lead.id);
+  const docCount = docRow.c;
   if (docCount > 0) add(Math.min(docCount * W.per_document, W.max_documents), `${docCount} document(s) submitted`);
 
-  const paidCount = db.prepare(
+  const paidRow = await db.prepare(
     "SELECT COUNT(*) AS c FROM fee_payments WHERE tenant_id = ? AND lead_id = ? AND status = 'paid'"
-  ).get(tenantId, lead.id).c;
+  ).get(tenantId, lead.id);
+  const paidCount = paidRow.c;
   if (paidCount > 0) add(W.has_paid, 'Has made a payment');
 
-  const appCount = db.prepare(
+  const appRow = await db.prepare(
     'SELECT COUNT(*) AS c FROM admission_applications WHERE tenant_id = ? AND lead_id = ?'
-  ).get(tenantId, lead.id).c;
+  ).get(tenantId, lead.id);
+  const appCount = appRow.c;
   if (appCount > 0) add(Math.min(appCount * W.per_application, W.max_applications), `${appCount} university application(s) started`);
 
-  const offerCount = db.prepare(
+  const offerRow = await db.prepare(
     "SELECT COUNT(*) AS c FROM admission_applications WHERE tenant_id = ? AND lead_id = ? AND application_status IN ('Offer','Accepted')"
-  ).get(tenantId, lead.id).c;
+  ).get(tenantId, lead.id);
+  const offerCount = offerRow.c;
   if (offerCount > 0) add(W.has_offer, 'Holds an offer letter');
 
   if (lead.referred_by_lead_id || lead.referrer_name) add(W.came_via_referral, 'Came through a referral');
 
-  // --- Our own responsiveness ---
-  const overdue = db.prepare(
+  const overdueRow = await db.prepare(
     "SELECT COUNT(*) AS c FROM reminders WHERE tenant_id = ? AND lead_id = ? AND status = 'pending' AND due_at < datetime('now')"
-  ).get(tenantId, lead.id).c;
+  ).get(tenantId, lead.id);
+  const overdue = overdueRow.c;
   if (overdue > 0) add(overdue * W.per_overdue_followup, `${overdue} overdue follow-up(s) — we're the bottleneck`);
 
-  // --- Stage ---
   const stageWeight = W[`stage_${lead.stage}`];
   if (stageWeight) add(stageWeight, `Stage: ${lead.stage}`);
 
@@ -172,12 +165,14 @@ function scoreLead(db, tenantId, lead, config) {
   };
 }
 
-function scoreAllLeads(db, tenantId) {
-  // Config is loaded once, not per lead — this matters when scoring
-  // hundreds of leads for the ranked view.
-  const config = loadConfig(db, tenantId);
-  const leads = db.prepare('SELECT * FROM leads WHERE tenant_id = ?').all(tenantId);
-  return leads.map((l) => scoreLead(db, tenantId, l, config)).sort((a, b) => b.score - a.score);
+async function scoreAllLeads(db, tenantId) {
+  const config = await loadConfig(db, tenantId);
+  const leads = await db.prepare('SELECT * FROM leads WHERE tenant_id = ?').all(tenantId);
+  const scored = [];
+  for (const l of leads) {
+    scored.push(await scoreLead(db, tenantId, l, config));
+  }
+  return scored.sort((a, b) => b.score - a.score);
 }
 
 module.exports = { scoreLead, scoreAllLeads, loadConfig, DEFAULT_WEIGHTS, DEFAULT_THRESHOLDS };

@@ -10,13 +10,13 @@ function tenantId(req) {
 }
 
 // PUT /alumni/availability/:studentId — a student opting in/out
-router.put('/availability/:studentId', (req, res) => {
+router.put('/availability/:studentId', async (req, res) => {
   const tid = tenantId(req);
-  const student = db.prepare('SELECT id FROM students WHERE tenant_id = ? AND id = ?').get(tid, req.params.studentId);
+  const student = await db.prepare('SELECT id FROM students WHERE tenant_id = ? AND id = ?').get(tid, req.params.studentId);
   if (!student) return res.status(404).json({ error: 'Student not found' });
 
   const { available_for_contact, preferred_channel, bio, max_active_connections } = req.body;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO alumni_availability (student_id, available_for_contact, preferred_channel, bio, max_active_connections, updated_at)
     VALUES (?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(student_id) DO UPDATE SET
@@ -27,18 +27,18 @@ router.put('/availability/:studentId', (req, res) => {
       updated_at = datetime('now')
   `).run(req.params.studentId, available_for_contact ? 1 : 0, preferred_channel || 'whatsapp', bio || null, max_active_connections || 3);
 
-  res.json(db.prepare('SELECT * FROM alumni_availability WHERE student_id = ?').get(req.params.studentId));
+  res.json(await db.prepare('SELECT * FROM alumni_availability WHERE student_id = ?').get(req.params.studentId));
 });
 
 // GET /alumni/match/:leadId — find available alumni at the institution(s)
 // this lead is applying to, sorted by who has fewest active connections
 // (spreads the load rather than always pinging the same one or two people).
-router.get('/match/:leadId', (req, res) => {
+router.get('/match/:leadId', async (req, res) => {
   const tid = tenantId(req);
-  const lead = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.leadId);
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.leadId);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-  const targetInstitutions = db.prepare(
+  const targetInstitutions = await db.prepare(
     'SELECT DISTINCT institution_name FROM admission_applications WHERE tenant_id = ? AND lead_id = ?'
   ).all(tid, req.params.leadId).map((r) => r.institution_name);
 
@@ -47,7 +47,7 @@ router.get('/match/:leadId', (req, res) => {
   }
 
   const placeholders = targetInstitutions.map(() => '?').join(',');
-  const matches = db.prepare(`
+  const matches = await db.prepare(`
     SELECT s.id AS student_id, l.full_name, s.institution_name, s.course_name, s.current_semester, s.status,
            a.preferred_channel, a.bio,
            (SELECT COUNT(*) FROM alumni_connections c WHERE c.student_id = s.id AND c.status IN ('requested','connected')) AS active_connections
@@ -64,42 +64,42 @@ router.get('/match/:leadId', (req, res) => {
 });
 
 // POST /alumni/connect — request a connection between a lead and an alumnus
-router.post('/connect', (req, res) => {
+router.post('/connect', async (req, res) => {
   const tid = tenantId(req);
   const { lead_id, student_id } = req.body;
   if (!lead_id || !student_id) return res.status(400).json({ error: 'lead_id and student_id are required' });
 
-  const student = db.prepare('SELECT * FROM students WHERE tenant_id = ? AND id = ?').get(tid, student_id);
+  const student = await db.prepare('SELECT * FROM students WHERE tenant_id = ? AND id = ?').get(tid, student_id);
   if (!student) return res.status(404).json({ error: 'Student not found' });
 
   const id = randomUUID();
-  db.prepare('INSERT INTO alumni_connections (id, tenant_id, lead_id, student_id) VALUES (?, ?, ?, ?)')
+  await db.prepare('INSERT INTO alumni_connections (id, tenant_id, lead_id, student_id) VALUES (?, ?, ?, ?)')
     .run(id, tid, lead_id, student_id);
 
-  createNotification(tid, {
+  await createNotification(tid, {
     title: 'Alumni connection requested',
     body: `Ready to introduce — reach out to the alumnus to confirm before sharing contact details.`,
     linkType: 'lead',
     linkId: lead_id,
   });
 
-  res.status(201).json(db.prepare('SELECT * FROM alumni_connections WHERE id = ?').get(id));
+  res.status(201).json(await db.prepare('SELECT * FROM alumni_connections WHERE id = ?').get(id));
 });
 
-router.patch('/connect/:id', (req, res) => {
+router.patch('/connect/:id', async (req, res) => {
   const tid = tenantId(req);
-  const existing = db.prepare('SELECT id FROM alumni_connections WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const existing = await db.prepare('SELECT id FROM alumni_connections WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Connection not found' });
 
   const { status, notes } = req.body;
-  db.prepare('UPDATE alumni_connections SET status = COALESCE(?, status), notes = COALESCE(?, notes) WHERE id = ?')
+  await db.prepare('UPDATE alumni_connections SET status = COALESCE(?, status), notes = COALESCE(?, notes) WHERE id = ?')
     .run(status || null, notes || null, req.params.id);
-  res.json(db.prepare('SELECT * FROM alumni_connections WHERE id = ?').get(req.params.id));
+  res.json(await db.prepare('SELECT * FROM alumni_connections WHERE id = ?').get(req.params.id));
 });
 
-router.get('/connections', (req, res) => {
+router.get('/connections', async (req, res) => {
   const tid = tenantId(req);
-  res.json(db.prepare(`
+  res.json(await db.prepare(`
     SELECT ac.*, l.full_name AS lead_name, sl.full_name AS student_name, s.institution_name
     FROM alumni_connections ac
     JOIN leads l ON l.id = ac.lead_id

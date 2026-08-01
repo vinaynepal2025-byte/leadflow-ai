@@ -21,10 +21,10 @@ function withParsedCustomFields(row) {
 // GET /leads/referrals — who is actually bringing in business.
 // Word-of-mouth is the top channel for consultancies but is usually
 // invisible in a CRM; this makes it countable.
-router.get('/referrals', (req, res) => {
+router.get('/referrals', async (req, res) => {
   const tid = tenantId(req);
 
-  const topReferrers = db.prepare(`
+  const topReferrers = await db.prepare(`
     SELECT r.id AS referrer_lead_id, r.full_name AS referrer_name,
            COUNT(l.id) AS referred_count,
            SUM(CASE WHEN l.stage = 'Admission' THEN 1 ELSE 0 END) AS converted_count
@@ -33,7 +33,7 @@ router.get('/referrals', (req, res) => {
     GROUP BY r.id ORDER BY referred_count DESC LIMIT 20
   `).all(tid);
 
-  const externalReferrers = db.prepare(`
+  const externalReferrers = await db.prepare(`
     SELECT referrer_name, referrer_type, COUNT(*) AS referred_count,
            SUM(CASE WHEN stage = 'Admission' THEN 1 ELSE 0 END) AS converted_count
     FROM leads
@@ -41,7 +41,7 @@ router.get('/referrals', (req, res) => {
     GROUP BY referrer_name, referrer_type ORDER BY referred_count DESC LIMIT 20
   `).all(tid);
 
-  const totalReferred = db.prepare(
+  const totalReferred = await db.prepare(
     'SELECT COUNT(*) AS c FROM leads WHERE tenant_id = ? AND (referred_by_lead_id IS NOT NULL OR referrer_name IS NOT NULL)'
   ).get(tid).c;
 
@@ -51,46 +51,46 @@ router.get('/referrals', (req, res) => {
 // GET /leads/check-duplicate?full_name=...&phone=...
 // Used before creating a lead — the app calls this first, shows candidates,
 // and the counselor decides whether to proceed or link to an existing lead.
-router.get('/check-duplicate', (req, res) => {
+router.get('/check-duplicate', async (req, res) => {
   const tid = tenantId(req);
   const { full_name, phone } = req.query;
   if (!full_name && !phone) return res.json([]);
-  res.json(findDuplicates(db, tid, { full_name, phone }));
+  res.json(await findDuplicates(db, tid, { full_name, phone }));
 });
 
 // GET /leads?stage=New&has_parent=true — list leads, optional filters
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const tid = tenantId(req);
   const { stage, has_parent } = req.query;
   let rows;
   if (has_parent === 'true') {
-    rows = db.prepare("SELECT * FROM leads WHERE tenant_id = ? AND parent_name IS NOT NULL ORDER BY created_at DESC").all(tid);
+    rows = await db.prepare("SELECT * FROM leads WHERE tenant_id = ? AND parent_name IS NOT NULL ORDER BY created_at DESC").all(tid);
   } else if (stage) {
-    rows = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND stage = ? ORDER BY created_at DESC')
+    rows = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND stage = ? ORDER BY created_at DESC')
       .all(tid, stage);
   } else {
-    rows = db.prepare('SELECT * FROM leads WHERE tenant_id = ? ORDER BY created_at DESC').all(tid);
+    rows = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? ORDER BY created_at DESC').all(tid);
   }
   res.json(rows.map(withParsedCustomFields));
 });
 
 // GET /leads/:id
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   const tid = tenantId(req);
-  const row = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const row = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!row) return res.status(404).json({ error: 'Lead not found' });
   res.json(withParsedCustomFields(row));
 });
 
 // POST /leads — create a new lead
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const tid = tenantId(req);
   const { full_name, phone, email, source, assigned_to, notes, parent_name, parent_phone, parent_relation,
           referred_by_lead_id, referrer_name, referrer_type } = req.body;
   if (!full_name) return res.status(400).json({ error: 'full_name is required' });
 
   const id = randomUUID();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO leads (id, tenant_id, full_name, phone, email, source, assigned_to, notes, parent_name, parent_phone, parent_relation,
                        referred_by_lead_id, referrer_name, referrer_type)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -98,15 +98,15 @@ router.post('/', (req, res) => {
          parent_name || null, parent_phone || null, parent_relation || null,
          referred_by_lead_id || null, referrer_name || null, referrer_type || null);
 
-  const created = db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
-  fireEvent('lead.created', { tenant_id: tid, lead_id: id });
+  const created = await db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
+  await fireEvent('lead.created', { tenant_id: tid, lead_id: id });
   res.status(201).json(created);
 });
 
 // PATCH /leads/:id — update fields (e.g. move stage, reassign, add notes)
-router.patch('/:id', (req, res) => {
+router.patch('/:id', async (req, res) => {
   const tid = tenantId(req);
-  const existing = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const existing = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Lead not found' });
 
   const allowed = ['full_name', 'phone', 'email', 'source', 'stage', 'assigned_to', 'notes', 'parent_name', 'parent_phone', 'parent_relation',
@@ -135,18 +135,18 @@ router.patch('/:id', (req, res) => {
   updates.push("updated_at = datetime('now')");
   values.push(tid, req.params.id);
 
-  db.prepare(`UPDATE leads SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
-  const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  await db.prepare(`UPDATE leads SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
+  const updated = await db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
   if (req.body.stage !== undefined) {
-    fireEvent('lead.stage_changed', { tenant_id: tid, lead_id: req.params.id, stage: req.body.stage });
+    await fireEvent('lead.stage_changed', { tenant_id: tid, lead_id: req.params.id, stage: req.body.stage });
   }
   res.json(withParsedCustomFields(updated));
 });
 
 // DELETE /leads/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   const tid = tenantId(req);
-  const result = db.prepare('DELETE FROM leads WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
+  const result = await db.prepare('DELETE FROM leads WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Lead not found' });
   res.status(204).send();
 });

@@ -7,40 +7,41 @@ function tenantId(req) {
   return req.header('x-tenant-id') || 'demo-consultancy';
 }
 
-// GET /performance — breakdown by counselor (assigned_to on leads)
-// v1 metrics: leads assigned, admissions closed, conversion %, pending
-// follow-ups owned, communications logged. Response-time metrics need
-// timestamped first-contact tracking not yet in the schema — noted as a
-// clear next step rather than faked with placeholder numbers.
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const tid = tenantId(req);
 
-  const counselors = db.prepare(
+  const distinctRows = await db.prepare(
     "SELECT DISTINCT assigned_to FROM leads WHERE tenant_id = ? AND assigned_to IS NOT NULL"
-  ).all(tid).map((r) => r.assigned_to);
+  ).all(tid);
+  const counselors = distinctRows.map((r) => r.assigned_to);
 
-  const results = counselors.map((counselor) => {
-    const totalLeads = db.prepare(
+  const results = await Promise.all(counselors.map(async (counselor) => {
+    const totalRow = await db.prepare(
       'SELECT COUNT(*) AS c FROM leads WHERE tenant_id = ? AND assigned_to = ?'
-    ).get(tid, counselor).c;
+    ).get(tid, counselor);
+    const totalLeads = totalRow.c;
 
-    const admissions = db.prepare(
+    const admissionsRow = await db.prepare(
       "SELECT COUNT(*) AS c FROM leads WHERE tenant_id = ? AND assigned_to = ? AND stage = 'Admission'"
-    ).get(tid, counselor).c;
+    ).get(tid, counselor);
+    const admissions = admissionsRow.c;
 
-    const lost = db.prepare(
+    const lostRow = await db.prepare(
       "SELECT COUNT(*) AS c FROM leads WHERE tenant_id = ? AND assigned_to = ? AND stage = 'Lost'"
-    ).get(tid, counselor).c;
+    ).get(tid, counselor);
+    const lost = lostRow.c;
 
-    const pendingReminders = db.prepare(`
+    const pendingRow = await db.prepare(`
       SELECT COUNT(*) AS c FROM reminders
       WHERE tenant_id = ? AND assigned_to = ? AND status = 'pending'
-    `).get(tid, counselor).c;
+    `).get(tid, counselor);
+    const pendingReminders = pendingRow.c;
 
-    const communicationsLogged = db.prepare(`
+    const commsRow = await db.prepare(`
       SELECT COUNT(*) AS c FROM communications
       WHERE tenant_id = ? AND created_by = ?
-    `).get(tid, counselor).c;
+    `).get(tid, counselor);
+    const communicationsLogged = commsRow.c;
 
     return {
       counselor,
@@ -51,9 +52,8 @@ router.get('/', (req, res) => {
       pending_reminders: pendingReminders,
       communications_logged: communicationsLogged,
     };
-  });
+  }));
 
-  // Highest conversion first — the leaderboard view
   results.sort((a, b) => b.conversion_rate_percent - a.conversion_rate_percent);
   res.json(results);
 });

@@ -9,18 +9,18 @@ function tenantId(req) {
 
 // GET /predictions/colleges/:leadId — ranks colleges by how good a fit
 // they are, using this consultancy's own historical outcomes.
-router.get('/colleges/:leadId', (req, res) => {
+router.get('/colleges/:leadId', async (req, res) => {
   const tid = tenantId(req);
-  const lead = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.leadId);
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.leadId);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-  const colleges = db.prepare('SELECT * FROM colleges WHERE tenant_id = ?').all(tid);
+  const colleges = await db.prepare('SELECT * FROM colleges WHERE tenant_id = ?').all(tid);
   if (colleges.length === 0) {
     return res.json({ predictions: [], note: 'Add colleges (College CRM) and record past admission outcomes to enable predictions.' });
   }
 
-  const predictions = colleges.map((college) => {
-    const outcomes = db.prepare(`
+  const predictions = await Promise.all(colleges.map(async (college) => {
+    const outcomes = await db.prepare(`
       SELECT application_status, COUNT(*) AS c
       FROM admission_applications
       WHERE tenant_id = ? AND institution_name = ?
@@ -56,7 +56,7 @@ router.get('/colleges/:leadId', (req, res) => {
       past_rejections: rejections,
       fit_notes: fitNotes,
     };
-  });
+  }));
 
   predictions.sort((a, b) => {
     if (a.historical_offer_rate_percent === null && b.historical_offer_rate_percent === null) return 0;
@@ -69,9 +69,9 @@ router.get('/colleges/:leadId', (req, res) => {
 });
 
 // GET /predictions/insights — tenant-wide: which colleges are converting
-router.get('/insights', (req, res) => {
+router.get('/insights', async (req, res) => {
   const tid = tenantId(req);
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT institution_name,
            COUNT(*) AS total_applications,
            SUM(CASE WHEN application_status IN ('Offer','Accepted') THEN 1 ELSE 0 END) AS offers,

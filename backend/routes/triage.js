@@ -21,7 +21,7 @@ router.post('/test', async (req, res) => {
 });
 
 // GET /triage/status — is auto-triage on, and is AI configured for it
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
   res.json({
     auto_triage_enabled: process.env.AUTO_TRIAGE_ENABLED === 'true',
     note: 'Set AUTO_TRIAGE_ENABLED=true in .env to let the app auto-reply to WhatsApp messages using your Knowledge Base.',

@@ -18,7 +18,7 @@ const router = express.Router();
 // .env to any secret string of your choice; Meta echoes it back on setup.
 
 // GET /whatsapp/webhook — Meta's one-time verification handshake
-router.get('/webhook', (req, res) => {
+router.get('/webhook', async (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
@@ -32,7 +32,7 @@ router.get('/webhook', (req, res) => {
 });
 
 // POST /whatsapp/webhook — inbound message events from Meta
-router.post('/webhook', (req, res) => {
+router.post('/webhook', async (req, res) => {
   // Always acknowledge immediately — Meta retries if it doesn't get a fast 200.
   res.sendStatus(200);
 
@@ -51,17 +51,17 @@ router.post('/webhook', (req, res) => {
       // Multi-tenant note: in production, which tenant owns which WhatsApp
       // number is looked up here too (one WABA phone number per tenant) —
       // simplified to the demo tenant until Module 5 (multi-tenant routing).
-      const lead = db.prepare(
+      const lead = await db.prepare(
         "SELECT * FROM leads WHERE phone LIKE '%' || ? OR phone = ?"
       ).get(fromPhone.slice(-10), fromPhone);
 
       if (lead) {
         const id = randomUUID();
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body, created_by)
           VALUES (?, ?, ?, 'whatsapp', 'inbound', ?, 'system-webhook')
         `).run(id, lead.tenant_id, lead.id, text);
-        createNotification(lead.tenant_id, {
+        await createNotification(lead.tenant_id, {
           title: `New WhatsApp reply from ${lead.full_name}`,
           body: text,
           linkType: 'lead',

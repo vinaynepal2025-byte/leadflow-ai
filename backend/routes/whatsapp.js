@@ -19,7 +19,7 @@ router.post('/send', async (req, res) => {
     return res.status(400).json({ error: 'lead_id and message are required' });
   }
 
-  const lead = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, lead_id);
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, lead_id);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   if (!lead.phone) return res.status(400).json({ error: 'This lead has no phone number on file' });
 
@@ -31,12 +31,12 @@ router.post('/send', async (req, res) => {
   }
 
   const id = randomUUID();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body, created_by)
     VALUES (?, ?, ?, 'whatsapp', 'outbound', ?, ?)
   `).run(id, tid, lead_id, message, created_by || null);
 
-  const logged = db.prepare('SELECT * FROM communications WHERE id = ?').get(id);
+  const logged = await db.prepare('SELECT * FROM communications WHERE id = ?').get(id);
   res.status(201).json({ sent: true, logged });
 });
 

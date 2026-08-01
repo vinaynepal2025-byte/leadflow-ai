@@ -37,8 +37,8 @@ function nameSimilarity(a, b) {
 /// Returns candidate duplicates for a new lead being created, sorted by
 /// confidence. Doesn't auto-merge anything — a human decides (Merge action
 /// stays a UI decision, not an automatic silent action).
-function findDuplicates(db, tenantId, { full_name, phone }) {
-  const allLeads = db.prepare('SELECT id, full_name, phone FROM leads WHERE tenant_id = ?').all(tenantId);
+async function findDuplicates(db, tenantId, { full_name, phone }) {
+  const allLeads = await db.prepare('SELECT id, full_name, phone FROM leads WHERE tenant_id = ?').all(tenantId);
   const normalizedNewPhone = normalizePhone(phone);
 
   const candidates = [];

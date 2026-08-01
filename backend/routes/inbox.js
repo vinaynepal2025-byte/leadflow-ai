@@ -8,7 +8,7 @@ function tenantId(req) {
 }
 
 // GET /inbox?channel=whatsapp&limit=50
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const tid = tenantId(req);
   const { channel, limit } = req.query;
   const max = Math.min(parseInt(limit) || 50, 200);
@@ -27,26 +27,26 @@ router.get('/', (req, res) => {
   query += ' ORDER BY c.created_at DESC LIMIT ?';
   params.push(max);
 
-  res.json(db.prepare(query).all(...params));
+  res.json(await db.prepare(query).all(...params));
 });
 
 // GET /inbox/unreplied — leads whose last message was inbound and we
 // haven't responded yet. The actual queue to clear first.
-router.get('/unreplied', (req, res) => {
+router.get('/unreplied', async (req, res) => {
   const tid = tenantId(req);
 
-  const leadIds = db.prepare('SELECT DISTINCT lead_id FROM communications WHERE tenant_id = ?').all(tid).map((r) => r.lead_id);
+  const leadIds = await db.prepare('SELECT DISTINCT lead_id FROM communications WHERE tenant_id = ?').all(tid).map((r) => r.lead_id);
   const unreplied = [];
 
   for (const leadId of leadIds) {
     // rowid as tiebreaker: SQLite's datetime('now') has second precision,
     // so two messages logged within the same second would otherwise sort
     // arbitrarily — rowid guarantees "most recently inserted" wins.
-    const last = db.prepare(
+    const last = await db.prepare(
       'SELECT * FROM communications WHERE tenant_id = ? AND lead_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1'
     ).get(tid, leadId);
     if (last && last.direction === 'inbound') {
-      const lead = db.prepare('SELECT full_name, phone, stage FROM leads WHERE id = ?').get(leadId);
+      const lead = await db.prepare('SELECT full_name, phone, stage FROM leads WHERE id = ?').get(leadId);
       unreplied.push({ ...last, lead_name: lead?.full_name, lead_phone: lead?.phone, stage: lead?.stage });
     }
   }
@@ -56,9 +56,9 @@ router.get('/unreplied', (req, res) => {
 });
 
 // GET /inbox/thread/:leadId — full cross-channel conversation with one lead
-router.get('/thread/:leadId', (req, res) => {
+router.get('/thread/:leadId', async (req, res) => {
   const tid = tenantId(req);
-  const rows = db.prepare(
+  const rows = await db.prepare(
     'SELECT * FROM communications WHERE tenant_id = ? AND lead_id = ? ORDER BY created_at ASC'
   ).all(tid, req.params.leadId);
   res.json(rows);

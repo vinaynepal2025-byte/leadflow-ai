@@ -23,15 +23,15 @@ router.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'password must be at least 6 characters' });
   }
 
-  const tenant = db.prepare('SELECT id FROM tenants WHERE id = ?').get(tenant_id);
+  const tenant = await db.prepare('SELECT id FROM tenants WHERE id = ?').get(tenant_id);
   if (!tenant) return res.status(404).json({ error: 'Unknown tenant_id' });
 
-  const existing = db.prepare('SELECT id FROM users WHERE tenant_id = ? AND email = ?').get(tenant_id, email);
+  const existing = await db.prepare('SELECT id FROM users WHERE tenant_id = ? AND email = ?').get(tenant_id, email);
   if (existing) return res.status(409).json({ error: 'A user with this email already exists in this tenant' });
 
   const passwordHash = await bcrypt.hash(password, 10);
   const id = randomUUID();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, tenant_id, email, password_hash, full_name, role)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(id, tenant_id, email, passwordHash, full_name, role || 'counselor');
@@ -47,7 +47,7 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'tenant_id, email, and password are required' });
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE tenant_id = ? AND email = ?').get(tenant_id, email);
+  const user = await db.prepare('SELECT * FROM users WHERE tenant_id = ? AND email = ?').get(tenant_id, email);
   if (!user) return res.status(401).json({ error: 'Invalid email or password' });
 
   const valid = await bcrypt.compare(password, user.password_hash);
@@ -76,9 +76,9 @@ function requireAuth(req, res, next) {
 }
 
 // GET /auth/team — list registered users for this tenant (no password hashes)
-router.get('/team', (req, res) => {
+router.get('/team', async (req, res) => {
   const tid = req.header('x-tenant-id') || 'demo-consultancy';
-  const users = db.prepare('SELECT id, email, full_name, role, created_at FROM users WHERE tenant_id = ?').all(tid);
+  const users = await db.prepare('SELECT id, email, full_name, role, created_at FROM users WHERE tenant_id = ?').all(tid);
   res.json(users);
 });
 

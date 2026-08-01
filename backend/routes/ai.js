@@ -7,7 +7,7 @@ const router = express.Router();
 
 // GET /ai/provider — which AI is active, and whether its key is set.
 // Lets the app show "AI: Gemini (ready)" instead of failing silently.
-router.get('/provider', (req, res) => {
+router.get('/provider', async (req, res) => {
   const provider = activeProvider();
   const keyEnvVar = {
     claude: 'ANTHROPIC_API_KEY',
@@ -29,10 +29,10 @@ function tenantId(req) {
 // POST /ai/analyze-lead/:id — runs Claude over the lead's history
 router.post('/analyze-lead/:id', async (req, res) => {
   const tid = tenantId(req);
-  const lead = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-  const communications = db.prepare(
+  const communications = await db.prepare(
     'SELECT * FROM communications WHERE tenant_id = ? AND lead_id = ? ORDER BY created_at ASC'
   ).all(tid, req.params.id);
 

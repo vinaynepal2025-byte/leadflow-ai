@@ -38,7 +38,7 @@ function buildShareUrls(link, message) {
 
 // ---------- Tracked link management ----------
 
-router.get('/links', (req, res) => {
+router.get('/links', async (req, res) => {
   const tid = tenantId(req);
   const { platform, campaign } = req.query;
   let query = 'SELECT * FROM tracked_links WHERE tenant_id = ?';
@@ -52,7 +52,7 @@ router.get('/links', (req, res) => {
     params.push(campaign);
   }
   query += ' ORDER BY created_at DESC';
-  res.json(db.prepare(query).all(...params));
+  res.json(await db.prepare(query).all(...params));
 });
 
 // POST /social/links  { title, platform, capture_form_id? | destination?, campaign?, message? }
@@ -70,7 +70,7 @@ router.post('/links', async (req, res) => {
   // brochure or a YouTube campus video.
   let finalDestination = destination;
   if (capture_form_id) {
-    const form = db.prepare('SELECT public_key FROM capture_forms WHERE tenant_id = ? AND id = ?').get(tid, capture_form_id);
+    const form = await db.prepare('SELECT public_key FROM capture_forms WHERE tenant_id = ? AND id = ?').get(tid, capture_form_id);
     if (!form) return res.status(404).json({ error: 'Capture form not found' });
     finalDestination = `/capture/form/${form.public_key}`;
   }
@@ -80,23 +80,23 @@ router.post('/links', async (req, res) => {
 
   const id = randomUUID();
   const shortCode = randomBytes(4).toString('hex');
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO tracked_links (id, tenant_id, short_code, title, destination, platform, campaign, capture_form_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, tid, shortCode, title, finalDestination, platform, campaign || null, capture_form_id || null);
 
   const trackedUrl = `${req.protocol}://${req.get('host')}/s/${shortCode}`;
   res.status(201).json({
-    ...db.prepare('SELECT * FROM tracked_links WHERE id = ?').get(id),
+    ...await db.prepare('SELECT * FROM tracked_links WHERE id = ?').get(id),
     tracked_url: trackedUrl,
     share_urls: buildShareUrls(trackedUrl, message),
   });
 });
 
 // GET /social/links/:id/share?message=... — ready-to-tap share URLs
-router.get('/links/:id/share', (req, res) => {
+router.get('/links/:id/share', async (req, res) => {
   const tid = tenantId(req);
-  const link = db.prepare('SELECT * FROM tracked_links WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const link = await db.prepare('SELECT * FROM tracked_links WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!link) return res.status(404).json({ error: 'Link not found' });
 
   const trackedUrl = `${req.protocol}://${req.get('host')}/s/${link.short_code}`;
@@ -107,7 +107,7 @@ router.get('/links/:id/share', (req, res) => {
 // campus notice boards, printed brochures.
 router.get('/links/:id/qr', async (req, res) => {
   const tid = tenantId(req);
-  const link = db.prepare('SELECT * FROM tracked_links WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const link = await db.prepare('SELECT * FROM tracked_links WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!link) return res.status(404).json({ error: 'Link not found' });
 
   const trackedUrl = `${req.protocol}://${req.get('host')}/s/${link.short_code}`;
@@ -119,9 +119,9 @@ router.get('/links/:id/qr', async (req, res) => {
   }
 });
 
-router.patch('/links/:id', (req, res) => {
+router.patch('/links/:id', async (req, res) => {
   const tid = tenantId(req);
-  const existing = db.prepare('SELECT id FROM tracked_links WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const existing = await db.prepare('SELECT id FROM tracked_links WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Link not found' });
 
   const allowed = ['title', 'campaign', 'active'];
@@ -135,18 +135,18 @@ router.patch('/links/:id', (req, res) => {
   }
   if (updates.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
   values.push(tid, req.params.id);
-  db.prepare(`UPDATE tracked_links SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
-  res.json(db.prepare('SELECT * FROM tracked_links WHERE id = ?').get(req.params.id));
+  await db.prepare(`UPDATE tracked_links SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
+  res.json(await db.prepare('SELECT * FROM tracked_links WHERE id = ?').get(req.params.id));
 });
 
 // ---------- Attribution analytics ----------
 
 // GET /social/performance — which platform, campaign and individual post
 // actually produced leads, not just clicks.
-router.get('/performance', (req, res) => {
+router.get('/performance', async (req, res) => {
   const tid = tenantId(req);
 
-  const byPlatform = db.prepare(`
+  const byPlatform = await db.prepare(`
     SELECT platform,
            COUNT(*) AS link_count,
            COALESCE(SUM(click_count), 0) AS total_clicks
@@ -155,7 +155,7 @@ router.get('/performance', (req, res) => {
 
   // Leads carry their source as "channel: form name" from the capture
   // form, so we can join clicks to actual leads per platform.
-  const leadsByPlatform = db.prepare(`
+  const leadsByPlatform = await db.prepare(`
     SELECT SUBSTR(source, 1, INSTR(source, ':') - 1) AS channel,
            COUNT(*) AS leads,
            SUM(CASE WHEN stage = 'Admission' THEN 1 ELSE 0 END) AS admissions
@@ -164,14 +164,14 @@ router.get('/performance', (req, res) => {
     GROUP BY channel
   `).all(tid);
 
-  const byCampaign = db.prepare(`
+  const byCampaign = await db.prepare(`
     SELECT COALESCE(campaign, '(no campaign)') AS campaign,
            COUNT(*) AS link_count,
            COALESCE(SUM(click_count), 0) AS total_clicks
     FROM tracked_links WHERE tenant_id = ? GROUP BY campaign ORDER BY total_clicks DESC
   `).all(tid);
 
-  const topLinks = db.prepare(`
+  const topLinks = await db.prepare(`
     SELECT id, title, platform, campaign, short_code, click_count
     FROM tracked_links WHERE tenant_id = ? ORDER BY click_count DESC LIMIT 10
   `).all(tid);

@@ -13,9 +13,9 @@ function tenantId(req) {
 // Returns a wa.me "click to chat" link with the message pre-filled.
 // Counselor taps it, WhatsApp opens with the message ready, they hit Send.
 // Semi-automatic: the app prepares everything, a human sends the final tap.
-router.get('/chat-link/:leadId', (req, res) => {
+router.get('/chat-link/:leadId', async (req, res) => {
   const tid = tenantId(req);
-  const lead = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.leadId);
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.leadId);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   if (!lead.phone) return res.status(400).json({ error: 'This lead has no phone number on file' });
 
@@ -30,19 +30,19 @@ router.get('/chat-link/:leadId', (req, res) => {
 // Call this after the counselor taps Send in WhatsApp, to log it in
 // Communication Hub — since the free wa.me method has no delivery webhook
 // of its own, the app can't know automatically that it was sent.
-router.post('/chat-link/:leadId/confirm-sent', (req, res) => {
+router.post('/chat-link/:leadId/confirm-sent', async (req, res) => {
   const tid = tenantId(req);
-  const lead = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.leadId);
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.leadId);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
   const { message, created_by } = req.body;
   const id = randomUUID();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body, created_by)
     VALUES (?, ?, ?, 'whatsapp-link', 'outbound', ?, ?)
   `).run(id, tid, lead.id, message || null, created_by || null);
 
-  res.status(201).json(db.prepare('SELECT * FROM communications WHERE id = ?').get(id));
+  res.status(201).json(await db.prepare('SELECT * FROM communications WHERE id = ?').get(id));
 });
 
 module.exports = router;

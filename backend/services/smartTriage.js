@@ -22,7 +22,7 @@ function keywordScore(message, article) {
 }
 
 async function triageMessage(tenantId, leadId, message) {
-  const articles = db.prepare('SELECT * FROM knowledge_articles WHERE tenant_id = ?').all(tenantId);
+  const articles = await db.prepare('SELECT * FROM knowledge_articles WHERE tenant_id = ?').all(tenantId);
   if (articles.length === 0) {
     return { action: 'escalate', reason: 'No Knowledge Base articles configured yet' };
   }
@@ -78,21 +78,21 @@ async function handleInboundForTriage(tenantId, lead, message) {
   if (result.action === 'auto_reply') {
     try {
       await sendWhatsAppMessage(lead.phone, result.reply);
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body, created_by)
         VALUES (?, ?, ?, 'whatsapp', 'outbound', ?, 'AI Auto-Reply')
       `).run(require('crypto').randomUUID(), tenantId, lead.id, `[Auto-reply, source: ${result.source_article}] ${result.reply}`);
     } catch (err) {
       // WhatsApp not configured or send failed — escalate instead of
       // silently losing the reply.
-      createNotification(tenantId, {
+      await createNotification(tenantId, {
         title: `Reply ready but couldn't send: ${lead.full_name}`,
         body: `Drafted: "${result.reply}" — WhatsApp not configured (${err.message})`,
         linkType: 'lead', linkId: lead.id,
       });
     }
   } else {
-    createNotification(tenantId, {
+    await createNotification(tenantId, {
       title: `Needs a human: ${lead.full_name}`,
       body: `"${message}" — ${result.reason}`,
       linkType: 'lead', linkId: lead.id,

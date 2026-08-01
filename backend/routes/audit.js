@@ -12,7 +12,7 @@ function tenantId(req) {
 // reminders, documents, fees, admissions) — Audit Center's job is to
 // present that existing record as one unified, readable timeline, not to
 // duplicate storage of what's already captured.
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const tid = tenantId(req);
   const { lead_id } = req.query;
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
@@ -22,7 +22,7 @@ router.get('/', (req, res) => {
 
   const events = [];
 
-  for (const row of db.prepare(
+  for (const row of await db.prepare(
     `SELECT id, lead_id, channel, direction, body, created_by, created_at FROM communications WHERE tenant_id = ? ${leadFilter}`
   ).all(tid, ...leadParam)) {
     events.push({
@@ -34,7 +34,7 @@ router.get('/', (req, res) => {
     });
   }
 
-  for (const row of db.prepare(
+  for (const row of await db.prepare(
     `SELECT id, lead_id, status, doc_type, created_at FROM documents WHERE tenant_id = ? ${leadFilter}`
   ).all(tid, ...leadParam)) {
     events.push({
@@ -46,7 +46,7 @@ router.get('/', (req, res) => {
     });
   }
 
-  for (const row of db.prepare(
+  for (const row of await db.prepare(
     `SELECT id, lead_id, application_status, institution_name, updated_at FROM admission_applications WHERE tenant_id = ? ${leadFilter}`
   ).all(tid, ...leadParam)) {
     events.push({
@@ -58,7 +58,7 @@ router.get('/', (req, res) => {
     });
   }
 
-  for (const row of db.prepare(
+  for (const row of await db.prepare(
     `SELECT id, lead_id, status, fee_type, amount, created_at FROM fee_payments WHERE tenant_id = ? ${leadFilter}`
   ).all(tid, ...leadParam)) {
     events.push({

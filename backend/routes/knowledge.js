@@ -9,7 +9,7 @@ function tenantId(req) {
 }
 
 // GET /knowledge?category=Visa+Process&q=schengen
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const tid = tenantId(req);
   const { category, q } = req.query;
   let query = 'SELECT * FROM knowledge_articles WHERE tenant_id = ?';
@@ -23,33 +23,33 @@ router.get('/', (req, res) => {
     params.push(`%${q}%`, `%${q}%`);
   }
   query += ' ORDER BY updated_at DESC';
-  res.json(db.prepare(query).all(...params));
+  res.json(await db.prepare(query).all(...params));
 });
 
 // GET /knowledge/:id
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   const tid = tenantId(req);
-  const row = db.prepare('SELECT * FROM knowledge_articles WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const row = await db.prepare('SELECT * FROM knowledge_articles WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!row) return res.status(404).json({ error: 'Article not found' });
   res.json(row);
 });
 
 // POST /knowledge
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const tid = tenantId(req);
   const { title, content, category } = req.body;
   if (!title || !content) return res.status(400).json({ error: 'title and content are required' });
 
   const id = randomUUID();
-  db.prepare('INSERT INTO knowledge_articles (id, tenant_id, title, content, category) VALUES (?, ?, ?, ?, ?)')
+  await db.prepare('INSERT INTO knowledge_articles (id, tenant_id, title, content, category) VALUES (?, ?, ?, ?, ?)')
     .run(id, tid, title, content, category || null);
-  res.status(201).json(db.prepare('SELECT * FROM knowledge_articles WHERE id = ?').get(id));
+  res.status(201).json(await db.prepare('SELECT * FROM knowledge_articles WHERE id = ?').get(id));
 });
 
 // PATCH /knowledge/:id
-router.patch('/:id', (req, res) => {
+router.patch('/:id', async (req, res) => {
   const tid = tenantId(req);
-  const existing = db.prepare('SELECT id FROM knowledge_articles WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const existing = await db.prepare('SELECT id FROM knowledge_articles WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Article not found' });
 
   const allowed = ['title', 'content', 'category'];
@@ -64,14 +64,14 @@ router.patch('/:id', (req, res) => {
   if (updates.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
   updates.push("updated_at = datetime('now')");
   values.push(tid, req.params.id);
-  db.prepare(`UPDATE knowledge_articles SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
-  res.json(db.prepare('SELECT * FROM knowledge_articles WHERE id = ?').get(req.params.id));
+  await db.prepare(`UPDATE knowledge_articles SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
+  res.json(await db.prepare('SELECT * FROM knowledge_articles WHERE id = ?').get(req.params.id));
 });
 
 // DELETE /knowledge/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   const tid = tenantId(req);
-  const result = db.prepare('DELETE FROM knowledge_articles WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
+  const result = await db.prepare('DELETE FROM knowledge_articles WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Article not found' });
   res.status(204).send();
 });

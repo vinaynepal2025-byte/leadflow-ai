@@ -22,8 +22,8 @@ function levenshtein(a, b) {
   return dp[m][n];
 }
 
-function findFuzzyDuplicate(tenantId, fullName) {
-  const candidates = db.prepare('SELECT id, full_name FROM leads WHERE tenant_id = ?').all(tenantId);
+async function findFuzzyDuplicate(tenantId, fullName) {
+  const candidates = await db.prepare('SELECT id, full_name FROM leads WHERE tenant_id = ?').all(tenantId);
   const normalized = fullName.toLowerCase().trim();
   for (const c of candidates) {
     const dist = levenshtein(normalized, c.full_name.toLowerCase().trim());
@@ -46,7 +46,7 @@ function tenantId(req) {
 // with the same phone number already exists for this tenant — this is a
 // simple, honest first pass, not the fuzzy/AI duplicate-matching the
 // original brief describes; that's a clearly separate, later capability.
-router.post('/', upload.single('file'), (req, res) => {
+router.post('/', upload.single('file'), async (req, res) => {
   const tid = tenantId(req);
   if (!req.file) return res.status(400).json({ error: 'file is required (CSV)' });
 
@@ -79,7 +79,7 @@ router.post('/', upload.single('file'), (req, res) => {
     }
 
     if (phone) {
-      const dup = db.prepare('SELECT id FROM leads WHERE tenant_id = ? AND phone = ?').get(tid, phone);
+      const dup = await db.prepare('SELECT id FROM leads WHERE tenant_id = ? AND phone = ?').get(tid, phone);
       if (dup) {
         results.skipped_duplicate++;
         continue;
@@ -87,7 +87,7 @@ router.post('/', upload.single('file'), (req, res) => {
     }
 
     const id = randomUUID();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO leads (id, tenant_id, full_name, phone, email, source, notes)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(id, tid, fullName, phone, email, source, notes);

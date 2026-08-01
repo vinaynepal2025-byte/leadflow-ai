@@ -12,15 +12,15 @@ const VALID_TRIGGERS = ['lead.created', 'lead.stage_changed', 'document.rejected
 const VALID_ACTIONS = ['create_reminder', 'create_notification'];
 
 // GET /automations
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const tid = tenantId(req);
-  const rows = db.prepare('SELECT * FROM automation_rules WHERE tenant_id = ? ORDER BY created_at DESC').all(tid);
+  const rows = await db.prepare('SELECT * FROM automation_rules WHERE tenant_id = ? ORDER BY created_at DESC').all(tid);
   res.json(rows.map((r) => ({ ...r, action_config: JSON.parse(r.action_config) })));
 });
 
 // POST /automations
 // { name, trigger_event, condition_field?, condition_value?, action_type, action_config }
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const tid = tenantId(req);
   const { name, trigger_event, condition_field, condition_value, action_type, action_config } = req.body;
 
@@ -35,21 +35,21 @@ router.post('/', (req, res) => {
   }
 
   const id = randomUUID();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO automation_rules (id, tenant_id, name, trigger_event, condition_field, condition_value, action_type, action_config)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, tid, name, trigger_event, condition_field || null, condition_value || null, action_type, JSON.stringify(action_config));
 
-  const created = db.prepare('SELECT * FROM automation_rules WHERE id = ?').get(id);
+  const created = await db.prepare('SELECT * FROM automation_rules WHERE id = ?').get(id);
   res.status(201).json({ ...created, action_config: JSON.parse(created.action_config) });
 });
 
 // PATCH /automations/:id  { enabled: false }
-router.patch('/:id', (req, res) => {
+router.patch('/:id', async (req, res) => {
   const tid = tenantId(req);
-  const existing = db.prepare('SELECT id FROM automation_rules WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const existing = await db.prepare('SELECT id FROM automation_rules WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Rule not found' });
-  db.prepare('UPDATE automation_rules SET enabled = ? WHERE tenant_id = ? AND id = ?')
+  await db.prepare('UPDATE automation_rules SET enabled = ? WHERE tenant_id = ? AND id = ?')
     .run(req.body.enabled ? 1 : 0, tid, req.params.id);
   res.json({ ok: true });
 });

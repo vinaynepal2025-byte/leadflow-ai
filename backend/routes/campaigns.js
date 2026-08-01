@@ -12,7 +12,7 @@ function tenantId(req) {
 // Targets are selected by filter (source/stage) at creation time — a
 // snapshot, not a live query, so a campaign's target list doesn't shift
 // under you after you've started sending.
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const tid = tenantId(req);
   const { name, message_template, source, stage } = req.body;
   if (!name || !message_template) {
@@ -29,14 +29,14 @@ router.post('/', (req, res) => {
     query += ' AND stage = ?';
     params.push(stage);
   }
-  const targetLeads = db.prepare(query).all(...params);
+  const targetLeads = await db.prepare(query).all(...params);
 
   const campaignId = randomUUID();
-  db.prepare('INSERT INTO campaigns (id, tenant_id, name, message_template) VALUES (?, ?, ?, ?)')
+  await db.prepare('INSERT INTO campaigns (id, tenant_id, name, message_template) VALUES (?, ?, ?, ?)')
     .run(campaignId, tid, name, message_template);
 
   for (const lead of targetLeads) {
-    db.prepare('INSERT INTO campaign_targets (id, campaign_id, lead_id) VALUES (?, ?, ?)')
+    await db.prepare('INSERT INTO campaign_targets (id, campaign_id, lead_id) VALUES (?, ?, ?)')
       .run(randomUUID(), campaignId, lead.id);
   }
 
@@ -50,14 +50,14 @@ router.post('/', (req, res) => {
 });
 
 // GET /campaigns
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const tid = tenantId(req);
-  const campaigns = db.prepare('SELECT * FROM campaigns WHERE tenant_id = ? ORDER BY created_at DESC').all(tid);
-  const withCounts = campaigns.map((c) => {
-    const total = db.prepare('SELECT COUNT(*) AS c FROM campaign_targets WHERE campaign_id = ?').get(c.id).c;
-    const sent = db.prepare("SELECT COUNT(*) AS c FROM campaign_targets WHERE campaign_id = ? AND status = 'sent'").get(c.id).c;
-    return { ...c, target_count: total, sent_count: sent };
-  });
+  const campaigns = await db.prepare('SELECT * FROM campaigns WHERE tenant_id = ? ORDER BY created_at DESC').all(tid);
+  const withCounts = await Promise.all(campaigns.map(async (c) => {
+    const totalRow = await db.prepare('SELECT COUNT(*) AS c FROM campaign_targets WHERE campaign_id = ?').get(c.id);
+    const sentRow = await db.prepare("SELECT COUNT(*) AS c FROM campaign_targets WHERE campaign_id = ? AND status = 'sent'").get(c.id);
+    return { ...c, target_count: totalRow.c, sent_count: sentRow.c };
+  }));
   res.json(withCounts);
 });
 
@@ -65,12 +65,12 @@ router.get('/', (req, res) => {
 // personalized from the message_template ({{name}} substitution).
 // Free method (same as the single-lead wa.me feature) — no Meta API cost,
 // counselor taps through the list and sends each one.
-router.get('/:id/links', (req, res) => {
+router.get('/:id/links', async (req, res) => {
   const tid = tenantId(req);
-  const campaign = db.prepare('SELECT * FROM campaigns WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const campaign = await db.prepare('SELECT * FROM campaigns WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
-  const targets = db.prepare(`
+  const targets = await db.prepare(`
     SELECT ct.id AS target_id, ct.status, l.id AS lead_id, l.full_name, l.phone
     FROM campaign_targets ct JOIN leads l ON l.id = ct.lead_id
     WHERE ct.campaign_id = ?
@@ -94,8 +94,8 @@ router.get('/:id/links', (req, res) => {
 });
 
 // POST /campaigns/targets/:targetId/confirm-sent
-router.post('/targets/:targetId/confirm-sent', (req, res) => {
-  db.prepare("UPDATE campaign_targets SET status = 'sent' WHERE id = ?").run(req.params.targetId);
+router.post('/targets/:targetId/confirm-sent', async (req, res) => {
+  await db.prepare("UPDATE campaign_targets SET status = 'sent' WHERE id = ?").run(req.params.targetId);
   res.json({ ok: true });
 });
 

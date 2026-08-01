@@ -8,8 +8,6 @@ function tenantId(req) {
   return req.header('x-tenant-id') || 'demo-consultancy';
 }
 
-/// Human labels + grouping so Settings can render this without hardcoding
-/// a duplicate list that would drift out of sync with the engine.
 const WEIGHT_META = {
   has_phone: { label: 'Phone number on file', group: 'Contact Info' },
   has_email: { label: 'Email on file', group: 'Contact Info' },
@@ -42,11 +40,10 @@ const WEIGHT_META = {
   stage_Lost: { label: 'Stage: Lost', group: 'Pipeline Stage' },
 };
 
-// GET /scoring/config — current weights + labels so Settings can build the UI
-router.get('/config', (req, res) => {
+router.get('/config', async (req, res) => {
   const tid = tenantId(req);
-  const cfg = loadConfig(db, tid);
-  const isCustomized = Boolean(db.prepare('SELECT tenant_id FROM scoring_config WHERE tenant_id = ?').get(tid));
+  const cfg = await loadConfig(db, tid);
+  const isCustomized = Boolean(await db.prepare('SELECT tenant_id FROM scoring_config WHERE tenant_id = ?').get(tid));
 
   res.json({
     customized: isCustomized,
@@ -62,11 +59,9 @@ router.get('/config', (req, res) => {
   });
 });
 
-// PUT /scoring/config  { weights: {key: value}, thresholds: {hot, warm} }
-// Partial updates are fine — anything omitted keeps its current value.
-router.put('/config', (req, res) => {
+router.put('/config', async (req, res) => {
   const tid = tenantId(req);
-  const current = loadConfig(db, tid);
+  const current = await loadConfig(db, tid);
 
   const newWeights = { ...current.weights };
   if (req.body.weights && typeof req.body.weights === 'object') {
@@ -100,7 +95,7 @@ router.put('/config', (req, res) => {
     }
   }
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO scoring_config (tenant_id, weights, thresholds, updated_at)
     VALUES (?, ?, ?, datetime('now'))
     ON CONFLICT(tenant_id) DO UPDATE SET weights = excluded.weights, thresholds = excluded.thresholds, updated_at = datetime('now')
@@ -109,27 +104,25 @@ router.put('/config', (req, res) => {
   res.json({ weights: newWeights, thresholds: newThresholds });
 });
 
-// POST /scoring/config/reset
-router.post('/config/reset', (req, res) => {
+router.post('/config/reset', async (req, res) => {
   const tid = tenantId(req);
-  db.prepare('DELETE FROM scoring_config WHERE tenant_id = ?').run(tid);
+  await db.prepare('DELETE FROM scoring_config WHERE tenant_id = ?').run(tid);
   res.json({ weights: DEFAULT_WEIGHTS, thresholds: DEFAULT_THRESHOLDS, reset: true });
 });
 
-// POST /scoring/config/preview — see how a proposed change would reshuffle
-// the pipeline BEFORE saving it. Changing scoring blind is how a team
-// accidentally buries the leads they were about to close.
-router.post('/config/preview', (req, res) => {
+router.post('/config/preview', async (req, res) => {
   const tid = tenantId(req);
-  const current = loadConfig(db, tid);
+  const current = await loadConfig(db, tid);
   const proposed = {
     weights: { ...current.weights, ...(req.body.weights || {}) },
     thresholds: { ...current.thresholds, ...(req.body.thresholds || {}) },
   };
 
-  const leads = db.prepare('SELECT * FROM leads WHERE tenant_id = ? LIMIT 200').all(tid);
-  const before = leads.map((l) => scoreLead(db, tid, l, current));
-  const after = leads.map((l) => scoreLead(db, tid, l, proposed));
+  const leads = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? LIMIT 200').all(tid);
+  const before = [];
+  for (const l of leads) before.push(await scoreLead(db, tid, l, current));
+  const after = [];
+  for (const l of leads) after.push(await scoreLead(db, tid, l, proposed));
 
   const changes = before.map((b, i) => ({
     lead_id: b.lead_id,
@@ -151,43 +144,32 @@ router.post('/config/preview', (req, res) => {
   });
 });
 
-// GET /scoring/lead/:id — one lead's score with full explanation
-router.get('/lead/:id', (req, res) => {
+router.get('/lead/:id', async (req, res) => {
   const tid = tenantId(req);
-  const lead = db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
-  res.json(scoreLead(db, tid, lead));
+  res.json(await scoreLead(db, tid, lead));
 });
 
-// GET /scoring/ranked?temperature=hot&limit=20
-// The whole pipeline, best-first. This is the view a counselor should
-// start their day on rather than a chronological list.
-router.get('/ranked', (req, res) => {
+router.get('/ranked', async (req, res) => {
   const tid = tenantId(req);
   const { temperature } = req.query;
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
 
-  let scored = scoreAllLeads(db, tid);
+  let scored = await scoreAllLeads(db, tid);
   if (temperature) scored = scored.filter((s) => s.temperature === temperature);
   res.json(scored.slice(0, limit));
 });
 
-// GET /scoring/today — the actual work queue: who to call, in what order,
-// and why. Combines high-intent leads with ones actively slipping away.
-router.get('/today', (req, res) => {
+router.get('/today', async (req, res) => {
   const tid = tenantId(req);
-  const scored = scoreAllLeads(db, tid);
+  const scored = await scoreAllLeads(db, tid);
 
   const active = scored.filter((s) => !['Closed', 'Lost'].includes(s.stage));
 
-  // Hot and warm leads worth pushing today
   const priority = active.filter((s) => s.temperature === 'hot').slice(0, 10);
   const priorityIds = new Set(priority.map((p) => p.lead_id));
 
-  // Leads sliding backwards. Deliberately excludes anyone already in
-  // priority_calls — showing the same person in two lists makes the
-  // queue noisier, not more useful. Threshold is low because a lead
-  // decaying from 30 is exactly who gets quietly abandoned.
   const atRisk = active
     .filter((s) => !priorityIds.has(s.lead_id) && s.risk_signals.length > 0 && s.score >= 15)
     .sort((a, b) => {
@@ -197,8 +179,7 @@ router.get('/today', (req, res) => {
     })
     .slice(0, 10);
 
-  // Never-contacted leads, oldest-first — the silent leak in most pipelines
-  const untouched = db.prepare(`
+  const untouched = await db.prepare(`
     SELECT l.id, l.full_name, l.created_at FROM leads l
     WHERE l.tenant_id = ? AND l.stage = 'New'
       AND NOT EXISTS (SELECT 1 FROM communications c WHERE c.lead_id = l.id)
