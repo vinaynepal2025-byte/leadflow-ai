@@ -29,7 +29,9 @@ class _ReviewProvidersScreenState extends State<ReviewProvidersScreen> {
   void _selectCollege(Map<String, dynamic> college) {
     setState(() {
       _selectedCollege = college;
-      _providersFuture = _api.getReviewProviders(collegeId: college['id']);
+      // false here so pending-verification providers show up too -- this
+      // screen doubles as the admin verification queue.
+      _providersFuture = _api.getReviewProviders(collegeId: college['id'], activeOnly: false);
     });
   }
 
@@ -89,6 +91,24 @@ class _ReviewProvidersScreenState extends State<ReviewProvidersScreen> {
       } catch (e) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not register: $e')));
       }
+    }
+  }
+
+  Future<void> _adminAction(Map<String, dynamic> provider, String action) async {
+    final Map<String, dynamic> fields = switch (action) {
+      'verify' => {'verified': true},
+      'activate' => {'active': true},
+      'deactivate' => {'active': false},
+      _ => {},
+    };
+    if (fields.isEmpty) return;
+    try {
+      await _api.updateReviewProvider(provider['id'], fields);
+      if (mounted) {
+        setState(() => _providersFuture = _api.getReviewProviders(collegeId: _selectedCollege!['id'], activeOnly: false));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not update: $e')));
     }
   }
 
@@ -201,15 +221,33 @@ class _ReviewProvidersScreenState extends State<ReviewProvidersScreen> {
                     itemBuilder: (context, i) {
                       final p = providers[i];
                       final rating = p['average_rating'];
+                      final verified = p['verified'] == true;
+                      final active = p['active'] == true;
                       return ListTile(
-                        leading: const CircleAvatar(child: Icon(Icons.person_outline)),
+                        leading: CircleAvatar(
+                          backgroundColor: verified ? Colors.green.shade50 : Colors.orange.shade50,
+                          child: Icon(verified ? Icons.verified_outlined : Icons.hourglass_empty, color: verified ? Colors.green : Colors.orange, size: 20),
+                        ),
                         title: Text(p['full_name']),
                         subtitle: Text(
                           '${p['role'] ?? ''}${rating != null ? ' • ⭐ $rating (${p['rating_count']})' : ''}\n'
-                          '₹${p['price_per_review'] ?? _selectedCollege!['peer_review_default_price'] ?? '—'} per review',
+                          '₹${p['price_per_review'] ?? _selectedCollege!['peer_review_default_price'] ?? '—'} per review'
+                          '${!verified ? '\nPending verification' : (!active ? '\nDeactivated' : '')}',
                         ),
                         isThreeLine: true,
-                        trailing: FilledButton(onPressed: () => _bookDialog(p), child: const Text('Book')),
+                        trailing: verified && active
+                            ? FilledButton(onPressed: () => _bookDialog(p), child: const Text('Book'))
+                            : PopupMenuButton<String>(
+                                onSelected: (choice) => _adminAction(p, choice),
+                                itemBuilder: (context) => [
+                                  if (!verified) const PopupMenuItem(value: 'verify', child: Text('Verify provider')),
+                                  PopupMenuItem(value: active ? 'deactivate' : 'activate', child: Text(active ? 'Deactivate' : 'Reactivate')),
+                                ],
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  child: Icon(Icons.more_vert),
+                                ),
+                              ),
                       );
                     },
                   );
