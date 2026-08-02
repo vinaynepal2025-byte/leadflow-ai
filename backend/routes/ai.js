@@ -90,7 +90,7 @@ ${brandHint}
 Pick font/styleMode/radius that genuinely match the mood (e.g. a medical consultancy usually wants "corporate" or "solid" mode, montserratOpenSans or spaceGroteskInter, low-to-moderate radius, no glow -- vs. a trendy exam-prep coaching brand for teenagers might want "glass" or "cartoon", higher radius, maybe glow).`;
 
   try {
-    const raw = await generateJson(instructionPrompt, { maxTokens: 500 });
+    const raw = await generateJson(instructionPrompt, { maxTokens: 1500 });
 
     const theme = {
       name: typeof raw.name === 'string' ? raw.name.slice(0, 40) : 'AI Theme',
