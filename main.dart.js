@@ -109191,14 +109191,14 @@ case 1:return A.l(p,r)}})
 return A.n($async$qQ,r)}}
 A.yu.prototype={}
 A.aOq.prototype={
-$0(){return A.pb(B.dL,B.aC).a.o7("serif")},
+$0(){return A.pb(B.dL,B.aC).a.o7("PlayfairDisplay")},
 $S:56}
 A.aOr.prototype={
-$0(){return A.pb(B.dL,B.aC).a.o7("serif")},
+$0(){return A.pb(B.dL,B.aC).a.o7("Lato")},
 $S:56}
 A.aOs.prototype={
 $3$color$fontSize$fontWeight(a,b,c){var s=null
-return A.d9(s,s,a,s,s,s,s,s,"serif",s,s,b,s,s,c,s,s,!0,s,s,s,s,s,s,s,s)},
+return A.d9(s,s,a,s,s,s,s,s,"PlayfairDisplay",s,s,b,s,s,c,s,s,!0,s,s,s,s,s,s,s,s)},
 $0(){return this.$3$color$fontSize$fontWeight(null,null,null)},
 $1$color(a){return this.$3$color$fontSize$fontWeight(a,null,null)},
 $2$color$fontSize(a,b){return this.$3$color$fontSize$fontWeight(a,b,null)},
@@ -109206,14 +109206,14 @@ $1$fontSize(a){return this.$3$color$fontSize$fontWeight(null,a,null)},
 $2$color$fontWeight(a,b){return this.$3$color$fontSize$fontWeight(a,null,b)},
 $S:91}
 A.aOu.prototype={
-$0(){return A.pb(B.dL,B.aC).a.o7("sans-serif-medium")},
+$0(){return A.pb(B.dL,B.aC).a.o7("Poppins")},
 $S:56}
 A.aOv.prototype={
-$0(){return A.pb(B.dL,B.aC).a.o7("sans-serif")},
+$0(){return A.pb(B.dL,B.aC).a.o7("Roboto")},
 $S:56}
 A.aOw.prototype={
 $3$color$fontSize$fontWeight(a,b,c){var s=null
-return A.d9(s,s,a,s,s,s,s,s,"sans-serif-medium",s,s,b,s,s,c,s,s,!0,s,s,s,s,s,s,s,s)},
+return A.d9(s,s,a,s,s,s,s,s,"Poppins",s,s,b,s,s,c,s,s,!0,s,s,s,s,s,s,s,s)},
 $0(){return this.$3$color$fontSize$fontWeight(null,null,null)},
 $1$color(a){return this.$3$color$fontSize$fontWeight(a,null,null)},
 $2$color$fontSize(a,b){return this.$3$color$fontSize$fontWeight(a,b,null)},
@@ -109221,14 +109221,14 @@ $1$fontSize(a){return this.$3$color$fontSize$fontWeight(null,a,null)},
 $2$color$fontWeight(a,b){return this.$3$color$fontSize$fontWeight(a,null,b)},
 $S:91}
 A.aOx.prototype={
-$0(){return A.pb(B.dL,B.aC).a.o7("sans-serif-condensed")},
+$0(){return A.pb(B.dL,B.aC).a.o7("Montserrat")},
 $S:56}
 A.aOy.prototype={
-$0(){return A.pb(B.dL,B.aC).a.o7("sans-serif")},
+$0(){return A.pb(B.dL,B.aC).a.o7("OpenSans")},
 $S:56}
 A.aOz.prototype={
 $3$color$fontSize$fontWeight(a,b,c){var s=null
-return A.d9(s,s,a,s,s,s,s,s,"sans-serif-condensed",s,s,b,s,s,c,s,s,!0,s,s,s,s,s,s,s,s)},
+return A.d9(s,s,a,s,s,s,s,s,"Montserrat",s,s,b,s,s,c,s,s,!0,s,s,s,s,s,s,s,s)},
 $0(){return this.$3$color$fontSize$fontWeight(null,null,null)},
 $1$color(a){return this.$3$color$fontSize$fontWeight(a,null,null)},
 $2$color$fontSize(a,b){return this.$3$color$fontSize$fontWeight(a,b,null)},
@@ -109236,14 +109236,14 @@ $1$fontSize(a){return this.$3$color$fontSize$fontWeight(null,a,null)},
 $2$color$fontWeight(a,b){return this.$3$color$fontSize$fontWeight(a,null,b)},
 $S:91}
 A.aOA.prototype={
-$0(){return A.pb(B.dL,B.aC).a.o7("sans-serif")},
+$0(){return A.pb(B.dL,B.aC).a.o7("SpaceGrotesk")},
 $S:56}
 A.aOB.prototype={
-$0(){return A.pb(B.dL,B.aC).a.o7("sans-serif")},
+$0(){return A.pb(B.dL,B.aC).a.o7("Inter")},
 $S:56}
 A.aOt.prototype={
 $3$color$fontSize$fontWeight(a,b,c){var s=null
-return A.d9(s,s,a,s,s,s,s,s,"sans-serif",s,s,b,s,s,c,s,s,!0,s,s,s,s,s,s,s,s)},
+return A.d9(s,s,a,s,s,s,s,s,"SpaceGrotesk",s,s,b,s,s,c,s,s,!0,s,s,s,s,s,s,s,s)},
 $0(){return this.$3$color$fontSize$fontWeight(null,null,null)},
 $1$color(a){return this.$3$color$fontSize$fontWeight(a,null,null)},
 $2$color$fontSize(a,b){return this.$3$color$fontSize$fontWeight(a,b,null)},
