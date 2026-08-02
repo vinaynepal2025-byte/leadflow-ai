@@ -174,6 +174,27 @@ class ApiService {
     return AiInsight.fromJson(jsonDecode(res.body));
   }
 
+  // ---------- AI Design Engine ----------
+  // Portable: this method + the backend's POST /ai/generate-theme route
+  // have no LeadFlow-specific coupling -- copy both into any other
+  // project that shares this app's theme/ folder shape.
+
+  Future<Map<String, dynamic>> generateAiTheme(String prompt, {List<String>? brandColors}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/ai/generate-theme'),
+      headers: _headers,
+      body: jsonEncode({
+        'prompt': prompt,
+        if (brandColors != null) 'brandColors': brandColors,
+      }),
+    );
+    if (res.statusCode == 502 || res.statusCode == 400) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'AI theme generation failed');
+    }
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   // ---------- Reminders ----------
 
   Future<List<ReminderItem>> getReminders({String? status, String? leadId}) async {

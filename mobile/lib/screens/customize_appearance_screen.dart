@@ -5,6 +5,7 @@ import '../theme/glass_settings.dart';
 import '../theme/locale_settings.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../widgets/live_preview_panel.dart';
+import '../widgets/ai_theme_generator_card.dart';
 
 class CustomizeAppearanceScreen extends StatelessWidget {
   const CustomizeAppearanceScreen({super.key});
@@ -47,6 +48,8 @@ class CustomizeAppearanceScreen extends StatelessWidget {
                   'This is a personal preference for this device — it doesn\'t change what other counselors see.',
                   style: TextStyle(color: Colors.grey, fontSize: 12),
                 ),
+                const SizedBox(height: 16),
+                const AiThemeGeneratorCard(),
                 const SizedBox(height: 20),
 
                 _sectionTitle('Language'),
