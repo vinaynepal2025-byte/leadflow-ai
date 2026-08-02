@@ -32,12 +32,11 @@ class _FontPair {
   const _FontPair(this.display, this.body, this.headingStyle);
 }
 
-// Uses the device's own built-in system font families instead of
-// downloading fonts over the network — this removes any dependency on
-// internet access or a specific DNS/host being reachable at startup,
-// which previously caused a hard crash whenever fonts.gstatic.com
-// couldn't be resolved. Each pairing still reads as visually distinct
-// via the different generic system families Android ships with.
+// Bundled TTF assets (assets/fonts/, declared in pubspec.yaml) — real,
+// distinct, premium typefaces instead of generic Android system fonts.
+// Still zero network dependency (fonts ship inside the APK), so this
+// keeps the earlier crash-fix property: no dependency on fonts.gstatic.com
+// or any host being reachable at startup.
 TextTheme _themeWithFamily(String family) => Typography.material2021(platform: TargetPlatform.android)
     .black
     .apply(fontFamily: family);
@@ -46,27 +45,27 @@ _FontPair _resolveFontPair(FontPairing pairing) {
   switch (pairing) {
     case FontPairing.playfairLato:
       return _FontPair(
-        () => _themeWithFamily('serif'),
-        () => _themeWithFamily('serif'),
-        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'serif', fontSize: fontSize, fontWeight: fontWeight, color: color),
+        () => _themeWithFamily('PlayfairDisplay'),
+        () => _themeWithFamily('Lato'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'PlayfairDisplay', fontSize: fontSize, fontWeight: fontWeight, color: color),
       );
     case FontPairing.poppinsRoboto:
       return _FontPair(
-        () => _themeWithFamily('sans-serif-medium'),
-        () => _themeWithFamily('sans-serif'),
-        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'sans-serif-medium', fontSize: fontSize, fontWeight: fontWeight, color: color),
+        () => _themeWithFamily('Poppins'),
+        () => _themeWithFamily('Roboto'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'Poppins', fontSize: fontSize, fontWeight: fontWeight, color: color),
       );
     case FontPairing.montserratOpenSans:
       return _FontPair(
-        () => _themeWithFamily('sans-serif-condensed'),
-        () => _themeWithFamily('sans-serif'),
-        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'sans-serif-condensed', fontSize: fontSize, fontWeight: fontWeight, color: color),
+        () => _themeWithFamily('Montserrat'),
+        () => _themeWithFamily('OpenSans'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'Montserrat', fontSize: fontSize, fontWeight: fontWeight, color: color),
       );
     case FontPairing.spaceGroteskInter:
       return _FontPair(
-        () => _themeWithFamily('sans-serif'),
-        () => _themeWithFamily('sans-serif'),
-        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'sans-serif', fontSize: fontSize, fontWeight: fontWeight, color: color),
+        () => _themeWithFamily('SpaceGrotesk'),
+        () => _themeWithFamily('Inter'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'SpaceGrotesk', fontSize: fontSize, fontWeight: fontWeight, color: color),
       );
   }
 }
