@@ -85,14 +85,14 @@ app.use('/compliance', complianceRouter);
 // so shared URLs stay short enough for an Instagram bio. Records the click
 // then forwards; a tracking failure must never block the redirect, since
 // a broken link costs a real lead.
-app.get('/s/:code', (req, res) => {
-  const link = db.prepare('SELECT * FROM tracked_links WHERE short_code = ? AND active = 1').get(req.params.code);
+app.get('/s/:code', async (req, res) => {
+  const link = await db.prepare('SELECT * FROM tracked_links WHERE short_code = ? AND active = 1').get(req.params.code);
   if (!link) return res.status(404).send('This link is no longer active.');
 
   try {
-    db.prepare('INSERT INTO link_clicks (id, link_id, tenant_id, referrer, user_agent) VALUES (?, ?, ?, ?, ?)')
+    await db.prepare('INSERT INTO link_clicks (id, link_id, tenant_id, referrer, user_agent) VALUES (?, ?, ?, ?, ?)')
       .run(shortLinkUuid(), link.id, link.tenant_id, req.get('referer') || null, req.get('user-agent') || null);
-    db.prepare('UPDATE tracked_links SET click_count = click_count + 1 WHERE id = ?').run(link.id);
+    await db.prepare('UPDATE tracked_links SET click_count = click_count + 1 WHERE id = ?').run(link.id);
   } catch (err) {
     console.error('Click tracking failed (redirect continues):', err.message);
   }
