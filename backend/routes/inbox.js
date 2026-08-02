@@ -35,7 +35,8 @@ router.get('/', async (req, res) => {
 router.get('/unreplied', async (req, res) => {
   const tid = tenantId(req);
 
-  const leadIds = await db.prepare('SELECT DISTINCT lead_id FROM communications WHERE tenant_id = ?').all(tid).map((r) => r.lead_id);
+  const leadIdRows = await db.prepare('SELECT DISTINCT lead_id FROM communications WHERE tenant_id = ?').all(tid);
+  const leadIds = leadIdRows.map((r) => r.lead_id);
   const unreplied = [];
 
   for (const leadId of leadIds) {

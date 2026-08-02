@@ -24,7 +24,7 @@ function withParsedCustomFields(row) {
 router.get('/referrals', async (req, res) => {
   const tid = tenantId(req);
 
-  const topReferrers = await db.prepare(`
+  const topReferrersRow = await db.prepare(`
     SELECT r.id AS referrer_lead_id, r.full_name AS referrer_name,
            COUNT(l.id) AS referred_count,
            SUM(CASE WHEN l.stage = 'Admission' THEN 1 ELSE 0 END) AS converted_count
@@ -43,7 +43,8 @@ router.get('/referrals', async (req, res) => {
 
   const totalReferred = await db.prepare(
     'SELECT COUNT(*) AS c FROM leads WHERE tenant_id = ? AND (referred_by_lead_id IS NOT NULL OR referrer_name IS NOT NULL)'
-  ).get(tid).c;
+  ).get(tid);
+  const topReferrers = topReferrersRow.c;
 
   res.json({ total_referred_leads: totalReferred, top_referrers_from_leads: topReferrers, external_referrers: externalReferrers });
 });

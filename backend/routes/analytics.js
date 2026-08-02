@@ -11,7 +11,8 @@ function tenantId(req) {
 router.get('/summary', async (req, res) => {
   const tid = tenantId(req);
 
-  const totalLeads = await db.prepare('SELECT COUNT(*) AS c FROM leads WHERE tenant_id = ?').get(tid).c;
+  const totalLeadsRow = await db.prepare('SELECT COUNT(*) AS c FROM leads WHERE tenant_id = ?').get(tid);
+  const totalLeads = totalLeadsRow.c;
 
   const byStage = await db.prepare(
     'SELECT stage, COUNT(*) AS count FROM leads WHERE tenant_id = ? GROUP BY stage'
@@ -21,17 +22,20 @@ router.get('/summary', async (req, res) => {
     "SELECT COALESCE(source, 'Unknown') AS source, COUNT(*) AS count FROM leads WHERE tenant_id = ? GROUP BY source"
   ).all(tid);
 
-  const pendingReminders = await db.prepare(
+  const pendingRemindersRow = await db.prepare(
     "SELECT COUNT(*) AS c FROM reminders WHERE tenant_id = ? AND status = 'pending'"
-  ).get(tid).c;
+  ).get(tid);
+  const pendingReminders = pendingRemindersRow.c;
 
-  const overdueReminders = await db.prepare(
+  const overdueRemindersRow = await db.prepare(
     "SELECT COUNT(*) AS c FROM reminders WHERE tenant_id = ? AND status = 'pending' AND due_at < datetime('now')"
-  ).get(tid).c;
+  ).get(tid);
+  const overdueReminders = overdueRemindersRow.c;
 
-  const communicationsToday = await db.prepare(
+  const communicationsTodayRow = await db.prepare(
     "SELECT COUNT(*) AS c FROM communications WHERE tenant_id = ? AND date(created_at) = date('now')"
-  ).get(tid).c;
+  ).get(tid);
+  const communicationsToday = communicationsTodayRow.c;
 
   // Simple conversion funnel: how many leads have ever reached each stage
   // is out of scope for v1 (needs stage-history tracking, not just current

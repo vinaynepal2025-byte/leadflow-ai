@@ -34,7 +34,8 @@ router.get('/', async (req, res) => {
 // GET /notifications/unread-count — for a badge icon
 router.get('/unread-count', async (req, res) => {
   const tid = tenantId(req);
-  const count = await db.prepare('SELECT COUNT(*) AS c FROM notifications WHERE tenant_id = ? AND read = 0').get(tid).c;
+  const countRow = await db.prepare('SELECT COUNT(*) AS c FROM notifications WHERE tenant_id = ? AND read = 0').get(tid);
+  const count = countRow.c;
   res.json({ count });
 });
 

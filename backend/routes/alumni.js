@@ -38,16 +38,17 @@ router.get('/match/:leadId', async (req, res) => {
   const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.leadId);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-  const targetInstitutions = await db.prepare(
+  const targetInstitutionsRows = await db.prepare(
     'SELECT DISTINCT institution_name FROM admission_applications WHERE tenant_id = ? AND lead_id = ?'
-  ).all(tid, req.params.leadId).map((r) => r.institution_name);
+  ).all(tid, req.params.leadId);
+  const targetInstitutions = targetInstitutionsRows.map((r) => r.institution_name);
 
   if (targetInstitutions.length === 0) {
     return res.json({ matches: [], note: 'This lead has no university applications on file yet — add one to find matching alumni.' });
   }
 
   const placeholders = targetInstitutions.map(() => '?').join(',');
-  const matches = await db.prepare(`
+  const matchesRows = await db.prepare(`
     SELECT s.id AS student_id, l.full_name, s.institution_name, s.course_name, s.current_semester, s.status,
            a.preferred_channel, a.bio,
            (SELECT COUNT(*) FROM alumni_connections c WHERE c.student_id = s.id AND c.status IN ('requested','connected')) AS active_connections
@@ -58,7 +59,8 @@ router.get('/match/:leadId', async (req, res) => {
       AND a.available_for_contact = 1
       AND s.status IN ('enrolled', 'graduated')
     ORDER BY active_connections ASC
-  `).all(tid, ...targetInstitutions).filter((m) => m.active_connections < (m.max_active_connections || 3));
+  `).all(tid, ...targetInstitutions);
+  const matches = matchesRows.filter((m) => m.active_connections < (m.max_active_connections || 3));
 
   res.json({ matched_institutions: targetInstitutions, matches });
 });

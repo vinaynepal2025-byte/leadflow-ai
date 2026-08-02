@@ -7,7 +7,12 @@
 // calls are translated to Postgres syntax automatically, and .get/.all/.run
 // are now async (must be awaited at every call site).
 
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// Postgres returns BIGINT (used by COUNT star) as a string by default to
+// avoid precision loss. Our counts are always small and Flutter expects
+// real ints, so parse BIGINT (OID 20) as a JS number app-wide.
+types.setTypeParser(20, (val) => parseInt(val, 10));
 
 const pool = new Pool({
   host: process.env.PGHOST,
@@ -44,5 +49,12 @@ function prepare(sql) {
     },
   };
 }
+
+// Prevent idle connection drops (network blips, pooler timeouts) from
+// crashing the entire Node process — pg emits an unhandled 'error' event
+// on the pool for these, which is fatal unless we listen for it.
+pool.on('error', (err) => {
+  console.error('Unexpected Postgres pool error (recovered, not fatal):', err.message);
+});
 
 module.exports = { prepare, pool };

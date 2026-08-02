@@ -42,7 +42,8 @@ router.get('/', async (req, res) => {
   }
   query += ' ORDER BY m.scheduled_at ASC';
 
-  res.json(await db.prepare(query).all(...params).map(parseAttendees));
+  const meetingRows = await db.prepare(query).all(...params);
+  res.json(meetingRows.map(parseAttendees));
 });
 
 // POST /meetings — schedule a counseling session, campus tour, etc.

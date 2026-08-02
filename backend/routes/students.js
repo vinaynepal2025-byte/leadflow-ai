@@ -39,7 +39,7 @@ router.post('/', async (req, res) => {
   if (!lead_id || !institution_name) {
     return res.status(400).json({ error: 'lead_id and institution_name are required' });
   }
-  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, lead_id);
+  const leadRow = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, lead_id);
   if (!lead) return res.status(404).json({ error: 'Lead not found for this tenant' });
 
   const existing = await db.prepare('SELECT id FROM students WHERE tenant_id = ? AND lead_id = ?').get(tid, lead_id);
@@ -153,18 +153,20 @@ router.get('/stats/summary', async (req, res) => {
   const byInstitution = await db.prepare(
     'SELECT institution_name, COUNT(*) AS count FROM students WHERE tenant_id = ? GROUP BY institution_name ORDER BY count DESC'
   ).all(tid);
-  const strugglingCount = await db.prepare(`
+  const strugglingCountRow = await db.prepare(`
     SELECT COUNT(DISTINCT student_id) AS c FROM student_checkins
     WHERE tenant_id = ? AND wellbeing = 'struggling'
-  `).get(tid).c;
-  const noRecentCheckin = await db.prepare(`
+  `).get(tid);
+  const strugglingCount = strugglingCountRow.c;
+  const noRecentCheckinRow = await db.prepare(`
     SELECT COUNT(*) AS c FROM students s
     WHERE s.tenant_id = ? AND s.status = 'enrolled'
       AND NOT EXISTS (
         SELECT 1 FROM student_checkins c
-        WHERE c.student_id = s.id AND c.checkin_date >= date('now', '-90 days')
+        WHERE c.student_id = s.id AND c.checkin_date >= (CURRENT_DATE - INTERVAL '90 days')::text
       )
-  `).get(tid).c;
+  `).get(tid);
+  const noRecentCheckin = noRecentCheckinRow.c;
 
   res.json({
     by_status: byStatus,

@@ -29,15 +29,18 @@ router.get('/', async (req, res) => {
 // GET /fees/summary — tenant-wide totals for the Fee dashboard
 router.get('/summary', async (req, res) => {
   const tid = tenantId(req);
-  const totalDue = await db.prepare(
+  const totalDueRow = await db.prepare(
     "SELECT COALESCE(SUM(amount),0) AS t FROM fee_payments WHERE tenant_id = ? AND status IN ('pending','overdue')"
-  ).get(tid).t;
-  const totalCollected = await db.prepare(
+  ).get(tid);
+  const totalDue = totalDueRow.t;
+  const totalCollectedRow = await db.prepare(
     "SELECT COALESCE(SUM(amount),0) AS t FROM fee_payments WHERE tenant_id = ? AND status = 'paid'"
-  ).get(tid).t;
-  const overdueCount = await db.prepare(
-    "SELECT COUNT(*) AS c FROM fee_payments WHERE tenant_id = ? AND status = 'pending' AND due_date < date('now')"
-  ).get(tid).c;
+  ).get(tid);
+  const totalCollected = totalCollectedRow.t;
+  const overdueCountRow = await db.prepare(
+    "SELECT COUNT(*) AS c FROM fee_payments WHERE tenant_id = ? AND status = 'pending' AND due_date::date < CURRENT_DATE"
+  ).get(tid);
+  const overdueCount = overdueCountRow.c;
   res.json({ total_due: totalDue, total_collected: totalCollected, overdue_count: overdueCount });
 });
 
