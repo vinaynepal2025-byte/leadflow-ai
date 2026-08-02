@@ -158,7 +158,7 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
               label: const Text('Meetings & Campus Tours'),
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => MeetingsScreen(leadId: lead.id)),
+                MaterialPageRoute(builder: (_) => MeetingsScreen(leadId: lead.id, leadName: lead.fullName, leadPhone: lead.phone)),
               ),
             ),
             const SizedBox(height: 10),

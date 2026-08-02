@@ -827,7 +827,102 @@ class ApiService {
     _checkOk(res);
   }
 
+  Future<Map<String, dynamic>> updateMeetingVisitDetails(String id, Map<String, dynamic> fields) async {
+    final res = await http.patch(Uri.parse('$baseUrl/meetings/$id/visit-details'), headers: _headers, body: jsonEncode(fields));
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  // ---------- Colleges: peer-review config ----------
+
+  Future<void> updateCollege(String id, Map<String, dynamic> fields) async {
+    final res = await http.patch(Uri.parse('$baseUrl/colleges/$id'), headers: _headers, body: jsonEncode(fields));
+    _checkOk(res);
+  }
+
+  // ---------- Paid Peer-Review Marketplace ----------
+  // Portable pattern: payment is a device UPI-intent link straight to the
+  // provider's own UPI ID -- no gateway approval needed to go live.
+
+  Future<List<Map<String, dynamic>>> getReviewProviders({String? collegeId, bool activeOnly = true}) async {
+    final params = <String, String>{};
+    if (collegeId != null) params['college_id'] = collegeId;
+    if (!activeOnly) params['active_only'] = 'false';
+    final res = await http.get(Uri.parse('$baseUrl/review-providers').replace(queryParameters: params.isEmpty ? null : params), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<void> registerReviewProvider({
+    required String collegeId,
+    required String fullName,
+    String? role,
+    String? phone,
+    required String upiId,
+    double? pricePerReview,
+    String? bio,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/review-providers'),
+      headers: _headers,
+      body: jsonEncode({
+        'college_id': collegeId, 'full_name': fullName, 'role': role, 'phone': phone,
+        'upi_id': upiId, 'price_per_review': pricePerReview, 'bio': bio,
+      }),
+    );
+    if (res.statusCode == 400) throw Exception(jsonDecode(res.body)['error'] ?? 'Registration failed');
+    _checkOk(res, expected: 201);
+  }
+
+  Future<void> updateReviewProvider(String id, Map<String, dynamic> fields) async {
+    final res = await http.patch(Uri.parse('$baseUrl/review-providers/$id'), headers: _headers, body: jsonEncode(fields));
+    _checkOk(res);
+  }
+
+  Future<Map<String, dynamic>> bookPeerReview({required String leadId, required String collegeId, required String providerId}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/peer-reviews'),
+      headers: _headers,
+      body: jsonEncode({'lead_id': leadId, 'college_id': collegeId, 'provider_id': providerId}),
+    );
+    if (res.statusCode == 400 || res.statusCode == 404) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Booking failed');
+    }
+    _checkOk(res, expected: 201);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> confirmPeerReviewPayment(String bookingId, {String? paymentNote}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/peer-reviews/$bookingId/confirm-payment'),
+      headers: _headers,
+      body: jsonEncode({'payment_note': paymentNote}),
+    );
+    _checkOk(res);
+  }
+
+  Future<void> completePeerReview(String bookingId, {int? rating, String? reviewNotes}) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/peer-reviews/$bookingId/complete'),
+      headers: _headers,
+      body: jsonEncode({'rating': rating, 'review_notes': reviewNotes}),
+    );
+    _checkOk(res);
+  }
+
+  Future<List<Map<String, dynamic>>> getPeerReviews({String? leadId, String? providerId}) async {
+    final params = <String, String>{};
+    if (leadId != null) params['lead_id'] = leadId;
+    if (providerId != null) params['provider_id'] = providerId;
+    final res = await http.get(Uri.parse('$baseUrl/peer-reviews').replace(queryParameters: params.isEmpty ? null : params), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
   // ---------- Lead Scoring ----------
+
 
   Future<Map<String, dynamic>> getScoringToday() async {
     final res = await http.get(Uri.parse('$baseUrl/scoring/today'), headers: _headers);

@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:image_picker/image_picker.dart';
 import '../services/api_service.dart';
+import 'review_providers_screen.dart';
 
 class MeetingsScreen extends StatefulWidget {
   final String leadId;
-  const MeetingsScreen({super.key, required this.leadId});
+  final String? leadName;
+  final String? leadPhone;
+  const MeetingsScreen({super.key, required this.leadId, this.leadName, this.leadPhone});
 
   @override
   State<MeetingsScreen> createState() => _MeetingsScreenState();
@@ -16,6 +20,19 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
 
   static const types = ['Counseling', 'Virtual Campus Tour', 'Physical Campus Visit', 'Parent Meeting', 'Demo Class', 'Other'];
   static const statuses = ['scheduled', 'completed', 'no-show', 'cancelled', 'rescheduled'];
+  static const virtualPlatforms = ['WhatsApp Video', 'Google Meet', 'Zoom', 'Other'];
+  static const areaOptions = [
+    ('Campus', Icons.apartment_outlined),
+    ('Hospital', Icons.local_hospital_outlined),
+    ('Hostel', Icons.house_outlined),
+    ('Faculty', Icons.person_outline),
+    ('Fee Office', Icons.currency_rupee),
+    ('Playground', Icons.sports_soccer_outlined),
+    ('Admin', Icons.badge_outlined),
+    ('Examination', Icons.edit_note_outlined),
+    ('Library', Icons.menu_book_outlined),
+    ('Labs', Icons.science_outlined),
+  ];
 
   @override
   void initState() {
@@ -25,71 +42,278 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
 
   void _refresh() => setState(() => _future = _api.getMeetings(leadId: widget.leadId));
 
-  Future<void> _scheduleDialog() async {
-    String type = types.first;
-    final titleCtrl = TextEditingController();
-    final dateCtrl = TextEditingController();
-    final linkCtrl = TextEditingController();
-    final campusCtrl = TextEditingController();
-    DateTime? picked;
+  // -------------------- Rich Add Visit dialog --------------------
 
-    final saved = await showDialog<bool>(
+  Future<void> _addVisitDialog() async {
+    bool isPhysical = true;
+    final titleCtrl = TextEditingController();
+    final campusCtrl = TextEditingController();
+    final linkCtrl = TextEditingController();
+    final callerCityCtrl = TextEditingController();
+    final callerStateCtrl = TextEditingController();
+    final queriesCtrl = TextEditingController();
+    String platform = virtualPlatforms.first;
+    bool firstTimeVisit = true;
+    final Set<String> areasSelected = {};
+    DateTime? picked = DateTime.now();
+    XFile? photo;
+    bool generatingLink = false;
+    bool saving = false;
+
+    await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Schedule Meeting'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: type,
-                  decoration: const InputDecoration(labelText: 'Type'),
-                  items: types.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                  onChanged: (v) => setDialogState(() => type = v ?? type),
-                ),
-                TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title')),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.calendar_today, size: 16),
-                  label: Text(picked == null ? 'Pick date & time' : picked.toString().substring(0, 16)),
-                  onPressed: () async {
-                    final date = await showDatePicker(
-                      context: context, initialDate: DateTime.now(),
-                      firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 365)),
-                    );
-                    if (date == null || !context.mounted) return;
-                    final time = await showTimePicker(context: context, initialTime: TimeOfDay.now());
-                    if (time == null) return;
-                    setDialogState(() => picked = DateTime(date.year, date.month, date.day, time.hour, time.minute));
-                  },
-                ),
-                if (type.contains('Campus'))
-                  TextField(controller: campusCtrl, decoration: const InputDecoration(labelText: 'Campus name')),
-                TextField(controller: linkCtrl, decoration: const InputDecoration(labelText: 'Meeting link (Zoom/Meet) — optional')),
-              ],
+        builder: (context, setSheetState) {
+          Future<void> takePhoto(ImageSource source) async {
+            final picker = ImagePicker();
+            final result = await picker.pickImage(source: source, imageQuality: 80);
+            if (result != null) setSheetState(() => photo = result);
+          }
+
+          Future<void> generateLink() async {
+            if (platform != 'WhatsApp Video') {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text('$platform links must be created in the $platform app, then pasted here.'),
+              ));
+              return;
+            }
+            if (widget.leadPhone == null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('No phone number on file for this lead')),
+              );
+              return;
+            }
+            setSheetState(() => generatingLink = true);
+            try {
+              final link = await _api.getWhatsAppChatLink(
+                widget.leadId,
+                'Hi ${widget.leadName ?? 'there'}, join our video call here — tap the video icon once the chat opens.',
+              );
+              setSheetState(() => linkCtrl.text = link);
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not generate link: $e')));
+              }
+            } finally {
+              setSheetState(() => generatingLink = false);
+            }
+          }
+
+          Future<void> save() async {
+            if (titleCtrl.text.trim().isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Title is required')));
+              return;
+            }
+            setSheetState(() => saving = true);
+            try {
+              final meetingType = isPhysical ? 'Physical Campus Visit' : 'Virtual Campus Tour';
+              final meeting = await _api.createMeeting(
+                leadId: widget.leadId,
+                meetingType: meetingType,
+                title: titleCtrl.text.trim(),
+                scheduledAt: (picked ?? DateTime.now()).toIso8601String(),
+                mode: isPhysical ? 'in-person' : 'online',
+                meetingLink: !isPhysical && linkCtrl.text.trim().isNotEmpty ? linkCtrl.text.trim() : null,
+                campusName: campusCtrl.text.trim().isEmpty ? null : campusCtrl.text.trim(),
+                hostName: 'Counselor',
+              );
+
+              await _api.updateMeetingVisitDetails(meeting['id'], {
+                if (!isPhysical) 'virtual_platform': platform,
+                if (areasSelected.isNotEmpty) 'areas_visited': areasSelected.toList(),
+                if (!isPhysical && callerCityCtrl.text.trim().isNotEmpty) 'caller_city': callerCityCtrl.text.trim(),
+                if (!isPhysical && callerStateCtrl.text.trim().isNotEmpty) 'caller_state': callerStateCtrl.text.trim(),
+                if (queriesCtrl.text.trim().isNotEmpty) 'visitor_queries': queriesCtrl.text.trim(),
+                'first_time_visit': firstTimeVisit,
+              });
+
+              if (photo != null) {
+                try {
+                  await _api.uploadDocument(
+                    leadId: widget.leadId,
+                    docType: 'visit_photo',
+                    filePath: photo!.path,
+                    fileName: photo!.name,
+                    uploadedBy: 'Counselor',
+                  );
+                } catch (_) {
+                  // Visit itself is already saved -- a photo-upload hiccup
+                  // shouldn't lose the whole visit record.
+                }
+              }
+
+              if (context.mounted) Navigator.pop(context);
+              _refresh();
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save visit: $e')));
+              }
+            } finally {
+              setSheetState(() => saving = false);
+            }
+          }
+
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 16, right: 16, top: 16,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
             ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Schedule')),
-          ],
-        ),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.add_location_alt_outlined),
+                      const SizedBox(width: 8),
+                      const Text('Add Visit', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                      const Spacer(),
+                      IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('Visit Mode', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Text('🏫 Physical'),
+                          selected: isPhysical,
+                          onSelected: (_) => setSheetState(() => isPhysical = true),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Text('🎥 Virtual'),
+                          selected: !isPhysical,
+                          onSelected: (_) => setSheetState(() => isPhysical = false),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title *', border: OutlineInputBorder())),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.calendar_today, size: 16),
+                    label: Text(picked == null ? 'Pick date & time' : picked.toString().substring(0, 16)),
+                    onPressed: () async {
+                      final date = await showDatePicker(
+                        context: context, initialDate: DateTime.now(),
+                        firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (date == null || !context.mounted) return;
+                      final time = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+                      if (time == null) return;
+                      setSheetState(() => picked = DateTime(date.year, date.month, date.day, time.hour, time.minute));
+                    },
+                  ),
+                  const SizedBox(height: 10),
+
+                  if (isPhysical) ...[
+                    TextField(controller: campusCtrl, decoration: const InputDecoration(labelText: 'Campus / Location', border: OutlineInputBorder())),
+                    const SizedBox(height: 12),
+                  ] else ...[
+                    const Text('Virtual Platform', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      children: virtualPlatforms.map((p) => ChoiceChip(
+                        label: Text(p),
+                        selected: platform == p,
+                        onSelected: (_) => setSheetState(() => platform = p),
+                      )).toList(),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(controller: linkCtrl, decoration: const InputDecoration(labelText: 'Meeting link', border: OutlineInputBorder())),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          onPressed: generatingLink ? null : generateLink,
+                          icon: generatingLink
+                              ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.auto_awesome, size: 16),
+                          label: const Text('Generate'),
+                        ),
+                      ],
+                    ),
+                    if (platform == 'WhatsApp Video')
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text('Opens the WhatsApp chat with the lead — tap the video icon there to start the call.',
+                            style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(child: TextField(controller: callerCityCtrl, decoration: const InputDecoration(labelText: 'Caller City', border: OutlineInputBorder()))),
+                        const SizedBox(width: 8),
+                        Expanded(child: TextField(controller: callerStateCtrl, decoration: const InputDecoration(labelText: 'Caller State/Country', border: OutlineInputBorder()))),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  const Text('Areas of Interest / Visited (select all that apply)', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: areaOptions.map((a) {
+                      final selected = areasSelected.contains(a.$1);
+                      return FilterChip(
+                        avatar: Icon(a.$2, size: 16),
+                        label: Text(a.$1),
+                        selected: selected,
+                        onSelected: (v) => setSheetState(() => v ? areasSelected.add(a.$1) : areasSelected.remove(a.$1)),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Expanded(child: FilterChip(label: const Text('First-time visit'), selected: firstTimeVisit, onSelected: (v) => setSheetState(() => firstTimeVisit = v))),
+                      const SizedBox(width: 8),
+                      Expanded(child: FilterChip(label: const Text('Return visit'), selected: !firstTimeVisit, onSelected: (v) => setSheetState(() => firstTimeVisit = !v))),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  Text('Photo (auto-added to report)', style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      OutlinedButton.icon(icon: const Icon(Icons.camera_alt_outlined, size: 16), label: const Text('Camera'), onPressed: () => takePhoto(ImageSource.camera)),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(icon: const Icon(Icons.photo_library_outlined, size: 16), label: const Text('Gallery'), onPressed: () => takePhoto(ImageSource.gallery)),
+                      const SizedBox(width: 8),
+                      if (photo != null) const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  TextField(controller: queriesCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Visitor Queries', border: OutlineInputBorder())),
+                  const SizedBox(height: 16),
+
+                  FilledButton.icon(
+                    onPressed: saving ? null : save,
+                    icon: saving ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.save_outlined),
+                    label: Text(saving ? 'Saving...' : 'Save Visit'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
-
-    if (saved == true && titleCtrl.text.trim().isNotEmpty && picked != null) {
-      await _api.createMeeting(
-        leadId: widget.leadId,
-        meetingType: type,
-        title: titleCtrl.text.trim(),
-        scheduledAt: picked!.toIso8601String(),
-        meetingLink: linkCtrl.text.trim().isEmpty ? null : linkCtrl.text.trim(),
-        campusName: campusCtrl.text.trim().isEmpty ? null : campusCtrl.text.trim(),
-        hostName: 'Counselor',
-      );
-      _refresh();
-    }
   }
 
   Future<void> _recordOutcome(Map<String, dynamic> meeting) async {
@@ -106,14 +330,14 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
-                value: status,
+                initialValue: status,
                 decoration: const InputDecoration(labelText: 'Status'),
                 items: statuses.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
                 onChanged: (v) => setDialogState(() => status = v ?? status),
               ),
               if (status == 'completed')
                 DropdownButtonFormField<String>(
-                  value: interest,
+                  initialValue: interest,
                   decoration: const InputDecoration(labelText: 'Interest level'),
                   items: const ['hot', 'warm', 'cold'].map((i) => DropdownMenuItem(value: i, child: Text(i))).toList(),
                   onChanged: (v) => setDialogState(() => interest = v ?? interest),
@@ -152,13 +376,26 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     if (type.contains('Campus')) return Icons.school;
     if (type == 'Parent Meeting') return Icons.family_restroom;
     if (type == 'Demo Class') return Icons.play_lesson;
+    if (type == 'Peer Review Call') return Icons.star_outline;
     return Icons.groups;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Meetings & Campus Tours')),
+      appBar: AppBar(
+        title: const Text('Meetings & Campus Tours'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.star_outline),
+            tooltip: 'Book a Paid Peer Review',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => ReviewProvidersScreen(leadId: widget.leadId)),
+            ),
+          ),
+        ],
+      ),
       body: FutureBuilder<List<Map<String, dynamic>>>(
         future: _future,
         builder: (context, snapshot) {
@@ -167,17 +404,22 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
           }
           final meetings = snapshot.data ?? [];
           if (meetings.isEmpty) {
-            return const Center(child: Text('No meetings scheduled yet', style: TextStyle(color: Colors.grey)));
+            return const Center(child: Text('No visits scheduled yet', style: TextStyle(color: Colors.grey)));
           }
           return ListView.separated(
             itemCount: meetings.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, i) {
               final m = meetings[i];
+              final areas = (m['areas_visited'] is List) ? (m['areas_visited'] as List).join(', ') : null;
               return ListTile(
                 leading: Icon(_typeIcon(m['meeting_type']), color: _statusColor(m['status'])),
                 title: Text(m['title']),
-                subtitle: Text('${m['meeting_type']} • ${m['scheduled_at']}\nStatus: ${m['status']}${m['interest_level'] != null ? ' • ${m['interest_level']}' : ''}'),
+                subtitle: Text(
+                  '${m['meeting_type']} • ${m['scheduled_at']}\n'
+                  'Status: ${m['status']}${m['interest_level'] != null ? ' • ${m['interest_level']}' : ''}'
+                  '${areas != null && areas.isNotEmpty ? '\nVisited: $areas' : ''}',
+                ),
                 isThreeLine: true,
                 trailing: m['status'] == 'scheduled'
                     ? Column(
@@ -198,9 +440,9 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
         },
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _scheduleDialog,
+        onPressed: _addVisitDialog,
         icon: const Icon(Icons.add),
-        label: const Text('Schedule'),
+        label: const Text('Add Visit'),
       ),
     );
   }

@@ -32,7 +32,7 @@ class _CallLogTab extends StatefulWidget {
 class _CallLogTabState extends State<_CallLogTab> {
   final _api = ApiService();
   late Future<List<Map<String, dynamic>>> _future;
-  static const outcomes = ['connected', 'no-answer', 'busy', 'wrong-number', 'voicemail'];
+  static const outcomes = ['connected', 'no-answer', 'busy', 'wrong-number', 'voicemail', 'call-back-requested', 'switched-off', 'not-reachable', 'converted', 'not-interested'];
 
   @override
   void initState() {

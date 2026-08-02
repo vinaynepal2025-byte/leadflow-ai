@@ -9,7 +9,7 @@ function tenantId(req) {
   return req.header('x-tenant-id') || 'demo-consultancy';
 }
 
-const OUTCOMES = ['connected', 'no-answer', 'busy', 'wrong-number', 'voicemail'];
+const OUTCOMES = ['connected', 'no-answer', 'busy', 'wrong-number', 'voicemail', 'call-back-requested', 'switched-off', 'not-reachable', 'converted', 'not-interested'];
 
 // GET /calls?lead_id=xxx
 router.get('/', async (req, res) => {

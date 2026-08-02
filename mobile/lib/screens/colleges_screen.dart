@@ -57,6 +57,55 @@ class _CollegesScreenState extends State<CollegesScreen> {
     }
   }
 
+  // Tenant-controllable per-college peer-review config: on/off + default
+  // price. This is the lever that makes the paid peer-review marketplace
+  // opt-in per college rather than a blanket platform feature.
+  Future<void> _peerReviewDialog(Map<String, dynamic> college) async {
+    bool enabled = college['peer_review_enabled'] == true;
+    final priceCtrl = TextEditingController(text: college['peer_review_default_price']?.toString() ?? '');
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Peer Review — ${college['name']}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SwitchListTile(
+                title: const Text('Enable paid peer review'),
+                subtitle: const Text('Lets verified students/alumni offer paid review calls for this college'),
+                value: enabled,
+                onChanged: (v) => setDialogState(() => enabled = v),
+              ),
+              if (enabled)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: TextField(
+                    controller: priceCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Default price per review (₹)', helperText: 'Individual providers can override this'),
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          ],
+        ),
+      ),
+    );
+
+    if (saved == true) {
+      await _api.updateCollege(college['id'], {
+        'peer_review_enabled': enabled,
+        if (enabled) 'peer_review_default_price': double.tryParse(priceCtrl.text.trim()),
+      });
+      _refresh();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -76,11 +125,26 @@ class _CollegesScreenState extends State<CollegesScreen> {
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, i) {
               final c = colleges[i];
+              final reviewOn = c['peer_review_enabled'] == true;
               return ListTile(
                 leading: const Icon(Icons.school_outlined),
                 title: Text(c['name']),
-                subtitle: Text('${c['country'] ?? ''} ${c['contact_person'] != null ? '• ${c['contact_person']}' : ''}'),
-                trailing: c['commission_percent'] != null ? Text('${c['commission_percent']}%') : null,
+                subtitle: Text(
+                  '${c['country'] ?? ''} ${c['contact_person'] != null ? '• ${c['contact_person']}' : ''}'
+                  '${reviewOn ? '\n⭐ Peer review ON — ₹${c['peer_review_default_price'] ?? '—'}' : ''}',
+                ),
+                isThreeLine: reviewOn,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (c['commission_percent'] != null) Text('${c['commission_percent']}%'),
+                    IconButton(
+                      icon: Icon(Icons.star, color: reviewOn ? Colors.amber : Colors.grey),
+                      tooltip: 'Peer review settings',
+                      onPressed: () => _peerReviewDialog(c),
+                    ),
+                  ],
+                ),
               );
             },
           );
