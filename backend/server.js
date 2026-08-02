@@ -77,6 +77,8 @@ app.use('/social', socialRouter);
 app.use('/alumni', alumniRouter);
 app.use('/triage', triageRouter);
 app.use('/payments', paymentsRouter);
+app.use('/review-providers', require('./routes/reviewProviders'));
+app.use('/peer-reviews', require('./routes/peerReviews'));
 app.use('/predictions', predictionsRouter);
 app.use('/inbox', inboxRouter);
 app.use('/compliance', complianceRouter);

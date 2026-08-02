@@ -32,7 +32,7 @@ router.patch('/:id', async (req, res) => {
   const existing = await db.prepare('SELECT id FROM colleges WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'College not found' });
 
-  const allowed = ['name', 'country', 'contact_person', 'contact_email', 'commission_percent', 'notes'];
+  const allowed = ['name', 'country', 'contact_person', 'contact_email', 'commission_percent', 'notes', 'peer_review_enabled', 'peer_review_default_price'];
   const updates = [];
   const values = [];
   for (const field of allowed) {

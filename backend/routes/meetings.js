@@ -179,4 +179,36 @@ router.get('/stats', async (req, res) => {
   });
 });
 
+// PATCH /meetings/:id/visit-details — adds WRC-inspired rich fields
+// (virtual platform, areas visited, photo, visitor queries, caller
+// location, first-time-visit flag) onto a meeting already created via
+// the normal POST /meetings. Kept as a separate endpoint deliberately:
+// it never touches the original INSERT, so it can't desync column and
+// value counts against code this patch script didn't have full live
+// visibility into. Flutter flow: POST /meetings, then immediately
+// PATCH .../visit-details with whichever of these fields apply.
+router.patch('/:id/visit-details', async (req, res) => {
+  const tid = tenantId(req);
+  const existing = await db.prepare('SELECT id FROM meetings WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Meeting not found' });
+
+  const allowed = ['virtual_platform', 'areas_visited', 'photo_url', 'visitor_queries', 'caller_city', 'caller_state', 'first_time_visit'];
+  const updates = [];
+  const values = [];
+  for (const field of allowed) {
+    if (req.body[field] !== undefined) {
+      const val = field === 'areas_visited' && Array.isArray(req.body[field]) ? JSON.stringify(req.body[field]) : req.body[field];
+      updates.push(`${field} = ?`);
+      values.push(val);
+    }
+  }
+  if (updates.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+  values.push(tid, req.params.id);
+  await db.prepare(`UPDATE meetings SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
+
+  const updated = await db.prepare('SELECT * FROM meetings WHERE id = ?').get(req.params.id);
+  res.json({ ...updated, areas_visited: updated.areas_visited ? JSON.parse(updated.areas_visited) : [] });
+});
+
 module.exports = router;
+
