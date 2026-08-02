@@ -175,7 +175,7 @@ class _ReviewProvidersScreenState extends State<ReviewProvidersScreen> {
                   );
                 }
                 return DropdownButtonFormField<Map<String, dynamic>>(
-                  initialValue: _selectedCollege,
+                  value: _selectedCollege,
                   decoration: const InputDecoration(labelText: 'College', border: OutlineInputBorder()),
                   items: colleges.map((c) => DropdownMenuItem(value: c, child: Text(c['name']))).toList(),
                   onChanged: (v) { if (v != null) _selectCollege(v); },

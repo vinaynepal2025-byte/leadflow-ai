@@ -798,7 +798,7 @@ class ApiService {
     return data.cast<Map<String, dynamic>>();
   }
 
-  Future<void> createMeeting({
+  Future<Map<String, dynamic>> createMeeting({
     required String leadId,
     required String meetingType,
     required String title,
@@ -820,6 +820,7 @@ class ApiService {
       }),
     );
     _checkOk(res, expected: 201);
+    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<void> updateMeeting(String id, Map<String, dynamic> fields) async {

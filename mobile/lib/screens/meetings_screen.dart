@@ -330,14 +330,14 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
-                initialValue: status,
+                value: status,
                 decoration: const InputDecoration(labelText: 'Status'),
                 items: statuses.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
                 onChanged: (v) => setDialogState(() => status = v ?? status),
               ),
               if (status == 'completed')
                 DropdownButtonFormField<String>(
-                  initialValue: interest,
+                  value: interest,
                   decoration: const InputDecoration(labelText: 'Interest level'),
                   items: const ['hot', 'warm', 'cold'].map((i) => DropdownMenuItem(value: i, child: Text(i))).toList(),
                   onChanged: (v) => setDialogState(() => interest = v ?? interest),
