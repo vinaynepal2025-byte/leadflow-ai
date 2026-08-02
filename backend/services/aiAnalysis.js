@@ -28,7 +28,7 @@ Respond ONLY with valid JSON, no other text, in exactly this shape:
   "suggested_whatsapp_reply": "a ready-to-send WhatsApp message draft, warm and professional"
 }`;
 
-  return generateJson(prompt, { maxTokens: 600 });
+  return generateJson(prompt, { maxTokens: 2000 });
 }
 
 module.exports = { analyzeLead };
