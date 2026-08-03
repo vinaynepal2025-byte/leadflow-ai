@@ -45,6 +45,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   // -------------------- Rich Add Visit dialog --------------------
 
   Future<void> _addVisitDialog() async {
+    final screenContext = context;
     bool isPhysical = true;
     final titleCtrl = TextEditingController();
     final campusCtrl = TextEditingController();
@@ -128,6 +129,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                 'first_time_visit': firstTimeVisit,
               });
 
+              bool photoFailed = false;
               if (photo != null) {
                 try {
                   await _api.uploadDocument(
@@ -139,11 +141,18 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                   );
                 } catch (_) {
                   // Visit itself is already saved -- a photo-upload hiccup
-                  // shouldn't lose the whole visit record.
+                  // shouldn't lose the whole visit record, but the
+                  // counselor needs to know the photo didn't make it in.
+                  photoFailed = true;
                 }
               }
 
               if (context.mounted) Navigator.pop(context);
+              if (photoFailed && mounted) {
+                ScaffoldMessenger.of(screenContext).showSnackBar(
+                  const SnackBar(content: Text('Visit saved, but the photo failed to upload -- try attaching it again from Documents.')),
+                );
+              }
               _refresh();
             } catch (e) {
               if (context.mounted) {
