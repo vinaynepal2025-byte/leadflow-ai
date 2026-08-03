@@ -76,21 +76,37 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'This provider is not currently accepting bookings' });
   }
 
-  const price = provider.price_per_review ?? college.peer_review_default_price;
-  if (!price) return res.status(400).json({ error: 'No price is set for this provider or college -- set one before booking' });
+  let price;
+  let durationMinutes = null;
+  const MIN_DURATION = 5;
+  const MAX_DURATION = 120;
+
+  if (provider.pricing_mode === 'per_minute') {
+    durationMinutes = parseInt(req.body.duration_minutes, 10);
+    if (!durationMinutes || durationMinutes < MIN_DURATION || durationMinutes > MAX_DURATION) {
+      return res.status(400).json({ error: `duration_minutes is required and must be between ${MIN_DURATION} and ${MAX_DURATION}` });
+    }
+    if (!provider.rate_per_minute) {
+      return res.status(400).json({ error: 'This provider has no rate_per_minute set -- ask them to update their profile' });
+    }
+    price = Math.round(provider.rate_per_minute * durationMinutes * 100) / 100;
+  } else {
+    price = provider.price_per_review ?? college.peer_review_default_price;
+    if (!price) return res.status(400).json({ error: 'No price is set for this provider or college -- set one before booking' });
+  }
 
   const id = randomUUID();
   const commissionPercent = college.commission_percent || 0;
   await db.prepare(`
-    INSERT INTO peer_review_bookings (id, tenant_id, lead_id, college_id, provider_id, price, commission_percent, payment_status, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'booked')
-  `).run(id, tid, lead_id, college_id, provider_id, price, commissionPercent);
+    INSERT INTO peer_review_bookings (id, tenant_id, lead_id, college_id, provider_id, price, duration_minutes, commission_percent, payment_status, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'booked')
+  `).run(id, tid, lead_id, college_id, provider_id, price, durationMinutes, commissionPercent);
 
   const upiLink = buildUpiLink({
     upiId: provider.upi_id,
     payeeName: provider.full_name,
     amount: price,
-    note: `Review call - ${college.name}`,
+    note: durationMinutes ? `Review call (${durationMinutes} min) - ${college.name}` : `Review call - ${college.name}`,
   });
 
   res.status(201).json({
@@ -208,7 +224,7 @@ router.get('/pay/:id', async (req, res) => {
     upiId: provider.upi_id,
     payeeName: provider.full_name,
     amount: booking.price,
-    note: `Review call - ${college.name}`,
+    note: booking.duration_minutes ? `Review call (${booking.duration_minutes} min) - ${college.name}` : `Review call - ${college.name}`,
   });
   const qrDataUrl = await QRCode.toDataURL(upiLink, { width: 320, margin: 2 });
 

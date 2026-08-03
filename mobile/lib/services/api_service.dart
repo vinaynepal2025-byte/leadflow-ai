@@ -881,11 +881,16 @@ class ApiService {
     _checkOk(res);
   }
 
-  Future<Map<String, dynamic>> bookPeerReview({required String leadId, required String collegeId, required String providerId}) async {
+  Future<Map<String, dynamic>> bookPeerReview({required String leadId, required String collegeId, required String providerId, int? durationMinutes}) async {
     final res = await http.post(
       Uri.parse('$baseUrl/peer-reviews'),
       headers: _headers,
-      body: jsonEncode({'lead_id': leadId, 'college_id': collegeId, 'provider_id': providerId}),
+      body: jsonEncode({
+        'lead_id': leadId,
+        'college_id': collegeId,
+        'provider_id': providerId,
+        if (durationMinutes != null) 'duration_minutes': durationMinutes,
+      }),
     );
     if (res.statusCode == 400 || res.statusCode == 404) {
       throw Exception(jsonDecode(res.body)['error'] ?? 'Booking failed');

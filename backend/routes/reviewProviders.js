@@ -43,7 +43,7 @@ router.get('/', async (req, res) => {
 // a counselor/admin must verify before the provider appears to leads.
 router.post('/', async (req, res) => {
   const tid = tenantId(req);
-  const { college_id, full_name, role, phone, upi_id, price_per_review, bio } = req.body;
+  const { college_id, full_name, role, phone, upi_id, price_per_review, pricing_mode, rate_per_minute, bio } = req.body;
 
   if (!college_id || !full_name || !upi_id) {
     return res.status(400).json({ error: 'college_id, full_name, and upi_id are required' });
@@ -51,14 +51,18 @@ router.post('/', async (req, res) => {
   if (!UPI_RE.test(upi_id)) {
     return res.status(400).json({ error: 'upi_id does not look like a valid UPI ID (expected format: name@bank)' });
   }
+  const mode = pricing_mode === 'per_minute' ? 'per_minute' : 'flat';
+  if (mode === 'per_minute' && (!rate_per_minute || rate_per_minute <= 0)) {
+    return res.status(400).json({ error: 'rate_per_minute must be a positive number for per_minute pricing_mode' });
+  }
   const college = await db.prepare('SELECT id FROM colleges WHERE tenant_id = ? AND id = ?').get(tid, college_id);
   if (!college) return res.status(404).json({ error: 'College not found for this tenant' });
 
   const id = randomUUID();
   await db.prepare(`
-    INSERT INTO review_providers (id, tenant_id, college_id, full_name, role, phone, upi_id, price_per_review, bio)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, tid, college_id, full_name, role || 'student', phone || null, upi_id, price_per_review || null, bio || null);
+    INSERT INTO review_providers (id, tenant_id, college_id, full_name, role, phone, upi_id, price_per_review, pricing_mode, rate_per_minute, bio)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, tid, college_id, full_name, role || 'student', phone || null, upi_id, price_per_review || null, mode, mode === 'per_minute' ? rate_per_minute : null, bio || null);
 
   res.status(201).json(withRating(await db.prepare('SELECT * FROM review_providers WHERE id = ?').get(id)));
 });
@@ -74,8 +78,11 @@ router.patch('/:id', async (req, res) => {
   if (req.body.upi_id !== undefined && !UPI_RE.test(req.body.upi_id)) {
     return res.status(400).json({ error: 'upi_id does not look like a valid UPI ID (expected format: name@bank)' });
   }
+  if (req.body.pricing_mode !== undefined && !['flat', 'per_minute'].includes(req.body.pricing_mode)) {
+    return res.status(400).json({ error: "pricing_mode must be 'flat' or 'per_minute'" });
+  }
 
-  const allowed = ['full_name', 'role', 'phone', 'upi_id', 'price_per_review', 'bio', 'verified', 'active'];
+  const allowed = ['full_name', 'role', 'phone', 'upi_id', 'price_per_review', 'pricing_mode', 'rate_per_minute', 'bio', 'verified', 'active'];
   const updates = [];
   const values = [];
   for (const field of allowed) {

@@ -115,19 +115,57 @@ class _ReviewProvidersScreenState extends State<ReviewProvidersScreen> {
   }
 
   Future<void> _bookDialog(Map<String, dynamic> provider) async {
+    final isPerMinute = provider['pricing_mode'] == 'per_minute';
+    final ratePerMinute = (provider['rate_per_minute'] as num?)?.toDouble();
+    int duration = 15;
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Book with ${provider['full_name']}'),
-        content: Text(
-          'Price: ₹${provider['price_per_review'] ?? _selectedCollege?['peer_review_default_price'] ?? '—'}\n\n'
-          'A UPI payment link will open your phone\'s UPI app (GPay, PhonePe, Paytm, etc.) '
-          'with the amount and provider pre-filled. Payment goes directly to the provider.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Book & Pay')),
-        ],
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final priceText = isPerMinute
+              ? (ratePerMinute != null
+                  ? '₹${(ratePerMinute * duration).toStringAsFixed(0)} (₹${ratePerMinute.toStringAsFixed(0)}/min × $duration min)'
+                  : '—')
+              : '₹${provider['price_per_review'] ?? _selectedCollege?['peer_review_default_price'] ?? '—'}';
+          return AlertDialog(
+            title: Text('Book with ${provider['full_name']}'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Price: $priceText'),
+                if (isPerMinute) ...[
+                  const SizedBox(height: 12),
+                  const Text('Estimated call duration', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline),
+                        onPressed: duration > 5 ? () => setDialogState(() => duration -= 5) : null,
+                      ),
+                      Text('$duration min', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      IconButton(
+                        icon: const Icon(Icons.add_circle_outline),
+                        onPressed: duration < 120 ? () => setDialogState(() => duration += 5) : null,
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 10),
+                const Text(
+                  'A UPI payment link will open your phone\'s UPI app (GPay, PhonePe, Paytm, etc.) '
+                  'with the amount and provider pre-filled. Payment goes directly to the provider.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Book & Pay')),
+            ],
+          );
+        },
       ),
     );
     if (confirmed != true) return;
@@ -137,6 +175,7 @@ class _ReviewProvidersScreenState extends State<ReviewProvidersScreen> {
         leadId: widget.leadId,
         collegeId: _selectedCollege!['id'],
         providerId: provider['id'],
+        durationMinutes: isPerMinute ? duration : null,
       );
       final bookingId = result['booking']['id'] as String;
       final upiLink = result['upi_payment_link'] as String;
