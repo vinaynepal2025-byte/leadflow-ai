@@ -157,21 +157,26 @@ class _DiagRootState extends State<_DiagRoot> {
         ChangeNotifierProvider.value(value: _appearance!),
         ChangeNotifierProvider.value(value: _locale!),
       ],
-      child: _RealApp(loggedIn: _loggedIn, lightTheme: _lightTheme!, darkTheme: _darkTheme!),
+      child: _RealApp(loggedIn: _loggedIn),
     );
   }
 }
 
 class _RealApp extends StatelessWidget {
   final bool loggedIn;
-  final ThemeData lightTheme;
-  final ThemeData darkTheme;
-  const _RealApp({required this.loggedIn, required this.lightTheme, required this.darkTheme});
+  const _RealApp({required this.loggedIn});
 
   @override
   Widget build(BuildContext context) {
     return Consumer3<AppearanceSettings, GlassSettings, LocaleSettings>(
       builder: (context, appearance, glass, locale, _) {
+        // Rebuilt fresh on every appearance change (font, color, mode,
+        // radius, ...). Previously this received ThemeData objects built
+        // once at boot, so color changes appeared to work (glass widgets
+        // read AppearanceSettings directly) but font/typography changes
+        // silently did nothing anywhere in the app until a full restart.
+        final lightTheme = AppTheme.build(appearance, brightness: Brightness.light);
+        final darkTheme = AppTheme.build(appearance, brightness: Brightness.dark);
         return MaterialApp(
           title: 'LeadFlow AI',
           debugShowCheckedModeBanner: false,

@@ -152,7 +152,12 @@ class _ReviewProvidersScreenState extends State<ReviewProvidersScreen> {
               icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
               label: const Text('Open UPI App'),
               onPressed: () async {
-                await launchUrl(Uri.parse(upiLink), mode: LaunchMode.externalApplication);
+                final launched = await launchUrl(Uri.parse(upiLink), mode: LaunchMode.externalApplication);
+                if (!launched && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('No UPI app found on this device — install GPay, PhonePe, or Paytm to pay.')),
+                  );
+                }
               },
             ),
             FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text("I've Paid")),

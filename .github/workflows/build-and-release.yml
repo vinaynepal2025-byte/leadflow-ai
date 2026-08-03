@@ -43,6 +43,25 @@ jobs:
         run: |
           sed -i 's#<manifest xmlns:android="http://schemas.android.com/apk/res/android">#<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET" />#' android/app/src/main/AndroidManifest.xml
 
+      - name: Add package-visibility queries (UPI payment apps)
+        # Android 11+ (API 30+) hides other installed apps from your app
+        # unless you explicitly declare what you need to see. Without this,
+        # tapping "Open UPI App" silently does nothing even when GPay /
+        # PhonePe / Paytm IS installed, because resolveActivity() can't find
+        # a match for the upi:// scheme.
+        run: |
+          python3 - <<'PYEOF3'
+          path = 'android/app/src/main/AndroidManifest.xml'
+          with open(path) as f:
+              content = f.read()
+          queries_block = '    <queries>\n        <intent>\n            <action android:name="android.intent.action.VIEW" />\n            <data android:scheme="upi" />\n        </intent>\n    </queries>\n'
+          marker = '<application'
+          idx = content.index(marker)
+          content = content[:idx] + queries_block + content[idx:]
+          with open(path, 'w') as f:
+              f.write(content)
+          PYEOF3
+
       - name: Disable Impeller renderer (compatibility fix for some Android GPUs)
         # Some Android GPU/driver combinations (seen on certain vivo/OriginOS
         # devices) fail to paint any frame under Flutter's newer Impeller
