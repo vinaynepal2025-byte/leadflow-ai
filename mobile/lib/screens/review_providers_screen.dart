@@ -8,7 +8,9 @@ import '../services/api_service.dart';
 /// link, so no payment-gateway approval is needed to go live.
 class ReviewProvidersScreen extends StatefulWidget {
   final String leadId;
-  const ReviewProvidersScreen({super.key, required this.leadId});
+  final String? leadPhone;
+  final String? leadName;
+  const ReviewProvidersScreen({super.key, required this.leadId, this.leadPhone, this.leadName});
 
   @override
   State<ReviewProvidersScreen> createState() => _ReviewProvidersScreenState();
@@ -138,6 +140,7 @@ class _ReviewProvidersScreenState extends State<ReviewProvidersScreen> {
       );
       final bookingId = result['booking']['id'] as String;
       final upiLink = result['upi_payment_link'] as String;
+      final publicPayUrl = result['public_pay_url'] as String?;
 
       if (!mounted) return;
       final paid = await showDialog<bool>(
@@ -145,21 +148,47 @@ class _ReviewProvidersScreenState extends State<ReviewProvidersScreen> {
         barrierDismissible: false,
         builder: (context) => AlertDialog(
           title: const Text('Complete Payment'),
-          content: const Text('Tap below to open your UPI app. Once payment is done, come back and confirm.'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('The lead pays -- not you. Share the link below so they can pay from their own phone; no app install needed on their end.'),
+              const SizedBox(height: 16),
+              if (publicPayUrl != null)
+                FilledButton.icon(
+                  icon: const Icon(Icons.chat_outlined, size: 18),
+                  label: const Text('Share Payment Link (WhatsApp)'),
+                  onPressed: widget.leadPhone == null
+                      ? null
+                      : () async {
+                          final cleanPhone = widget.leadPhone!.replaceAll(RegExp(r'[^0-9]'), '');
+                          final msg = 'Hi ${widget.leadName ?? "there"}, please pay for your review call here: $publicPayUrl';
+                          final waLink = 'https://wa.me/$cleanPhone?text=${Uri.encodeComponent(msg)}';
+                          await launchUrl(Uri.parse(waLink), mode: LaunchMode.externalApplication);
+                        },
+                ),
+              if (publicPayUrl != null && widget.leadPhone == null)
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text('No phone number on this lead — add one to share via WhatsApp.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
+                label: const Text('Pay from this device instead'),
+                onPressed: () async {
+                  final launched = await launchUrl(Uri.parse(upiLink), mode: LaunchMode.externalApplication);
+                  if (!launched && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('No UPI app found on this device — install GPay, PhonePe, or Paytm to pay.')),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel Booking')),
-            FilledButton.icon(
-              icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
-              label: const Text('Open UPI App'),
-              onPressed: () async {
-                final launched = await launchUrl(Uri.parse(upiLink), mode: LaunchMode.externalApplication);
-                if (!launched && context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('No UPI app found on this device — install GPay, PhonePe, or Paytm to pay.')),
-                  );
-                }
-              },
-            ),
             FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text("I've Paid")),
           ],
         ),

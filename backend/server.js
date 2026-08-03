@@ -46,6 +46,12 @@ const complianceRouter = require('./routes/compliance');
 const db = require('./db');
 
 const app = express();
+// Render terminates TLS in front of this app and forwards plain HTTP, so
+// without this, req.protocol always reports 'http' -- every generated
+// share link (/s/:code, /peer-reviews/pay/:id) would come out as
+// http://... instead of https://... . Trusting the first proxy hop lets
+// Express read X-Forwarded-Proto and report the real scheme.
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 

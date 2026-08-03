@@ -391,7 +391,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
             tooltip: 'Book a Paid Peer Review',
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => ReviewProvidersScreen(leadId: widget.leadId)),
+              MaterialPageRoute(builder: (_) => ReviewProvidersScreen(leadId: widget.leadId, leadPhone: widget.leadPhone, leadName: widget.leadName)),
             ),
           ),
         ],
