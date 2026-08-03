@@ -16,6 +16,12 @@ function getTransport() {
     port: parseInt(SMTP_PORT || '587'),
     secure: SMTP_PORT === '465',
     auth: { user: SMTP_USER, pass: SMTP_PASS },
+    // Render's outbound network can't route IPv6 -- Gmail (and some other
+    // providers) resolve to an IPv6 address by default, causing a silent
+    // ENETUNREACH. Forcing IPv4 here fixed it (confirmed live on Render,
+    // Aug 2026 -- worked fine locally in Termux, which resolves differently,
+    // so this class of bug only surfaces in production).
+    family: 4,
   });
 }
 
