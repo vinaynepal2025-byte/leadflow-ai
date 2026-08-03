@@ -149,7 +149,7 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
               label: const Text('Calls & Voice Notes'),
               onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => CallsVoiceNotesScreen(leadId: lead.id)),
+                MaterialPageRoute(builder: (_) => CallsVoiceNotesScreen(leadId: lead.id, leadPhone: lead.phone, leadName: lead.fullName)),
               ),
             ),
             const SizedBox(height: 10),

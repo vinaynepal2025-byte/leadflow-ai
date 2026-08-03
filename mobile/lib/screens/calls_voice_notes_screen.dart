@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 
 class CallsVoiceNotesScreen extends StatelessWidget {
   final String leadId;
-  const CallsVoiceNotesScreen({super.key, required this.leadId});
+  final String? leadPhone;
+  final String? leadName;
+  const CallsVoiceNotesScreen({super.key, required this.leadId, this.leadPhone, this.leadName});
 
   @override
   Widget build(BuildContext context) {
@@ -15,7 +18,10 @@ class CallsVoiceNotesScreen extends StatelessWidget {
           title: const Text('Calls & Voice Notes'),
           bottom: const TabBar(tabs: [Tab(text: 'Call Log'), Tab(text: 'Voice Notes')]),
         ),
-        body: TabBarView(children: [_CallLogTab(leadId: leadId), _VoiceNotesTab(leadId: leadId)]),
+        body: TabBarView(children: [
+          _CallLogTab(leadId: leadId, leadPhone: leadPhone, leadName: leadName),
+          _VoiceNotesTab(leadId: leadId),
+        ]),
       ),
     );
   }
@@ -23,7 +29,9 @@ class CallsVoiceNotesScreen extends StatelessWidget {
 
 class _CallLogTab extends StatefulWidget {
   final String leadId;
-  const _CallLogTab({required this.leadId});
+  final String? leadPhone;
+  final String? leadName;
+  const _CallLogTab({required this.leadId, this.leadPhone, this.leadName});
 
   @override
   State<_CallLogTab> createState() => _CallLogTabState();
@@ -75,30 +83,89 @@ class _CallLogTabState extends State<_CallLogTab> {
     }
   }
 
+  Future<void> _callPhone() async {
+    if (widget.leadPhone == null) return;
+    final launched = await launchUrl(Uri(scheme: 'tel', path: widget.leadPhone));
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open the dialer on this device')),
+      );
+    }
+  }
+
+  Future<void> _callWhatsApp() async {
+    if (widget.leadPhone == null) return;
+    try {
+      final message = 'Hi ${widget.leadName ?? "there"}, calling regarding your enquiry -- tap the video or voice icon once the chat opens.';
+      final link = await _api.getWhatsAppChatLink(widget.leadId, message);
+      await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
+      await _api.confirmWhatsAppSent(widget.leadId, message, 'Counselor');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open WhatsApp: $e')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final hasPhone = widget.leadPhone != null && widget.leadPhone!.isNotEmpty;
     return Scaffold(
-      body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final calls = snapshot.data ?? [];
-          if (calls.isEmpty) return const Center(child: Text('No calls logged yet', style: TextStyle(color: Colors.grey)));
-          return ListView.separated(
-            itemCount: calls.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (context, i) {
-              final c = calls[i];
-              return ListTile(
-                leading: Icon(c['outcome'] == 'connected' ? Icons.call : Icons.call_missed, color: c['outcome'] == 'connected' ? Colors.green : Colors.orange),
-                title: Text(c['outcome']),
-                subtitle: Text(c['notes'] ?? c['created_at']),
-              );
-            },
-          );
-        },
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.call, size: 18),
+                    label: const Text('Phone Call'),
+                    onPressed: hasPhone ? _callPhone : null,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF25D366)),
+                    icon: const Icon(Icons.chat, size: 18),
+                    label: const Text('WhatsApp Call'),
+                    onPressed: hasPhone ? _callWhatsApp : null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (!hasPhone)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text('No phone number on file for this lead', style: TextStyle(fontSize: 11, color: Colors.grey)),
+            ),
+          Expanded(
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: _future,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final calls = snapshot.data ?? [];
+                if (calls.isEmpty) return const Center(child: Text('No calls logged yet', style: TextStyle(color: Colors.grey)));
+                return ListView.separated(
+                  itemCount: calls.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final c = calls[i];
+                    return ListTile(
+                      leading: Icon(c['outcome'] == 'connected' ? Icons.call : Icons.call_missed, color: c['outcome'] == 'connected' ? Colors.green : Colors.orange),
+                      title: Text(c['outcome']),
+                      subtitle: Text(c['notes'] ?? c['created_at']),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(onPressed: _logDialog, child: const Icon(Icons.add_call)),
     );
