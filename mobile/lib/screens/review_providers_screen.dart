@@ -116,7 +116,9 @@ class _ReviewProvidersScreenState extends State<ReviewProvidersScreen> {
 
   Future<void> _bookDialog(Map<String, dynamic> provider) async {
     final isPerMinute = provider['pricing_mode'] == 'per_minute';
-    final ratePerMinute = (provider['rate_per_minute'] as num?)?.toDouble();
+    final ratePerMinute = provider['rate_per_minute'] != null
+        ? num.tryParse(provider['rate_per_minute'].toString())?.toDouble()
+        : null;
     int duration = 15;
 
     final confirmed = await showDialog<bool>(
