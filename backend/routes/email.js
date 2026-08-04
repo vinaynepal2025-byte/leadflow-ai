@@ -21,8 +21,10 @@ router.post('/send', async (req, res) => {
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   if (!lead.email) return res.status(400).json({ error: 'This lead has no email address on file' });
 
+  const tenant = await db.prepare('SELECT * FROM tenants WHERE id = ?').get(tid);
+
   try {
-    await sendEmail(lead.email, subject, message);
+    await sendEmail(lead.email, subject, message, tenant);
   } catch (err) {
     return res.status(502).json({ error: err.message });
   }

@@ -119,7 +119,7 @@ router.post('/resend-verification', async (req, res) => {
 
   const verifyLink = `${req.protocol}://${req.get('host')}/auth/verify-email?token=${token}`;
   try {
-    await sendEmail(tenant.contact_email, 'Verify your LeadFlow AI account', verificationEmailText(verifyLink, tenant.name));
+    await sendEmail(tenant.contact_email, 'Verify your LeadFlow AI account', verificationEmailText(verifyLink, tenant.name), tenant);
   } catch (err) {
     return res.status(502).json({ error: `Could not send email: ${err.message}` });
   }
