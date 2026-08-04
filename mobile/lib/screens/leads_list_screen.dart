@@ -7,6 +7,7 @@ import '../l10n/app_strings.dart';
 import 'lead_detail_screen.dart';
 import 'add_lead_screen.dart';
 import 'import_contacts_screen.dart';
+import 'excel_import_export_screen.dart';
 
 class LeadsListScreen extends StatefulWidget {
   const LeadsListScreen({super.key});
@@ -51,6 +52,14 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
             tooltip: 'Import CSV',
             onPressed: () async {
               await Navigator.push(context, MaterialPageRoute(builder: (_) => const ImportContactsScreen()));
+              _refresh();
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.table_view),
+            tooltip: 'Custom Import / Export',
+            onPressed: () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (_) => const ExcelImportExportScreen()));
               _refresh();
             },
           ),

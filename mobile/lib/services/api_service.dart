@@ -1341,6 +1341,45 @@ class ApiService {
     return data.cast<Map<String, dynamic>>();
   }
 
+
+  // ---------- Excel/CSV Custom Import + Export (Phase 2) ----------
+
+  Future<Map<String, dynamic>> previewLeadsExcelImport(String filePath, String fileName) async {
+    final uri = Uri.parse('$baseUrl/leads-excel/import/preview');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll({'x-tenant-id': tenantId})
+      ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
+    final streamed = await request.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 200) {
+      throw Exception(jsonDecode(body)['error'] ?? 'Could not read file');
+    }
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> commitLeadsExcelImport(
+    String filePath,
+    String fileName,
+    Map<String, String> mapping,
+  ) async {
+    final uri = Uri.parse('$baseUrl/leads-excel/import/commit');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll({'x-tenant-id': tenantId})
+      ..fields['mapping'] = jsonEncode(mapping)
+      ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
+    final streamed = await request.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 201) {
+      throw Exception(jsonDecode(body)['error'] ?? 'Import failed');
+    }
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
+
+  String buildLeadsExportUrl(List<String> columns) {
+    final cols = Uri.encodeComponent(columns.join(','));
+    return '$baseUrl/leads-excel/export?tenant_id=$tenantId&columns=$cols';
+  }
+
   void _checkOk(http.Response res, {int expected = 200}) {
     if (res.statusCode != expected) {
       String message = 'Request failed (${res.statusCode})';
