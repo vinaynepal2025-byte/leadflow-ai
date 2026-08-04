@@ -11,6 +11,7 @@ const express = require('express');
 const { randomUUID } = require('crypto');
 const db = require('../db');
 const { generateJson } = require('../services/aiProvider');
+const { computeEngagementTrend } = require('../services/engagementTrend');
 
 const router = express.Router();
 
@@ -53,6 +54,9 @@ router.post('/:leadId/next-best-action', async (req, res) => {
     .map((o) => `${o.offer_text} — ₹${o.amount || 'n/a'} (${o.status}, given ${o.given_at})`)
     .join('\n') || '(no offers made yet)';
 
+  const trendResult = computeEngagementTrend(communications);
+  await db.prepare('UPDATE leads SET engagement_trend = ? WHERE tenant_id = ? AND id = ?').run(trendResult.trend, tid, leadId);
+
   const daysSinceContact = lead.last_contacted_at
     ? Math.floor((Date.now() - new Date(lead.last_contacted_at).getTime()) / 86400000)
     : null;
@@ -63,6 +67,7 @@ move right now, not a generic checklist.
 
 Lead: ${lead.full_name}, source: ${lead.source_category || lead.source || 'unknown'}, stage: ${lead.stage}
 Days since last contact: ${daysSinceContact ?? 'never contacted'}
+Computed engagement trend (rule-based, not a guess): ${trendResult.trend} — ${trendResult.reasoning}
 Notes on file: ${lead.notes || 'none'}
 
 Interaction history (chronological):
@@ -275,6 +280,28 @@ router.get('/send-queue/today', async (req, res) => {
     LIMIT 50
   `).all(tid);
   res.json(rows);
+});
+
+// ---------------------------------------------------------------------
+// GET /cockpit/:leadId/engagement-trend — rule-based (not AI), silent-churn
+// detector. Updates leads.engagement_trend so it's visible elsewhere
+// (e.g. send-queue) without recomputing every time.
+// ---------------------------------------------------------------------
+router.get('/:leadId/engagement-trend', async (req, res) => {
+  const tid = tenantId(req);
+  const { leadId } = req.params;
+
+  const lead = await db.prepare('SELECT id FROM leads WHERE tenant_id = ? AND id = ?').get(tid, leadId);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+  const communications = await db.prepare(
+    'SELECT * FROM communications WHERE tenant_id = ? AND lead_id = ? ORDER BY created_at ASC'
+  ).all(tid, leadId);
+
+  const result = computeEngagementTrend(communications);
+  await db.prepare('UPDATE leads SET engagement_trend = ? WHERE tenant_id = ? AND id = ?').run(result.trend, tid, leadId);
+
+  res.json(result);
 });
 
 // ---------------------------------------------------------------------

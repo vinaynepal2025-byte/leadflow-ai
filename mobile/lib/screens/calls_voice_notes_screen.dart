@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../services/api_service.dart';
 
 class CallsVoiceNotesScreen extends StatelessWidget {
@@ -205,6 +206,10 @@ class _VoiceNotesTabState extends State<_VoiceNotesTab> {
     String? error;
     bool summarizing = false;
 
+    final speech = stt.SpeechToText();
+    final speechAvailable = await speech.initialize();
+    bool listening = false;
+
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -220,10 +225,39 @@ class _VoiceNotesTabState extends State<_VoiceNotesTab> {
               children: [
                 Text(note['file_name'], style: const TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: transcriptCtrl,
-                  maxLines: 4,
-                  decoration: const InputDecoration(labelText: 'Transcript (type or paste)', border: OutlineInputBorder()),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: transcriptCtrl,
+                        maxLines: 4,
+                        decoration: const InputDecoration(labelText: 'Transcript (type, paste, or dictate)', border: OutlineInputBorder()),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filledTonal(
+                      icon: Icon(listening ? Icons.stop : Icons.mic, color: listening ? Colors.red : null),
+                      tooltip: speechAvailable
+                          ? (listening ? 'Stop dictating' : 'Dictate transcript')
+                          : 'Speech recognition not available on this device',
+                      onPressed: !speechAvailable
+                          ? null
+                          : () async {
+                              if (listening) {
+                                await speech.stop();
+                                setSheetState(() => listening = false);
+                              } else {
+                                setSheetState(() => listening = true);
+                                await speech.listen(
+                                  onResult: (result) {
+                                    setSheetState(() => transcriptCtrl.text = result.recognizedWords);
+                                  },
+                                );
+                              }
+                            },
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 OutlinedButton(
