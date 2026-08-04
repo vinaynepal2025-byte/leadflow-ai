@@ -1239,6 +1239,108 @@ class ApiService {
     return data.cast<Map<String, dynamic>>();
   }
 
+
+  // ---------- Calling Cockpit ----------
+
+  Future<Map<String, dynamic>> getCockpit(String leadId) async {
+    final res = await http.get(Uri.parse('$baseUrl/cockpit/$leadId'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getNextBestAction(String leadId) async {
+    final res = await http.post(Uri.parse('$baseUrl/cockpit/$leadId/next-best-action'), headers: _headers);
+    if (res.statusCode == 502) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'AI not configured yet');
+    }
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getDraft(String leadId, {String channel = 'whatsapp'}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/cockpit/$leadId/draft'),
+      headers: _headers,
+      body: jsonEncode({'channel': channel}),
+    );
+    if (res.statusCode == 502) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'AI not configured yet');
+    }
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> confirmCockpitSend({
+    required String leadId,
+    required String channel,
+    required String draftText,
+    String? contentId,
+    String? sentBy,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/cockpit/$leadId/confirm-send'),
+      headers: _headers,
+      body: jsonEncode({
+        'channel': channel,
+        'draft_text': draftText,
+        'content_id': contentId,
+        'sent_by': sentBy ?? 'Counselor',
+      }),
+    );
+    _checkOk(res, expected: 201);
+  }
+
+  Future<List<Map<String, dynamic>>> getOffers(String leadId) async {
+    final res = await http.get(Uri.parse('$baseUrl/cockpit/offers/$leadId'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<void> createOffer({
+    required String leadId,
+    required String offerText,
+    num? amount,
+    String? givenBy,
+    String? notes,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/cockpit/offers'),
+      headers: _headers,
+      body: jsonEncode({
+        'lead_id': leadId,
+        'offer_text': offerText,
+        'amount': amount,
+        'given_by': givenBy ?? 'Counselor',
+        'notes': notes,
+      }),
+    );
+    _checkOk(res, expected: 201);
+  }
+
+  Future<void> updateOfferStatus(String offerId, String status) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/cockpit/offers/$offerId'),
+      headers: _headers,
+      body: jsonEncode({'status': status}),
+    );
+    _checkOk(res);
+  }
+
+  Future<List<Map<String, dynamic>>> getContentLibrary() async {
+    final res = await http.get(Uri.parse('$baseUrl/cockpit/content'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<List<Map<String, dynamic>>> getSendQueueToday() async {
+    final res = await http.get(Uri.parse('$baseUrl/cockpit/send-queue/today'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
   void _checkOk(http.Response res, {int expected = 200}) {
     if (res.statusCode != expected) {
       String message = 'Request failed (${res.statusCode})';

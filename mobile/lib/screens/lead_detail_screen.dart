@@ -12,6 +12,7 @@ import 'meetings_screen.dart';
 import 'journey_screen.dart';
 import 'alumni_match_screen.dart';
 import 'compliance_screen.dart';
+import 'cockpit_screen.dart';
 
 class LeadDetailScreen extends StatefulWidget {
   final String leadId;
@@ -106,6 +107,18 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
             ],
             const SizedBox(height: 20),
             _aiSection(),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                icon: const Icon(Icons.bolt),
+                label: const Text('Open Calling Cockpit'),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => CockpitScreen(leadId: lead.id)),
+                ),
+              ),
+            ),
             const SizedBox(height: 20),
             Row(
               children: [

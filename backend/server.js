@@ -110,6 +110,7 @@ app.get('/s/:code', async (req, res) => {
 app.use('/leads/import-excel', leadsImportExcelRouter);
 app.use('/leads/import', leadsImportRouter);
 app.use('/leads', leadsRouter);
+app.use('/cockpit', require('./routes/cockpit'));
 app.use('/communications', communicationsRouter);
 app.use('/whatsapp', whatsappRouter);
 app.use('/whatsapp', whatsappLinkRouter);
