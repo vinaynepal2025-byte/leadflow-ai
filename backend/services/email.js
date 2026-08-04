@@ -1,34 +1,42 @@
-// Email Center — sends real email via SMTP. Requires the consultancy's
-// own email account credentials in .env:
-//   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
-// Works with Gmail (with an App Password), Outlook, or any SMTP provider —
-// same honest pattern as WhatsApp/AI: real integration, needs your keys.
+// Email Center — sends real email via Brevo's HTTP API (not raw SMTP).
+// Render's free tier blocks all outbound SMTP ports (25, 465, 587) as of
+// Sept 2025 -- confirmed via a live ENETUNREACH/timeout test, Aug 2026.
+// Brevo's API rides over HTTPS (port 443), which is never blocked, so this
+// works on Render's free tier with zero extra cost (300 emails/day free).
+//
+// Requires in .env:
+//   BREVO_API_KEY      — from Brevo dashboard: Settings > SMTP & API > API Keys
+//   BREVO_SENDER_EMAIL — a verified sender (Settings > Senders & IP > Senders)
+//   BREVO_SENDER_NAME  — optional, defaults to "LeadFlow AI"
 
-const nodemailer = require('nodemailer');
-
-function getTransport() {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-    throw new Error('Email not configured yet. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env.');
-  }
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: parseInt(SMTP_PORT || '587'),
-    secure: SMTP_PORT === '465',
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-    // Render's outbound network can't route IPv6 -- Gmail (and some other
-    // providers) resolve to an IPv6 address by default, causing a silent
-    // ENETUNREACH. Forcing IPv4 here fixed it (confirmed live on Render,
-    // Aug 2026 -- worked fine locally in Termux, which resolves differently,
-    // so this class of bug only surfaces in production).
-    family: 4,
-  });
-}
+const BREVO_ENDPOINT = 'https://api.brevo.com/v3/smtp/email';
 
 async function sendEmail(to, subject, text) {
-  const transport = getTransport();
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
-  return transport.sendMail({ from, to, subject, text });
+  const { BREVO_API_KEY, BREVO_SENDER_EMAIL, BREVO_SENDER_NAME } = process.env;
+  if (!BREVO_API_KEY || !BREVO_SENDER_EMAIL) {
+    throw new Error('Email not configured yet. Set BREVO_API_KEY and BREVO_SENDER_EMAIL in .env.');
+  }
+
+  const res = await fetch(BREVO_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'api-key': BREVO_API_KEY,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { email: BREVO_SENDER_EMAIL, name: BREVO_SENDER_NAME || 'LeadFlow AI' },
+      to: [{ email: to }],
+      subject,
+      textContent: text,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Brevo API error (${res.status}): ${body}`);
+  }
+  return res.json();
 }
 
 module.exports = { sendEmail };
