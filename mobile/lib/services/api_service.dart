@@ -1450,6 +1450,32 @@ class ApiService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+
+  // ---------- Lead Folders (Phase 6) ----------
+
+  Future<List<Map<String, dynamic>>> getLeadFolders() async {
+    final res = await http.get(Uri.parse('$baseUrl/leads-folders'), headers: _headers);
+    _checkOk(res);
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return (data['folders'] as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<List<Map<String, dynamic>>> getLeadsInFolder(String categoryId) async {
+    final res = await http.get(Uri.parse('$baseUrl/leads-folders/$categoryId/leads'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<void> setLeadFolder(String leadId, String category) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/leads-folders/$leadId'),
+      headers: _headers,
+      body: jsonEncode({'category': category}),
+    );
+    _checkOk(res);
+  }
+
   void _checkOk(http.Response res, {int expected = 200}) {
     if (res.statusCode != expected) {
       String message = 'Request failed (${res.statusCode})';

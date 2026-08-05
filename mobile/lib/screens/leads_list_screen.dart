@@ -8,6 +8,7 @@ import 'lead_detail_screen.dart';
 import 'add_lead_screen.dart';
 import 'import_contacts_screen.dart';
 import 'excel_import_export_screen.dart';
+import 'lead_folders_screen.dart';
 
 class LeadsListScreen extends StatefulWidget {
   const LeadsListScreen({super.key});
@@ -62,6 +63,11 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
               await Navigator.push(context, MaterialPageRoute(builder: (_) => const ExcelImportExportScreen()));
               _refresh();
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.folder_special),
+            tooltip: 'Lead Folders',
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeadFoldersScreen())),
           ),
         ],
       ),
