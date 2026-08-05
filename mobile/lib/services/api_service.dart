@@ -1485,7 +1485,7 @@ class ApiService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  Future<void> markFeePaid({required String leadId, required String feeId, String? paymentMethod}) async {
+  Future<void> markFeePaidFromCockpit({required String leadId, required String feeId, String? paymentMethod}) async {
     final res = await http.post(
       Uri.parse('$baseUrl/cockpit/$leadId/mark-fee-paid'),
       headers: _headers,

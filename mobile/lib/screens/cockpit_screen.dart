@@ -340,7 +340,7 @@ class _CockpitScreenState extends State<CockpitScreen> {
                 trailing: f['status'] != 'paid'
                     ? TextButton(
                         onPressed: () async {
-                          await _api.markFeePaid(leadId: widget.leadId, feeId: f['id']);
+                          await _api.markFeePaidFromCockpit(leadId: widget.leadId, feeId: f['id']);
                           _load();
                         },
                         child: const Text('Mark Paid'),
