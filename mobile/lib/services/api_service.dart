@@ -1405,6 +1405,51 @@ class ApiService {
     }
   }
 
+
+  // ---------- Flyer Studio (Phase 5) ----------
+
+  Future<List<Map<String, dynamic>>> getFlyerTemplates() async {
+    final res = await http.get(Uri.parse('$baseUrl/flyers/templates'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> generateFlyer({required String templateId, required Map<String, dynamic> fields}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/flyers/generate'),
+      headers: _headers,
+      body: jsonEncode({'template_id': templateId, 'fields': fields}),
+    );
+    if (res.statusCode != 200) throw Exception(jsonDecode(res.body)['error'] ?? 'Flyer generation failed');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> quickGenerateFlyer({required String templateId, String? leadId}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/flyers/quick-generate'),
+      headers: _headers,
+      body: jsonEncode({'template_id': templateId, 'lead_id': leadId}),
+    );
+    if (res.statusCode != 200) throw Exception(jsonDecode(res.body)['error'] ?? 'AI flyer generation failed');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> saveFlyer({
+    required String templateId,
+    required Map<String, dynamic> fields,
+    String? leadId,
+    bool aiGenerated = false,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/flyers/save'),
+      headers: _headers,
+      body: jsonEncode({'template_id': templateId, 'fields': fields, 'lead_id': leadId, 'ai_generated': aiGenerated}),
+    );
+    if (res.statusCode != 201) throw Exception(jsonDecode(res.body)['error'] ?? 'Could not save flyer');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   void _checkOk(http.Response res, {int expected = 200}) {
     if (res.statusCode != expected) {
       String message = 'Request failed (${res.statusCode})';

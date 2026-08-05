@@ -15,6 +15,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
+import 'flyer_studio_screen.dart';
 
 class CockpitScreen extends StatefulWidget {
   final String leadId;
@@ -320,11 +321,20 @@ class _CockpitScreenState extends State<CockpitScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
-                Icon(Icons.edit_note, color: Colors.blue),
-                SizedBox(width: 8),
-                Text('Draft a message', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const Icon(Icons.edit_note, color: Colors.blue),
+                const SizedBox(width: 8),
+                const Text('Draft a message', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => FlyerStudioScreen(leadId: widget.leadId)),
+                  ),
+                  icon: const Icon(Icons.image, size: 18),
+                  label: const Text('Flyer'),
+                ),
               ],
             ),
             const SizedBox(height: 8),
