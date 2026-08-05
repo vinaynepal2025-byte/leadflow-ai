@@ -15,6 +15,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
+import '../widgets/glass_widgets.dart';
 import 'flyer_studio_screen.dart';
 
 class CockpitScreen extends StatefulWidget {
@@ -212,172 +213,165 @@ class _CockpitScreenState extends State<CockpitScreen> {
 
     return Scaffold(
       appBar: AppBar(title: Text(leadName)),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _loadError != null
-              ? Center(child: Text('Could not load: $_loadError'))
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      _buildNextBestActionCard(),
-                      const SizedBox(height: 16),
-                      _buildOffersCard(),
-                      const SizedBox(height: 16),
-                      _buildDraftCard(),
-                    ],
+      body: GlassBackdrop(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _loadError != null
+                ? Center(child: Text('Could not load: $_loadError'))
+                : RefreshIndicator(
+                    onRefresh: _load,
+                    child: ListView(
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        _buildNextBestActionCard(),
+                        const SizedBox(height: 16),
+                        _buildOffersCard(),
+                        const SizedBox(height: 16),
+                        _buildDraftCard(),
+                      ],
+                    ),
                   ),
-                ),
+      ),
     );
   }
 
   Widget _buildNextBestActionCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    return GlassContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.bolt, color: Colors.amber),
+              const SizedBox(width: 8),
+              const Text('Next Best Action', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const Spacer(),
+              if (_nbaLoading) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_nba == null && !_nbaLoading)
+            GlassButton(onPressed: _fetchNextBestAction, child: const Text('What should I do now?')),
+          if (_nbaError != null) Text(_nbaError!, style: const TextStyle(color: Colors.red)),
+          if (_nba != null) ...[
             Row(
               children: [
-                const Icon(Icons.bolt, color: Colors.amber),
+                Chip(label: Text((_nba!['recommended_channel'] ?? '').toString().toUpperCase())),
                 const SizedBox(width: 8),
-                const Text('Next Best Action', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const Spacer(),
-                if (_nbaLoading) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                Chip(
+                  label: Text((_nba!['urgency'] ?? '').toString()),
+                  backgroundColor: _nba!['urgency'] == 'today' ? Colors.red.shade100 : null,
+                ),
               ],
             ),
             const SizedBox(height: 8),
-            if (_nba == null && !_nbaLoading)
-              FilledButton.tonal(onPressed: _fetchNextBestAction, child: const Text('What should I do now?')),
-            if (_nbaError != null) Text(_nbaError!, style: const TextStyle(color: Colors.red)),
-            if (_nba != null) ...[
-              Row(
-                children: [
-                  Chip(label: Text((_nba!['recommended_channel'] ?? '').toString().toUpperCase())),
-                  const SizedBox(width: 8),
-                  Chip(
-                    label: Text((_nba!['urgency'] ?? '').toString()),
-                    backgroundColor: _nba!['urgency'] == 'today' ? Colors.red.shade100 : null,
-                  ),
-                ],
+            Text(_nba!['reasoning'] ?? ''),
+            const SizedBox(height: 8),
+            ...((_nba!['talking_points'] as List? ?? []))
+                .map((p) => Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text('• $p'),
+                    )),
+            if (_nba!['risk_flag'] != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('⚠️ ${_nba!['risk_flag']}', style: const TextStyle(color: Colors.orange)),
               ),
-              const SizedBox(height: 8),
-              Text(_nba!['reasoning'] ?? ''),
-              const SizedBox(height: 8),
-              ...((_nba!['talking_points'] as List? ?? []))
-                  .map((p) => Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text('• $p'),
-                      )),
-              if (_nba!['risk_flag'] != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text('⚠️ ${_nba!['risk_flag']}', style: const TextStyle(color: Colors.orange)),
-                ),
-              TextButton(onPressed: _fetchNextBestAction, child: const Text('Refresh')),
-            ],
+            TextButton(onPressed: _fetchNextBestAction, child: const Text('Refresh')),
           ],
-        ),
+        ],
       ),
     );
   }
 
   Widget _buildOffersCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.local_offer, color: Colors.green),
-                const SizedBox(width: 8),
-                const Text('Offers', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const Spacer(),
-                IconButton(icon: const Icon(Icons.add), onPressed: _showAddOfferDialog),
-              ],
-            ),
-            if (_offers.isEmpty) const Text('No offers logged yet', style: TextStyle(color: Colors.grey)),
-            ..._offers.map((o) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(o['offer_text'] ?? ''),
-                  subtitle: Text(
-                    '${o['amount'] != null ? '₹${o['amount']} · ' : ''}${o['status']}',
-                  ),
-                )),
-          ],
-        ),
+    return GlassContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.local_offer, color: Colors.green),
+              const SizedBox(width: 8),
+              const Text('Offers', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const Spacer(),
+              IconButton(icon: const Icon(Icons.add), onPressed: _showAddOfferDialog),
+            ],
+          ),
+          if (_offers.isEmpty) const Text('No offers logged yet', style: TextStyle(color: Colors.grey)),
+          ..._offers.map((o) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(o['offer_text'] ?? ''),
+                subtitle: Text(
+                  '${o['amount'] != null ? '₹${o['amount']} · ' : ''}${o['status']}',
+                ),
+              )),
+        ],
       ),
     );
   }
 
   Widget _buildDraftCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.edit_note, color: Colors.blue),
-                const SizedBox(width: 8),
-                const Text('Draft a message', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => FlyerStudioScreen(leadId: widget.leadId)),
-                  ),
-                  icon: const Icon(Icons.image, size: 18),
-                  label: const Text('Flyer'),
+    return GlassContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.edit_note, color: Colors.blue),
+              const SizedBox(width: 8),
+              const Text('Draft a message', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => FlyerStudioScreen(leadId: widget.leadId)),
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            if (_draft == null && !_draftLoading)
-              FilledButton.tonal(onPressed: _fetchDraft, child: const Text('Draft a personalized WhatsApp message')),
-            if (_draftLoading) const Center(child: CircularProgressIndicator()),
-            if (_draftError != null) Text(_draftError!, style: const TextStyle(color: Colors.red)),
-            if (_draft != null) ...[
-              TextField(
-                controller: _draftController,
-                maxLines: 5,
-                decoration: const InputDecoration(border: OutlineInputBorder(), hintText: 'Edit before sending if needed'),
-              ),
-              const SizedBox(height: 4),
-              Text(_draft!['reasoning'] ?? '', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-              const SizedBox(height: 12),
-              if (_whatsappApiConfigured)
-                SwitchListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  value: _sendViaApi,
-                  title: const Text('Send instantly via WhatsApp API', style: TextStyle(fontSize: 13)),
-                  subtitle: const Text('Off = free tap-to-send in the WhatsApp app', style: TextStyle(fontSize: 11)),
-                  onChanged: (v) => setState(() => _sendViaApi = v),
-                ),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: _sending ? null : _openWhatsAppAndLog,
-                      icon: Icon(_sendViaApi && _whatsappApiConfigured ? Icons.bolt : Icons.send),
-                      label: Text(_sending
-                          ? 'Sending...'
-                          : (_sendViaApi && _whatsappApiConfigured ? 'Send Now (API)' : 'Open WhatsApp & Send')),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  TextButton(onPressed: _fetchDraft, child: const Text('Redraft')),
-                ],
+                icon: const Icon(Icons.image, size: 18),
+                label: const Text('Flyer'),
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          if (_draft == null && !_draftLoading)
+            GlassButton(onPressed: _fetchDraft, child: const Text('Draft a personalized WhatsApp message')),
+          if (_draftLoading) const Center(child: CircularProgressIndicator()),
+          if (_draftError != null) Text(_draftError!, style: const TextStyle(color: Colors.red)),
+          if (_draft != null) ...[
+            TextField(
+              controller: _draftController,
+              maxLines: 5,
+              decoration: const InputDecoration(border: OutlineInputBorder(), hintText: 'Edit before sending if needed'),
+            ),
+            const SizedBox(height: 4),
+            Text(_draft!['reasoning'] ?? '', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 12),
+            if (_whatsappApiConfigured)
+              SwitchListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: _sendViaApi,
+                title: const Text('Send instantly via WhatsApp API', style: TextStyle(fontSize: 13)),
+                subtitle: const Text('Off = free tap-to-send in the WhatsApp app', style: TextStyle(fontSize: 11)),
+                onChanged: (v) => setState(() => _sendViaApi = v),
+              ),
+            Row(
+              children: [
+                Expanded(
+                  child: GlassButton(
+                    onPressed: _sending ? null : _openWhatsAppAndLog,
+                    icon: _sendViaApi && _whatsappApiConfigured ? Icons.bolt : Icons.send,
+                    child: Text(_sending
+                        ? 'Sending...'
+                        : (_sendViaApi && _whatsappApiConfigured ? 'Send Now (API)' : 'Open WhatsApp & Send')),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton(onPressed: _fetchDraft, child: const Text('Redraft')),
+              ],
+            ),
           ],
-        ),
+        ],
       ),
     );
   }

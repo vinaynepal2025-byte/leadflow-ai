@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
+import '../widgets/glass_widgets.dart';
 
 const List<String> _standardTargets = [
   'full_name', 'phone', 'email', 'source', 'notes', 'stage', 'parent_name', 'parent_phone',
@@ -46,9 +47,11 @@ class _ExcelImportExportScreenState extends State<ExcelImportExportScreen> with 
         title: const Text('Import / Export Leads'),
         bottom: TabBar(controller: _tab, tabs: const [Tab(text: 'Import'), Tab(text: 'Export')]),
       ),
-      body: TabBarView(
-        controller: _tab,
-        children: [_ImportTab(api: _api), _ExportTab(api: _api)],
+      body: GlassBackdrop(
+        child: TabBarView(
+          controller: _tab,
+          children: [_ImportTab(api: _api), _ExportTab(api: _api)],
+        ),
       ),
     );
   }
@@ -153,24 +156,21 @@ class _ImportTabState extends State<_ImportTab> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text(
-                  'Works with any column layout — pick your file, then tell us which column is which.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: _loading ? null : _pickAndPreview,
-                  icon: const Icon(Icons.upload_file),
-                  label: Text(_fileName ?? 'Choose .xlsx or .csv file'),
-                ),
-              ],
-            ),
+        GlassContainer(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Works with any column layout — pick your file, then tell us which column is which.',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 12),
+              GlassButton(
+                onPressed: _loading ? null : _pickAndPreview,
+                icon: Icons.upload_file,
+                child: Text(_fileName ?? 'Choose .xlsx or .csv file'),
+              ),
+            ],
           ),
         ),
         if (_loading) const Padding(padding: EdgeInsets.only(top: 24), child: Center(child: CircularProgressIndicator())),
@@ -181,15 +181,12 @@ class _ImportTabState extends State<_ImportTab> {
           const SizedBox(height: 8),
           ...(_preview!['headers'] as List).cast<String>().map(_mappingRow),
           const SizedBox(height: 16),
-          FilledButton(onPressed: _loading ? null : _commit, child: const Text('Import Leads')),
+          GlassButton(onPressed: _loading ? null : _commit, child: const Text('Import Leads')),
         ],
         if (_result != null) ...[
           const SizedBox(height: 20),
-          Card(
-            color: Colors.green.withValues(alpha: 0.08),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
+          GlassContainer(
+            child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('${_result!['created']} leads created', style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -197,7 +194,6 @@ class _ImportTabState extends State<_ImportTab> {
                   Text('${_result!['skipped_invalid']} skipped (missing name)'),
                 ],
               ),
-            ),
           ),
         ],
       ],
@@ -336,10 +332,10 @@ class _ExportTabState extends State<_ExportTab> {
           );
         }),
         const SizedBox(height: 16),
-        FilledButton.icon(
+        GlassButton(
           onPressed: _selected.isEmpty ? null : _export,
-          icon: const Icon(Icons.download),
-          label: const Text('Export as CSV'),
+          icon: Icons.download,
+          child: const Text('Export as CSV'),
         ),
       ],
     );
