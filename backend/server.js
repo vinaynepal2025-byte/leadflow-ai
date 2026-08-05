@@ -114,6 +114,7 @@ app.use('/cockpit', require('./routes/cockpit'));
 app.use('/leads-excel', require('./routes/leadsExcelV2'));
 app.use('/flyers', require('./routes/flyers'));
 app.use('/leads-folders', require('./routes/leadFolders'));
+app.use('/lead-ads', require('./routes/leadAdsWebhook'));
 app.use('/communications', communicationsRouter);
 app.use('/whatsapp', whatsappRouter);
 app.use('/whatsapp', whatsappLinkRouter);
