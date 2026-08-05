@@ -12,6 +12,7 @@ const { randomUUID } = require('crypto');
 const db = require('../db');
 const { generateJson } = require('../services/aiProvider');
 const { computeEngagementTrend } = require('../services/engagementTrend');
+const { fireEvent } = require('../services/automationEngine');
 
 const router = express.Router();
 
@@ -124,6 +125,10 @@ router.post('/offers', async (req, res) => {
     INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body, created_by)
     VALUES (?, ?, ?, 'note', 'outbound', ?, ?)
   `).run(randomUUID(), tid, lead_id, `Offer given: ${offer_text}${amount ? ` (₹${amount})` : ''}`, given_by || null);
+
+  fireEvent('offer.given', { tenant_id: tid, lead_id, offer_text, amount }).catch((err) =>
+    console.error('offer.given automation failed (offer itself was still saved):', err.message)
+  );
 
   res.status(201).json(await db.prepare('SELECT * FROM offers WHERE id = ?').get(id));
 });

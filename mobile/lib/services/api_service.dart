@@ -1380,6 +1380,31 @@ class ApiService {
     return '$baseUrl/leads-excel/export?tenant_id=$tenantId&columns=$cols';
   }
 
+
+  // ---------- WhatsApp API (paid, Phase 4 — only usable once Vinay has Meta credentials) ----------
+
+  Future<bool> checkWhatsAppApiConfigured() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/whatsapp/status'), headers: _headers);
+      if (res.statusCode != 200) return false;
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      return data['configured'] == true;
+    } catch (_) {
+      return false; // network hiccup — fail closed, never show a paid option that might not work
+    }
+  }
+
+  Future<void> sendViaWhatsAppApi({required String leadId, required String message, String? createdBy}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/whatsapp/send'),
+      headers: _headers,
+      body: jsonEncode({'lead_id': leadId, 'message': message, 'created_by': createdBy ?? 'Counselor'}),
+    );
+    if (res.statusCode != 201) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'WhatsApp API send failed');
+    }
+  }
+
   void _checkOk(http.Response res, {int expected = 200}) {
     if (res.statusCode != expected) {
       String message = 'Request failed (${res.statusCode})';

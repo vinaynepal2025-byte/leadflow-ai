@@ -41,11 +41,16 @@ class _CockpitScreenState extends State<CockpitScreen> {
   String? _draftError;
   final TextEditingController _draftController = TextEditingController();
   bool _sending = false;
+  bool _whatsappApiConfigured = false;
+  bool _sendViaApi = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _api.checkWhatsAppApiConfigured().then((configured) {
+      if (mounted) setState(() => _whatsappApiConfigured = configured);
+    });
   }
 
   @override
@@ -122,14 +127,21 @@ class _CockpitScreenState extends State<CockpitScreen> {
     if (text.isEmpty) return;
     setState(() => _sending = true);
     try {
-      final link = await _api.getWhatsAppChatLink(widget.leadId, text);
-      await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
-      await _api.confirmCockpitSend(
-        leadId: widget.leadId,
-        channel: 'whatsapp',
-        draftText: text,
-        contentId: _draft?['attach_content_id'],
-      );
+      if (_sendViaApi && _whatsappApiConfigured) {
+        // Paid path: sends instantly via Meta Cloud API, no manual tap
+        // needed. whatsapp.js already logs this to Communication Hub
+        // itself, so no separate confirm-send call here.
+        await _api.sendViaWhatsAppApi(leadId: widget.leadId, message: text);
+      } else {
+        final link = await _api.getWhatsAppChatLink(widget.leadId, text);
+        await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
+        await _api.confirmCockpitSend(
+          leadId: widget.leadId,
+          channel: 'whatsapp',
+          draftText: text,
+          contentId: _draft?['attach_content_id'],
+        );
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Logged — go ahead and tap Send inside WhatsApp')),
@@ -329,13 +341,24 @@ class _CockpitScreenState extends State<CockpitScreen> {
               const SizedBox(height: 4),
               Text(_draft!['reasoning'] ?? '', style: const TextStyle(fontSize: 12, color: Colors.grey)),
               const SizedBox(height: 12),
+              if (_whatsappApiConfigured)
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  value: _sendViaApi,
+                  title: const Text('Send instantly via WhatsApp API', style: TextStyle(fontSize: 13)),
+                  subtitle: const Text('Off = free tap-to-send in the WhatsApp app', style: TextStyle(fontSize: 11)),
+                  onChanged: (v) => setState(() => _sendViaApi = v),
+                ),
               Row(
                 children: [
                   Expanded(
                     child: FilledButton.icon(
                       onPressed: _sending ? null : _openWhatsAppAndLog,
-                      icon: const Icon(Icons.send),
-                      label: Text(_sending ? 'Opening...' : 'Open WhatsApp & Send'),
+                      icon: Icon(_sendViaApi && _whatsappApiConfigured ? Icons.bolt : Icons.send),
+                      label: Text(_sending
+                          ? 'Sending...'
+                          : (_sendViaApi && _whatsappApiConfigured ? 'Send Now (API)' : 'Open WhatsApp & Send')),
                     ),
                   ),
                   const SizedBox(width: 8),

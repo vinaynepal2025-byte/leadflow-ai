@@ -40,4 +40,15 @@ router.post('/send', async (req, res) => {
   res.status(201).json({ sent: true, logged });
 });
 
+
+// GET /whatsapp/status — lets the mobile app know whether the paid Meta
+// Cloud API path is configured, so it can show/hide the "Send via
+// WhatsApp API" option accordingly. Never assume configured — check the
+// actual env vars every time (cheap, avoids a stale cached answer if
+// Vinay adds credentials while the app is open).
+router.get('/status', (req, res) => {
+  const configured = Boolean(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
+  res.json({ configured });
+});
+
 module.exports = router;
