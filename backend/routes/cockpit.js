@@ -310,6 +310,57 @@ router.get('/:leadId/engagement-trend', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------
+// GET /cockpit/:leadId/finance-summary — fees + documents for one lead,
+// read from the existing fee_payments/documents tables (owned by
+// fees.js/documents.js/payments.js — this reads them, doesn't touch
+// those route files).
+// ---------------------------------------------------------------------
+router.get('/:leadId/finance-summary', async (req, res) => {
+  const tid = tenantId(req);
+  const { leadId } = req.params;
+
+  const lead = await db.prepare('SELECT id FROM leads WHERE tenant_id = ? AND id = ?').get(tid, leadId);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+  const fees = await db.prepare('SELECT * FROM fee_payments WHERE tenant_id = ? AND lead_id = ? ORDER BY due_date ASC').all(tid, leadId);
+  const documents = await db.prepare('SELECT * FROM documents WHERE tenant_id = ? AND lead_id = ? ORDER BY created_at DESC').all(tid, leadId);
+
+  res.json({ fees, documents });
+});
+
+// ---------------------------------------------------------------------
+// POST /cockpit/:leadId/mark-fee-paid  { fee_id, payment_method? }
+// Marks a fee_payments row paid, logs it to Communication Hub (same
+// pattern as offers), and fires the fee.paid automation trigger so a
+// receipt/thank-you follow-up can be automated via the existing
+// Automation Hub rule screen — no new UI needed for that part.
+// ---------------------------------------------------------------------
+router.post('/:leadId/mark-fee-paid', async (req, res) => {
+  const tid = tenantId(req);
+  const { leadId } = req.params;
+  const { fee_id, payment_method } = req.body;
+  if (!fee_id) return res.status(400).json({ error: 'fee_id is required' });
+
+  const fee = await db.prepare('SELECT * FROM fee_payments WHERE tenant_id = ? AND id = ? AND lead_id = ?').get(tid, fee_id, leadId);
+  if (!fee) return res.status(404).json({ error: 'Fee record not found for this lead' });
+
+  await db.prepare(
+    "UPDATE fee_payments SET status = 'paid', paid_date = now(), payment_method = ? WHERE tenant_id = ? AND id = ?"
+  ).run(payment_method || 'manual', tid, fee_id);
+
+  await db.prepare(`
+    INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body, created_by)
+    VALUES (?, ?, ?, 'note', 'outbound', ?, ?)
+  `).run(randomUUID(), tid, leadId, `Fee paid: ${fee.fee_type} — ₹${fee.amount}`, payment_method || 'manual');
+
+  fireEvent('fee.paid', { tenant_id: tid, lead_id: leadId, fee_type: fee.fee_type, amount: fee.amount }).catch((err) =>
+    console.error('fee.paid automation failed (payment itself was still saved):', err.message)
+  );
+
+  res.json(await db.prepare('SELECT * FROM fee_payments WHERE id = ?').get(fee_id));
+});
+
+// ---------------------------------------------------------------------
 // GET /cockpit/:leadId — full cockpit view for one lead: profile, history,
 // offers, and AI Next Best Action in a single call (mobile-screen friendly —
 // one request, not five).

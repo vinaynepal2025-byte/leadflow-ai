@@ -45,6 +45,7 @@ class _CockpitScreenState extends State<CockpitScreen> {
   bool _sending = false;
   bool _whatsappApiConfigured = false;
   bool _sendViaApi = false;
+  Map<String, dynamic>? _finance; // fees + documents for this lead
 
   @override
   void initState() {
@@ -68,9 +69,11 @@ class _CockpitScreenState extends State<CockpitScreen> {
     });
     try {
       final cockpit = await _api.getCockpit(widget.leadId);
+      final finance = await _api.getFinanceSummary(widget.leadId);
       setState(() {
         _cockpit = cockpit;
         _offers = (cockpit['offers'] as List).cast<Map<String, dynamic>>();
+        _finance = finance;
         _loading = false;
       });
     } catch (e) {
@@ -227,6 +230,8 @@ class _CockpitScreenState extends State<CockpitScreen> {
                         const SizedBox(height: 16),
                         _buildOffersCard(),
                         const SizedBox(height: 16),
+                        _buildFinanceCard(),
+                        const SizedBox(height: 16),
                         _buildDraftCard(),
                       ],
                     ),
@@ -306,6 +311,57 @@ class _CockpitScreenState extends State<CockpitScreen> {
                   '${o['amount'] != null ? '₹${o['amount']} · ' : ''}${o['status']}',
                 ),
               )),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFinanceCard() {
+    final fees = (_finance?['fees'] as List? ?? []);
+    final documents = (_finance?['documents'] as List? ?? []);
+    if (fees.isEmpty && documents.isEmpty) return const SizedBox.shrink();
+
+    return GlassContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.receipt_long, color: Colors.teal),
+              SizedBox(width: 8),
+              Text('Fees & Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...fees.map((f) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('${f['fee_type']} — ₹${f['amount']}'),
+                subtitle: Text('Due ${f['due_date'] ?? 'n/a'} · ${f['status']}'),
+                trailing: f['status'] != 'paid'
+                    ? TextButton(
+                        onPressed: () async {
+                          await _api.markFeePaid(leadId: widget.leadId, feeId: f['id']);
+                          _load();
+                        },
+                        child: const Text('Mark Paid'),
+                      )
+                    : const Icon(Icons.check_circle, color: Colors.green, size: 20),
+              )),
+          if (documents.isNotEmpty) ...[
+            const Divider(),
+            ...documents.map((d) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(d['doc_type'] ?? ''),
+                  trailing: Chip(
+                    label: Text(d['status'] ?? ''),
+                    backgroundColor: d['status'] == 'verified'
+                        ? Colors.green.shade100
+                        : d['status'] == 'rejected'
+                            ? Colors.red.shade100
+                            : null,
+                  ),
+                )),
+          ],
         ],
       ),
     );

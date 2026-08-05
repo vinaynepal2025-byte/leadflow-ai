@@ -1476,6 +1476,24 @@ class ApiService {
     _checkOk(res);
   }
 
+
+  // ---------- Fees & Documents (Cockpit integration) ----------
+
+  Future<Map<String, dynamic>> getFinanceSummary(String leadId) async {
+    final res = await http.get(Uri.parse('$baseUrl/cockpit/$leadId/finance-summary'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> markFeePaid({required String leadId, required String feeId, String? paymentMethod}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/cockpit/$leadId/mark-fee-paid'),
+      headers: _headers,
+      body: jsonEncode({'fee_id': feeId, 'payment_method': paymentMethod}),
+    );
+    _checkOk(res);
+  }
+
   void _checkOk(http.Response res, {int expected = 200}) {
     if (res.statusCode != expected) {
       String message = 'Request failed (${res.statusCode})';

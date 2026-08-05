@@ -8,7 +8,7 @@ function tenantId(req) {
   return req.header('x-tenant-id') || 'demo-consultancy';
 }
 
-const VALID_TRIGGERS = ['lead.created', 'lead.stage_changed', 'document.rejected', 'offer.given'];
+const VALID_TRIGGERS = ['lead.created', 'lead.stage_changed', 'document.rejected', 'offer.given', 'fee.paid'];
 const VALID_ACTIONS = ['create_reminder', 'create_notification'];
 
 // GET /automations
