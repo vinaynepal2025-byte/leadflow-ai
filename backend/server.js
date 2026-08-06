@@ -1,4 +1,5 @@
 require('dotenv').config({ quiet: true });
+require('./services/fontSetup');
 const express = require('express');
 const cors = require('cors');
 const leadsRouter = require('./routes/leads');

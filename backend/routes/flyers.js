@@ -20,6 +20,7 @@ const express = require('express');
 const { randomUUID } = require('crypto');
 const db = require('../db');
 const { listTemplates, renderTemplate } = require('../services/flyerTemplates');
+const { AVAILABLE_FONTS } = require('../services/fontSetup');
 const { generateJson } = require('../services/aiProvider');
 
 const router = express.Router();
@@ -49,8 +50,17 @@ function tenantId(req) {
 
 // GET /flyers/templates
 router.get('/templates', (req, res) => {
-  res.json(listTemplates());
+  res.json({ templates: listTemplates(), available_fonts: AVAILABLE_FONTS });
 });
+
+// Validates a requested font against what's actually installed on the
+// server — silently falling back would let a typo produce a subtly wrong
+// flyer with no explanation, so this rejects clearly instead.
+function validateFont(fields) {
+  if (fields.font_family && !AVAILABLE_FONTS.includes(fields.font_family)) {
+    throw new Error(`Unknown font_family "${fields.font_family}". Available: ${AVAILABLE_FONTS.join(', ')}`);
+  }
+}
 
 // POST /flyers/generate  { template_id, fields }
 // Renders immediately, returns a base64 PNG data URI for instant preview
@@ -60,6 +70,7 @@ router.post('/generate', async (req, res) => {
   if (!template_id || !fields) return res.status(400).json({ error: 'template_id and fields are required' });
 
   try {
+    validateFont(fields);
     const svg = renderTemplate(template_id, fields);
     const png = await getSharp()(Buffer.from(svg)).png().toBuffer();
     res.json({ image_data_uri: `data:image/png;base64,${png.toString('base64')}`, fields });
@@ -108,6 +119,7 @@ shape for an offer_announcement template:
       theme_color: tenant?.theme_color || '#1B2A4A',
       ...aiFields,
     };
+    validateFont(fields);
     const svg = renderTemplate(template_id, fields);
     const png = await getSharp()(Buffer.from(svg)).png().toBuffer();
     res.json({ image_data_uri: `data:image/png;base64,${png.toString('base64')}`, fields, ai_generated: true });
@@ -124,6 +136,7 @@ router.post('/save', async (req, res) => {
   if (!template_id || !fields) return res.status(400).json({ error: 'template_id and fields are required' });
 
   try {
+    validateFont(fields);
     const svg = renderTemplate(template_id, fields);
     const png = await getSharp()(Buffer.from(svg)).png().toBuffer();
     const id = randomUUID();

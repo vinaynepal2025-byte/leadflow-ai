@@ -11,7 +11,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
-import '../widgets/glass_widgets.dart';
 
 class FlyerStudioScreen extends StatefulWidget {
   final String? leadId; // optional — enables AI grounding + "Save to this lead"
@@ -167,8 +166,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Flyer Studio')),
-      body: GlassBackdrop(
-        child: _loadingTemplates
+      body: _loadingTemplates
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(16),
@@ -187,10 +185,10 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: GlassButton(
+                      child: FilledButton.icon(
                         onPressed: _generating ? null : _quickGenerate,
-                        icon: Icons.bolt,
-                        child: Text(widget.leadId != null ? 'Quick Generate (AI, this lead)' : 'Quick Generate (AI)'),
+                        icon: const Icon(Icons.bolt),
+                        label: Text(widget.leadId != null ? 'Quick Generate (AI, this lead)' : 'Quick Generate (AI)'),
                       ),
                     ),
                   ],
@@ -226,35 +224,38 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  GlassButton(
+                  FilledButton.icon(
                     onPressed: _saving ? null : _save,
-                    icon: Icons.save,
-                    child: Text(_saving ? 'Saving...' : 'Save Flyer'),
+                    icon: const Icon(Icons.save),
+                    label: Text(_saving ? 'Saving...' : 'Save Flyer'),
                   ),
                 ],
 
                 if (_savedImageUrl != null) ...[
                   const SizedBox(height: 16),
-                  GlassContainer(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Saved! Shareable link:', style: TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 4),
-                        SelectableText(_savedImageUrl!, style: const TextStyle(fontSize: 12)),
-                        const SizedBox(height: 12),
-                        OutlinedButton.icon(
-                          onPressed: _openInCanva,
-                          icon: const Icon(Icons.brush),
-                          label: const Text('Open Canva to Polish (manual upload)'),
-                        ),
-                      ],
+                  Card(
+                    color: Colors.green.withValues(alpha: 0.08),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Saved! Shareable link:', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 4),
+                          SelectableText(_savedImageUrl!, style: const TextStyle(fontSize: 12)),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: _openInCanva,
+                            icon: const Icon(Icons.brush),
+                            label: const Text('Open Canva to Polish (manual upload)'),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
               ],
             ),
-      ),
     );
   }
 }

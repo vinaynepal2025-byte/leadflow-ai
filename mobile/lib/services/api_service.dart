@@ -1408,11 +1408,10 @@ class ApiService {
 
   // ---------- Flyer Studio (Phase 5) ----------
 
-  Future<List<Map<String, dynamic>>> getFlyerTemplates() async {
+  Future<Map<String, dynamic>> getFlyerTemplates() async {
     final res = await http.get(Uri.parse('$baseUrl/flyers/templates'), headers: _headers);
     _checkOk(res);
-    final List data = jsonDecode(res.body);
-    return data.cast<Map<String, dynamic>>();
+    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> generateFlyer({required String templateId, required Map<String, dynamic> fields}) async {
