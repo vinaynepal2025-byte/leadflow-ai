@@ -43,6 +43,28 @@ jobs:
         run: |
           sed -i 's#<manifest xmlns:android="http://schemas.android.com/apk/res/android">#<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />#' android/app/src/main/AndroidManifest.xml
 
+      - name: Bump minSdkVersion to 23 (required by record_android for mic recording)
+        run: |
+          python3 - <<'PYEOF4'
+          import re
+          path = 'android/app/build.gradle'
+          with open(path) as f:
+              content = f.read()
+          # Handles both the flutter.minSdkVersion reference and a literal
+          # integer, whichever the generated file actually contains.
+          new_content, count = re.subn(
+              r'minSdkVersion\s+\S+',
+              'minSdkVersion 23',
+              content,
+              count=1,
+          )
+          if count == 0:
+              raise SystemExit('minSdkVersion line not found in build.gradle — CI step needs manual review')
+          with open(path, 'w') as f:
+              f.write(new_content)
+          print('minSdkVersion bumped to 23')
+          PYEOF4
+
       - name: Add package-visibility queries (UPI payment apps)
         # Android 11+ (API 30+) hides other installed apps from your app
         # unless you explicitly declare what you need to see. Without this,
