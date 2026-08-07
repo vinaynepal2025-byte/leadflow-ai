@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:async';
 import '../services/api_service.dart';
 
 class CallsVoiceNotesScreen extends StatelessWidget {
@@ -200,6 +204,184 @@ class _VoiceNotesTabState extends State<_VoiceNotesTab> {
     _refresh();
   }
 
+  Future<void> _showAddOptions() async {
+    await showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.mic),
+              title: const Text('Record a voice note'),
+              onTap: () {
+                Navigator.pop(context);
+                _showRecordSheet();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.upload_file),
+              title: const Text('Upload an audio file'),
+              onTap: () {
+                Navigator.pop(context);
+                _upload();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Real microphone recording, with playback preview BEFORE it's attached
+  // — the counselor can listen back and re-record if it's not right,
+  // rather than the note being finalized the moment recording stops.
+  Future<void> _showRecordSheet() async {
+    final recorder = AudioRecorder();
+    final player = AudioPlayer();
+    bool recording = false;
+    bool hasRecording = false;
+    bool playing = false;
+    bool uploading = false;
+    int elapsedSeconds = 0;
+    String? recordedPath;
+    Timer? ticker;
+
+    Future<void> startRecording(void Function(void Function()) setSheetState) async {
+      if (!await recorder.hasPermission()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Microphone permission is needed to record a voice note')),
+          );
+        }
+        return;
+      }
+      final tempDir = await getTemporaryDirectory();
+      final path = '${tempDir.path}/voicenote_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await recorder.start(const RecordConfig(), path: path);
+      recordedPath = path;
+      elapsedSeconds = 0;
+      ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        elapsedSeconds++;
+        setSheetState(() {});
+      });
+      setSheetState(() {
+        recording = true;
+        hasRecording = false;
+      });
+    }
+
+    Future<void> stopRecording(void Function(void Function()) setSheetState) async {
+      await recorder.stop();
+      ticker?.cancel();
+      setSheetState(() {
+        recording = false;
+        hasRecording = true;
+      });
+    }
+
+    await showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                recording ? 'Recording... ${elapsedSeconds}s' : (hasRecording ? 'Preview before saving' : 'Voice Note'),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 20),
+              if (!recording && !hasRecording)
+                IconButton.filled(
+                  iconSize: 48,
+                  icon: const Icon(Icons.mic),
+                  onPressed: () => startRecording(setSheetState),
+                ),
+              if (recording)
+                IconButton.filled(
+                  iconSize: 48,
+                  icon: const Icon(Icons.stop),
+                  style: IconButton.styleFrom(backgroundColor: Colors.red),
+                  onPressed: () => stopRecording(setSheetState),
+                ),
+              if (hasRecording && recordedPath != null) ...[
+                IconButton.filled(
+                  iconSize: 40,
+                  icon: Icon(playing ? Icons.pause : Icons.play_arrow),
+                  onPressed: () async {
+                    if (playing) {
+                      await player.pause();
+                      setSheetState(() => playing = false);
+                    } else {
+                      await player.play(DeviceFileSource(recordedPath!));
+                      setSheetState(() => playing = true);
+                      player.onPlayerComplete.listen((_) {
+                        if (context.mounted) setSheetState(() => playing = false);
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Re-record'),
+                      onPressed: () {
+                        setSheetState(() {
+                          hasRecording = false;
+                          recordedPath = null;
+                        });
+                      },
+                    ),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.check),
+                      label: Text(uploading ? 'Saving...' : 'Use this recording'),
+                      onPressed: uploading
+                          ? null
+                          : () async {
+                              setSheetState(() => uploading = true);
+                              try {
+                                await _api.uploadVoiceNote(
+                                  leadId: widget.leadId,
+                                  filePath: recordedPath!,
+                                  fileName: 'voice_note_${DateTime.now().millisecondsSinceEpoch}.m4a',
+                                  recordedBy: 'Counselor',
+                                );
+                                if (context.mounted) Navigator.pop(context);
+                                _refresh();
+                              } catch (e) {
+                                setSheetState(() => uploading = false);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+                                }
+                              }
+                            },
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () {
+                  ticker?.cancel();
+                  recorder.dispose();
+                  player.dispose();
+                  Navigator.pop(context);
+                },
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openNote(Map<String, dynamic> note) async {
     final transcriptCtrl = TextEditingController(text: note['transcript'] ?? '');
     String? summary = note['ai_summary'];
@@ -331,7 +513,7 @@ class _VoiceNotesTabState extends State<_VoiceNotesTab> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(onPressed: _upload, child: const Icon(Icons.upload_file)),
+      floatingActionButton: FloatingActionButton(onPressed: _showAddOptions, child: const Icon(Icons.add)),
     );
   }
 }
