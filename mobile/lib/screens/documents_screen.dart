@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 
 class DocumentsScreen extends StatefulWidget {
@@ -108,9 +109,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   backgroundColor: _statusColor(d['status']).withValues(alpha: 0.12),
                   labelStyle: TextStyle(color: _statusColor(d['status'])),
                 ),
-                onTap: d['status'] == 'pending'
-                    ? () => _showVerifyOptions(d['id'])
-                    : null,
+                onTap: () => _showDocumentOptions(d),
               );
             },
           );
@@ -126,30 +125,42 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     );
   }
 
-  void _showVerifyOptions(String docId) {
-    showModalBottomSheet(
+  Future<void> _showDocumentOptions(Map<String, dynamic> d) async {
+    await showModalBottomSheet(
       context: context,
       builder: (context) => SafeArea(
         child: Wrap(
           children: [
             ListTile(
-              leading: const Icon(Icons.check_circle, color: Colors.green),
-              title: const Text('Verify'),
+              leading: const Icon(Icons.open_in_new),
+              title: const Text('View / Download'),
+              subtitle: Text(d['file_name']),
               onTap: () async {
                 Navigator.pop(context);
-                await _api.setDocumentStatus(docId, 'verified');
-                _refresh();
+                final url = _api.getDocumentDownloadUrl(d['id']);
+                await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.cancel, color: Colors.red),
-              title: const Text('Reject'),
-              onTap: () async {
-                Navigator.pop(context);
-                await _api.setDocumentStatus(docId, 'rejected');
-                _refresh();
-              },
-            ),
+            if (d['status'] == 'pending') ...[
+              ListTile(
+                leading: const Icon(Icons.check_circle, color: Colors.green),
+                title: const Text('Verify'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _api.setDocumentStatus(d['id'], 'verified');
+                  _refresh();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.cancel, color: Colors.red),
+                title: const Text('Reject'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _api.setDocumentStatus(d['id'], 'rejected');
+                  _refresh();
+                },
+              ),
+            ],
           ],
         ),
       ),

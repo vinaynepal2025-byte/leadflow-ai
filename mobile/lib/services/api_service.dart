@@ -280,6 +280,8 @@ class ApiService {
     }
   }
 
+  String getDocumentDownloadUrl(String docId) => '$baseUrl/documents/$docId/download';
+
   Future<void> setDocumentStatus(String docId, String status) async {
     final res = await http.patch(
       Uri.parse('$baseUrl/documents/$docId'),
