@@ -50,19 +50,28 @@ jobs:
           path = 'android/app/build.gradle'
           with open(path) as f:
               content = f.read()
-          # Handles both the flutter.minSdkVersion reference and a literal
-          # integer, whichever the generated file actually contains.
+
           new_content, count = re.subn(
-              r'minSdkVersion\s+\S+',
-              'minSdkVersion 23',
+              r'^(\s*minSdk\s*=\s*)[^\n]*',
+              r'\g<1>23',
               content,
               count=1,
+              flags=re.MULTILINE,
           )
           if count == 0:
-              raise SystemExit('minSdkVersion line not found in build.gradle — CI step needs manual review')
+              new_content, count = re.subn(
+                  r'^(\s*minSdkVersion\s+)[^\n]*',
+                  r'\g<1>23',
+                  content,
+                  count=1,
+                  flags=re.MULTILINE,
+              )
+          if count == 0:
+              raise SystemExit('minSdk line not found in either known format')
+
           with open(path, 'w') as f:
               f.write(new_content)
-          print('minSdkVersion bumped to 23')
+          print('minSdk bumped to 23, replacements made:', count)
           PYEOF4
 
       - name: Add package-visibility queries (UPI payment apps)
