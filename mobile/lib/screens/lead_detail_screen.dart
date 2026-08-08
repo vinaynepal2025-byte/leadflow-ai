@@ -370,7 +370,7 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: DropdownButtonFormField<String>(
-          initialValue: options.contains(currentValue) ? currentValue as String : null,
+          value: options.contains(currentValue) ? currentValue as String : null,
           decoration: InputDecoration(labelText: def['label'], isDense: true, border: const OutlineInputBorder()),
           items: options.map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
           onChanged: (v) async {

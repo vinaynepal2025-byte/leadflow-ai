@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
-import 'color_picker_dialog.dart';
+import '../widgets/color_picker_dialog.dart';
 
 // Curated icon set for icon_override. Storing IconData directly isn't
 // reliably serializable, so we store a string KEY in the DB and look up
@@ -241,9 +241,8 @@ class _SectionEditorSheetState extends State<_SectionEditorSheet> {
   }
 
   String _colorToHex(Color c) {
-    return '#${((c.r * 255.0).round() & 0xff).toRadixString(16).padLeft(2, '0')}'
-        '${((c.g * 255.0).round() & 0xff).toRadixString(16).padLeft(2, '0')}'
-        '${((c.b * 255.0).round() & 0xff).toRadixString(16).padLeft(2, '0')}';
+    final v = c.value & 0xFFFFFF;
+    return '#${v.toRadixString(16).padLeft(6, '0')}';
   }
 
   Future<void> _pickColor() async {

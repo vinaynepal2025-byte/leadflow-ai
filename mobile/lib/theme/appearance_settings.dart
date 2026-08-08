@@ -214,9 +214,9 @@ class AppearanceSettings extends ChangeNotifier {
   String _encodePreset(ThemePreset p) {
     return [
       p.name, p.tagline,
-      p.primary.toARGB32().toString(), p.accent.toARGB32().toString(),
+      p.primary.value.toString(), p.accent.value.toString(),
       p.font.index.toString(), p.radius.toString(), p.dark.toString(), p.styleMode.index.toString(),
-      p.glow.toString(), p.glowColor?.toARGB32().toString() ?? '', p.floating.toString(), p.texture.toString(),
+      p.glow.toString(), p.glowColor?.value.toString() ?? '', p.floating.toString(), p.texture.toString(),
     ].join('~~');
   }
 
