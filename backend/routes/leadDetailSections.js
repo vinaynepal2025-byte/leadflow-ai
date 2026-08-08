@@ -47,6 +47,46 @@ router.get('/', async (req, res) => {
   res.json(rows);
 });
 
+// POST /lead-detail-sections — create a custom (Phase 2) section. Only
+// custom sections can be created this way; the 10 built-ins are seeded
+// automatically and never created through this route.
+router.post('/', async (req, res) => {
+  const tid = tenantId(req);
+  const { custom_label, custom_action_type, custom_action_value, icon_override, color_override, size_override, shape_override } = req.body;
+
+  if (!custom_label || !custom_action_type || !custom_action_value) {
+    return res.status(400).json({ error: 'custom_label, custom_action_type, and custom_action_value are required' });
+  }
+  if (!['url', 'phone', 'email'].includes(custom_action_type)) {
+    return res.status(400).json({ error: "custom_action_type must be 'url', 'phone', or 'email'" });
+  }
+  if (custom_action_type === 'url' && !/^https?:\/\//i.test(custom_action_value)) {
+    return res.status(400).json({ error: 'custom_action_value must start with http:// or https:// for action type url' });
+  }
+
+  // Derive a stable, unique section_key from the label so it can share
+  // the same PATCH/DELETE routes as built-ins without a separate ID
+  // scheme. Collisions (two custom buttons with the same label) get a
+  // numeric suffix.
+  const baseKey = 'custom_' + custom_label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+  let key = baseKey || 'custom_button';
+  let suffix = 1;
+  while (await db.prepare('SELECT id FROM lead_detail_sections WHERE tenant_id = ? AND section_key = ?').get(tid, key)) {
+    suffix += 1;
+    key = baseKey + '_' + suffix;
+  }
+
+  const maxOrder = await db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM lead_detail_sections WHERE tenant_id = ?').get(tid);
+  const id = randomUUID();
+  await db.prepare(`
+    INSERT INTO lead_detail_sections
+      (id, tenant_id, section_key, is_custom, enabled, sort_order, custom_label, icon_override, color_override, size_override, shape_override, custom_action_type, custom_action_value)
+    VALUES (?, ?, ?, true, true, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, tid, key, maxOrder.m + 1, custom_label, icon_override || null, color_override || null, size_override || null, shape_override || null, custom_action_type, custom_action_value);
+
+  res.status(201).json(await db.prepare('SELECT * FROM lead_detail_sections WHERE id = ?').get(id));
+});
+
 // PATCH /lead-detail-sections/:section_key — update one section's
 // visibility, label, or style overrides. Works for both built-in and
 // (later) custom sections since both live in the same table.

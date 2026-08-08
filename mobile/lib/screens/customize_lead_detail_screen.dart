@@ -132,6 +132,109 @@ class _CustomizeLeadDetailScreenState extends State<CustomizeLeadDetailScreen> {
     }
   }
 
+  Future<void> _deleteCustomSection(Map<String, dynamic> section) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete this button?'),
+        content: Text('"${section['custom_label']}" will be removed for everyone on this account.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await _api.deleteLeadDetailSection(section['section_key']);
+      _load();
+    }
+  }
+
+  Future<void> _addCustomButton() async {
+    final labelCtrl = TextEditingController();
+    final valueCtrl = TextEditingController();
+    String actionType = 'url';
+
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 16, right: 16, top: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Add custom button', style: Theme.of(ctx).textTheme.titleMedium),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: labelCtrl,
+                  decoration: const InputDecoration(labelText: 'Button label', border: OutlineInputBorder(), isDense: true),
+                ),
+                const SizedBox(height: 16),
+                const Text('Action type', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 6),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'url', label: Text('Link'), icon: Icon(Icons.link, size: 16)),
+                    ButtonSegment(value: 'phone', label: Text('Call'), icon: Icon(Icons.call, size: 16)),
+                    ButtonSegment(value: 'email', label: Text('Email'), icon: Icon(Icons.email_outlined, size: 16)),
+                  ],
+                  selected: {actionType},
+                  onSelectionChanged: (s) => setSheetState(() => actionType = s.first),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: valueCtrl,
+                  keyboardType: actionType == 'phone' ? TextInputType.phone : (actionType == 'email' ? TextInputType.emailAddress : TextInputType.url),
+                  decoration: InputDecoration(
+                    labelText: actionType == 'url' ? 'URL (https://...)' : (actionType == 'phone' ? 'Phone number' : 'Email address'),
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel'))),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Add'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (result == true && labelCtrl.text.trim().isNotEmpty && valueCtrl.text.trim().isNotEmpty) {
+      try {
+        await _api.createLeadDetailSection(
+          customLabel: labelCtrl.text.trim(),
+          actionType: actionType,
+          actionValue: valueCtrl.text.trim(),
+        );
+        await _load();
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -182,16 +285,22 @@ class _CustomizeLeadDetailScreenState extends State<CustomizeLeadDetailScreen> {
                               tooltip: 'Move down',
                             ),
                             Switch(value: enabled, onChanged: (v) => _toggleEnabled(section, v)),
+                            if (section['is_custom'] == true)
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
+                                tooltip: 'Delete',
+                                onPressed: () => _deleteCustomSection(section),
+                              ),
                           ],
                         ),
                       ),
                     );
                   }),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Custom buttons (add your own links/actions) are coming in the next update.',
-                    style: TextStyle(color: Colors.grey, fontSize: 12),
-                    textAlign: TextAlign.center,
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add custom button'),
+                    onPressed: _addCustomButton,
                   ),
                   const SizedBox(height: 24),
                 ],

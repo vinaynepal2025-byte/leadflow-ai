@@ -1522,6 +1522,29 @@ class ApiService {
     return jsonDecode(res.body);
   }
 
+  Future<Map<String, dynamic>> createLeadDetailSection({
+    required String customLabel,
+    required String actionType,
+    required String actionValue,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/lead-detail-sections'),
+      headers: _headers,
+      body: jsonEncode({
+        'custom_label': customLabel,
+        'custom_action_type': actionType,
+        'custom_action_value': actionValue,
+      }),
+    );
+    _checkOk(res, expected: 201);
+    return jsonDecode(res.body);
+  }
+
+  Future<void> deleteLeadDetailSection(String sectionKey) async {
+    final res = await http.delete(Uri.parse('$baseUrl/lead-detail-sections/$sectionKey'), headers: _headers);
+    _checkOk(res);
+  }
+
   Future<List<Map<String, dynamic>>> reorderLeadDetailSections(List<String> order) async {
     final res = await http.put(
       Uri.parse('$baseUrl/lead-detail-sections/reorder'),

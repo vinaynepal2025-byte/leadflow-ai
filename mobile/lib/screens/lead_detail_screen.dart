@@ -357,7 +357,38 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
           ),
         );
       default:
-        return const SizedBox.shrink();
+        final config = _configFor(key);
+        if (config == null || config['is_custom'] != true) return const SizedBox.shrink();
+        final actionType = config['custom_action_type'] as String?;
+        final actionValue = config['custom_action_value'] as String?;
+        if (actionType == null || actionValue == null) return const SizedBox.shrink();
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Colors.blueGrey,
+          onPressed: () => _launchCustomAction(actionType, actionValue),
+        );
+    }
+  }
+
+  Future<void> _launchCustomAction(String actionType, String value) async {
+    Uri uri;
+    switch (actionType) {
+      case 'phone':
+        uri = Uri(scheme: 'tel', path: value);
+        break;
+      case 'email':
+        uri = Uri(scheme: 'mailto', path: value);
+        break;
+      case 'url':
+      default:
+        uri = Uri.parse(value);
+    }
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open: $e')));
+      }
     }
   }
 
