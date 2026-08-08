@@ -5,7 +5,9 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'dart:async';
+import 'dart:io';
 import '../services/api_service.dart';
 
 class CallsVoiceNotesScreen extends StatelessWidget {
@@ -202,6 +204,25 @@ class _VoiceNotesTabState extends State<_VoiceNotesTab> {
     if (result == null || result.files.single.path == null) return;
     await _api.uploadVoiceNote(leadId: widget.leadId, filePath: result.files.single.path!, fileName: result.files.single.name, recordedBy: 'Counselor');
     _refresh();
+  }
+
+  // Downloads the voice note's real audio bytes from the server, saves
+  // them to a temp file, then hands off to Android's native share sheet
+  // — this genuinely attaches the audio to WhatsApp (or any app the
+  // counselor picks), not just a text link. Same pattern already proven
+  // for Flyer Studio's "Share to WhatsApp".
+  Future<void> _shareToWhatsApp(Map<String, dynamic> note) async {
+    try {
+      final bytes = await _api.downloadVoiceNoteBytes(note['id']);
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/${note['file_name']}');
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles([XFile(file.path)]);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not share: $e')));
+      }
+    }
   }
 
   Future<void> _showAddOptions() async {
@@ -507,6 +528,11 @@ class _VoiceNotesTabState extends State<_VoiceNotesTab> {
                 leading: const Icon(Icons.mic_outlined),
                 title: Text(n['file_name']),
                 subtitle: Text(n['ai_summary'] != null ? 'Summarized' : (n['transcript'] != null ? 'Transcript added' : 'No transcript yet')),
+                trailing: IconButton(
+                  icon: const Icon(Icons.share, size: 20),
+                  tooltip: 'Share to WhatsApp',
+                  onPressed: () => _shareToWhatsApp(n),
+                ),
                 onTap: () => _openNote(n),
               );
             },

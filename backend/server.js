@@ -44,6 +44,7 @@ const paymentsRouter = require('./routes/payments');
 const predictionsRouter = require('./routes/predictions');
 const inboxRouter = require('./routes/inbox');
 const complianceRouter = require('./routes/compliance');
+const leadDetailSectionsRouter = require('./routes/leadDetailSections');
 const db = require('./db');
 
 const app = express();
@@ -124,6 +125,7 @@ app.use('/ai', aiRouter);
 app.use('/reminders', remindersRouter);
 app.use('/analytics', analyticsRouter);
 app.use('/documents', documentsRouter);
+app.use('/lead-detail-sections', leadDetailSectionsRouter);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`LeadFlow AI backend running on port ${PORT}`));

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 import 'customize_appearance_screen.dart';
+import 'customize_lead_detail_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -122,6 +123,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: const Text('Colors, fonts, corners, dark mode, glass effect'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeAppearanceScreen())),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.tune_outlined),
+              title: const Text('Customize Lead Detail'),
+              subtitle: const Text('Show, hide, reorder, and restyle lead-screen buttons'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeLeadDetailScreen())),
             ),
           ),
         ],

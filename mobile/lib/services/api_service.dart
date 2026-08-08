@@ -590,6 +590,14 @@ class ApiService {
 
   // ---------- Voice Notes ----------
 
+  String getVoiceNoteDownloadUrl(String noteId) => '$baseUrl/voice-notes/$noteId/download';
+
+  Future<List<int>> downloadVoiceNoteBytes(String noteId) async {
+    final res = await http.get(Uri.parse(getVoiceNoteDownloadUrl(noteId)), headers: _headers);
+    if (res.statusCode != 200) throw Exception('Could not download voice note');
+    return res.bodyBytes;
+  }
+
   Future<List<Map<String, dynamic>>> getVoiceNotes(String leadId) async {
     final res = await http.get(Uri.parse('$baseUrl/voice-notes').replace(queryParameters: {'lead_id': leadId}), headers: _headers);
     _checkOk(res);
@@ -1493,6 +1501,36 @@ class ApiService {
       body: jsonEncode({'fee_id': feeId, 'payment_method': paymentMethod}),
     );
     _checkOk(res);
+  }
+
+  // ---------- Lead Detail Customization ----------
+
+  Future<List<Map<String, dynamic>>> getLeadDetailSections() async {
+    final res = await http.get(Uri.parse('$baseUrl/lead-detail-sections'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> updateLeadDetailSection(String sectionKey, Map<String, dynamic> updates) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/lead-detail-sections/$sectionKey'),
+      headers: _headers,
+      body: jsonEncode(updates),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body);
+  }
+
+  Future<List<Map<String, dynamic>>> reorderLeadDetailSections(List<String> order) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/lead-detail-sections/reorder'),
+      headers: _headers,
+      body: jsonEncode({'order': order}),
+    );
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
   }
 
   void _checkOk(http.Response res, {int expected = 200}) {

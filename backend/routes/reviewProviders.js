@@ -94,11 +94,29 @@ router.patch('/:id', async (req, res) => {
   res.json(withRating(await db.prepare('SELECT * FROM review_providers WHERE id = ?').get(req.params.id)));
 });
 
+// If this provider has booking history (peer_review_bookings FK),
+// a hard delete would violate the FK constraint and 500. Booking/payment
+// history must never silently disappear, so instead we soft-delete
+// (active=false) and tell the caller what actually happened. Only
+// providers with zero bookings get a real hard delete.
 router.delete('/:id', async (req, res) => {
   const tid = tenantId(req);
-  const result = await db.prepare('DELETE FROM review_providers WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
-  if (result.changes === 0) return res.status(404).json({ error: 'Review provider not found' });
-  res.status(204).send();
+  const existing = await db.prepare('SELECT id FROM review_providers WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Review provider not found' });
+
+  const bookingCount = await db.prepare('SELECT COUNT(*) AS count FROM peer_review_bookings WHERE provider_id = ?').get(req.params.id);
+
+  if (bookingCount.count > 0) {
+    await db.prepare('UPDATE review_providers SET active = false WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
+    return res.status(200).json({
+      deleted: false,
+      deactivated: true,
+      message: 'This provider has ' + bookingCount.count + ' booking(s) on record, so it was deactivated instead of deleted to preserve booking/payment history.',
+    });
+  }
+
+  await db.prepare('DELETE FROM review_providers WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
+  res.status(200).json({ deleted: true, deactivated: false });
 });
 
 module.exports = router;

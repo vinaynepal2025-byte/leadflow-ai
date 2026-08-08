@@ -205,6 +205,112 @@ class AppearanceSettings extends ChangeNotifier {
   /// to render their true-blur variant.
   bool get isGlassy => _styleMode == UIStyleMode.glass || _styleMode == UIStyleMode.liquid;
 
+  // ---------- Custom presets ("Save current as preset") ----------
+  // Encoded as '~~'-delimited strings (not JSON, to avoid adding a
+  // dart:convert import for one small feature) in a SharedPreferences
+  // string list. Overwrites any existing preset with the same name.
+  static const _customPresetsKey = 'custom_theme_presets';
+
+  String _encodePreset(ThemePreset p) {
+    return [
+      p.name, p.tagline,
+      p.primary.toARGB32().toString(), p.accent.toARGB32().toString(),
+      p.font.index.toString(), p.radius.toString(), p.dark.toString(), p.styleMode.index.toString(),
+      p.glow.toString(), p.glowColor?.toARGB32().toString() ?? '', p.floating.toString(), p.texture.toString(),
+    ].join('~~');
+  }
+
+  ThemePreset? _decodePreset(String raw) {
+    try {
+      final parts = raw.split('~~');
+      if (parts.length != 12) return null;
+      return ThemePreset(
+        parts[0], parts[1],
+        Color(int.parse(parts[2])), Color(int.parse(parts[3])),
+        FontPairing.values[int.parse(parts[4])],
+        double.parse(parts[5]), parts[6] == 'true',
+        UIStyleMode.values[int.parse(parts[7])],
+        glow: parts[8] == 'true',
+        glowColor: parts[9].isEmpty ? null : Color(int.parse(parts[9])),
+        floating: parts[10] == 'true',
+        texture: parts[11] == 'true',
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<ThemePreset>> getCustomPresets() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_customPresetsKey) ?? [];
+    return raw.map(_decodePreset).whereType<ThemePreset>().toList();
+  }
+
+  Future<void> saveCurrentAsPreset(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_customPresetsKey) ?? [];
+    final preset = ThemePreset(
+      name, 'Custom', _primaryColor, _accentColor, _fontPairing, _cornerRadius, _darkMode, _styleMode,
+      glow: _glowEnabled, glowColor: _glowEnabled ? _glowColor : null, floating: _floatingEnabled, texture: _textureEnabled,
+    );
+    raw.removeWhere((r) => r.split('~~').first == name);
+    raw.add(_encodePreset(preset));
+    await prefs.setStringList(_customPresetsKey, raw);
+    notifyListeners();
+  }
+
+  Future<void> deleteCustomPreset(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_customPresetsKey) ?? [];
+    raw.removeWhere((r) => r.split('~~').first == name);
+    await prefs.setStringList(_customPresetsKey, raw);
+    notifyListeners();
+  }
+
+  // ---------- Per-section reset ----------
+  // Each of these only touches the fields shown in that section of the
+  // Customize screen -- reuses the existing public setters (already
+  // proven correct) rather than duplicating SharedPreferences key names.
+  Future<void> resetColors() async {
+    await setPrimaryColor(const Color(0xFF1B2A4A));
+    await setAccentColor(const Color(0xFFE8A33D));
+    await setOutlineColor(null);
+  }
+
+  Future<void> resetTypography() async {
+    await setFontPairing(FontPairing.spaceGroteskInter);
+    await setFontScale(1.0);
+  }
+
+  Future<void> resetShape() async {
+    await setCornerRadius(16.0);
+    await setBorderThickness(1.0);
+    await setComponentOpacity(1.0);
+    await setComponentScale(1.0);
+    await setEdgeBlur(0.0);
+  }
+
+  Future<void> resetEffects() async {
+    await setGlowEnabled(false);
+    await setGlowColor(const Color(0xFF00E5FF));
+    await setGlowIntensity(0.5);
+    await setFloatingEnabled(false);
+    await setFloatingIntensity(0.5);
+    await setTextureEnabled(false);
+  }
+
+  Future<void> resetLayout() async {
+    await setDensity(SpacingDensity.standard);
+    await setNavPosition(NavPosition.bottom);
+    await setSwipeActionsEnabled(false);
+  }
+
+  Future<void> resetModeAndAccessibility() async {
+    await setDarkMode(false);
+    await setHaptics(true);
+    await setTouchFeedback(TouchFeedback.fade);
+  }
+
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final primaryValue = prefs.getInt(_primaryKey);

@@ -13,6 +13,60 @@ import 'journey_screen.dart';
 import 'alumni_match_screen.dart';
 import 'compliance_screen.dart';
 import 'cockpit_screen.dart';
+import 'customize_lead_detail_screen.dart';
+
+// Must stay in sync with backend/routes/leadDetailSections.js DEFAULTS
+// and screens/customize_lead_detail_screen.dart -- three places carry
+// this same small map because the backend only stores an override,
+// never the default label/icon text itself.
+const Map<String, IconData> _kIconOptions = {
+  'auto_awesome': Icons.auto_awesome,
+  'bolt': Icons.bolt,
+  'chat': Icons.chat,
+  'folder_outlined': Icons.folder_outlined,
+  'school_outlined': Icons.school_outlined,
+  'phone_in_talk_outlined': Icons.phone_in_talk_outlined,
+  'event_available_outlined': Icons.event_available_outlined,
+  'flight_takeoff_outlined': Icons.flight_takeoff_outlined,
+  'diversity_3_outlined': Icons.diversity_3_outlined,
+  'privacy_tip_outlined': Icons.privacy_tip_outlined,
+  'star': Icons.star,
+  'favorite': Icons.favorite,
+  'call': Icons.call,
+  'email_outlined': Icons.email_outlined,
+  'work_outline': Icons.work_outline,
+  'description_outlined': Icons.description_outlined,
+  'payments_outlined': Icons.payments_outlined,
+  'group_outlined': Icons.group_outlined,
+  'shield_outlined': Icons.shield_outlined,
+  'map_outlined': Icons.map_outlined,
+};
+
+const Map<String, String> _kDefaultLabels = {
+  'ai_insight': 'AI Insight',
+  'calling_cockpit': 'Open Calling Cockpit',
+  'whatsapp': 'Send WhatsApp (free)',
+  'documents': 'Documents',
+  'admissions_fees': 'Admissions & Fees',
+  'calls_voice_notes': 'Calls & Voice Notes',
+  'meetings': 'Meetings & Campus Tours',
+  'visa_travel_student': 'Visa, Travel & Student',
+  'alumni': 'Alumni Network',
+  'consent_compliance': 'Consent & Compliance',
+};
+
+const Map<String, String> _kDefaultIcons = {
+  'ai_insight': 'auto_awesome',
+  'calling_cockpit': 'bolt',
+  'whatsapp': 'chat',
+  'documents': 'folder_outlined',
+  'admissions_fees': 'school_outlined',
+  'calls_voice_notes': 'phone_in_talk_outlined',
+  'meetings': 'event_available_outlined',
+  'visa_travel_student': 'flight_takeoff_outlined',
+  'alumni': 'diversity_3_outlined',
+  'consent_compliance': 'privacy_tip_outlined',
+};
 
 class LeadDetailScreen extends StatefulWidget {
   final String leadId;
@@ -28,6 +82,7 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
   List<Communication> _comms = [];
   List<Map<String, dynamic>> _customFieldDefs = [];
   List<Map<String, dynamic>> _stages = [];
+  List<Map<String, dynamic>> _sections = [];
   bool _loading = true;
   AiInsight? _insight;
   bool _analyzing = false;
@@ -45,12 +100,34 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
     final comms = await _api.getCommunications(widget.leadId);
     final defs = await _api.getCustomFieldDefinitions();
     final stages = await _api.getPipelineStages();
+
+    List<Map<String, dynamic>> sections;
+    try {
+      sections = await _api.getLeadDetailSections();
+    } catch (_) {
+      // If the config endpoint is unreachable, fall back to every
+      // built-in section enabled in its default order rather than
+      // showing a broken/empty screen.
+      final keys = _kDefaultLabels.keys.toList();
+      sections = List.generate(keys.length, (i) => {
+            'section_key': keys[i],
+            'enabled': true,
+            'sort_order': i,
+            'custom_label': null,
+            'icon_override': null,
+            'color_override': null,
+            'size_override': null,
+            'shape_override': null,
+          });
+    }
+
     if (!mounted) return;
     setState(() {
       _lead = lead;
       _comms = comms;
       _customFieldDefs = defs;
       _stages = stages;
+      _sections = sections;
       _loading = false;
     });
   }
@@ -60,14 +137,83 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
     _load();
   }
 
+  Map<String, dynamic>? _configFor(String key) {
+    for (final s in _sections) {
+      if (s['section_key'] == key) return s;
+    }
+    return null;
+  }
+
+  bool _isEnabled(String key) => (_configFor(key)?['enabled'] as bool?) ?? true;
+  String _labelFor(String key) => _configFor(key)?['custom_label'] ?? _kDefaultLabels[key] ?? key;
+  IconData _iconFor(String key) =>
+      _kIconOptions[_configFor(key)?['icon_override'] ?? _kDefaultIcons[key]] ?? Icons.star;
+
+  Color _colorFor(String key, Color fallback) {
+    final hex = _configFor(key)?['color_override'] as String?;
+    if (hex == null) return fallback;
+    var h = hex.replaceAll('#', '');
+    if (h.length == 6) h = 'FF$h';
+    return Color(int.parse(h, radix: 16));
+  }
+
+  String _sizeFor(String key) => _configFor(key)?['size_override'] ?? 'standard';
+  String _shapeFor(String key) => _configFor(key)?['shape_override'] ?? 'rounded';
+
+  Widget _styledButton({
+    required String sectionKey,
+    required Color defaultColor,
+    required VoidCallback onPressed,
+  }) {
+    final size = _sizeFor(sectionKey);
+    final shape = _shapeFor(sectionKey);
+    final color = _colorFor(sectionKey, defaultColor);
+    final vPad = size == 'compact' ? 8.0 : (size == 'large' ? 18.0 : 13.0);
+    final iconSize = size == 'compact' ? 16.0 : (size == 'large' ? 24.0 : 20.0);
+    final fontSize = size == 'compact' ? 12.0 : (size == 'large' ? 16.0 : 14.0);
+    final radius = shape == 'square'
+        ? BorderRadius.zero
+        : (shape == 'pill' ? BorderRadius.circular(999) : BorderRadius.circular(12));
+
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        icon: Icon(_iconFor(sectionKey), size: iconSize, color: color),
+        label: Text(_labelFor(sectionKey), style: TextStyle(fontSize: fontSize)),
+        style: OutlinedButton.styleFrom(
+          padding: EdgeInsets.symmetric(vertical: vPad, horizontal: 16),
+          shape: RoundedRectangleBorder(borderRadius: radius),
+          side: BorderSide(color: color.withValues(alpha: 0.5)),
+          alignment: Alignment.centerLeft,
+        ),
+        onPressed: onPressed,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading || _lead == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final lead = _lead!;
+    final orderedSections = List<Map<String, dynamic>>.from(_sections)
+      ..sort((a, b) => (a['sort_order'] as int? ?? 0).compareTo(b['sort_order'] as int? ?? 0));
+
     return Scaffold(
-      appBar: AppBar(title: Text(lead.fullName)),
+      appBar: AppBar(
+        title: Text(lead.fullName),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.tune),
+            tooltip: 'Customize this screen',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const CustomizeLeadDetailScreen()),
+            ).then((_) => _load()),
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
@@ -95,10 +241,10 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
             if (lead.phone != null) _infoRow(Icons.phone, lead.phone!),
             if (lead.email != null) _infoRow(Icons.email, lead.email!),
             if (lead.source != null) _infoRow(Icons.source, lead.source!),
-            if (lead.notes != null && lead.notes!.isNotEmpty)
-              _infoRow(Icons.notes, lead.notes!),
+            if (lead.notes != null && lead.notes!.isNotEmpty) _infoRow(Icons.notes, lead.notes!),
             if (lead.parentName != null)
-              _infoRow(Icons.family_restroom, 'Guardian: ${lead.parentName}${lead.parentPhone != null ? " (${lead.parentPhone})" : ""}'),
+              _infoRow(Icons.family_restroom,
+                  'Guardian: ${lead.parentName}${lead.parentPhone != null ? " (${lead.parentPhone})" : ""}'),
             if (_customFieldDefs.isNotEmpty) ...[
               const SizedBox(height: 12),
               const Text('Custom Fields', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
@@ -106,102 +252,28 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
               ..._customFieldDefs.map((def) => _customFieldTile(lead, def)),
             ],
             const SizedBox(height: 20),
-            _aiSection(),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                icon: const Icon(Icons.bolt),
-                label: const Text('Open Calling Cockpit'),
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => CockpitScreen(leadId: lead.id)),
+            // Email is not (yet) part of the customizable section set --
+            // always shown when the lead has an email, same as before.
+            if (lead.email != null) ...[
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.email_outlined),
+                  label: const Text('Email'),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => EmailComposeScreen(lead: lead)),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(child: _whatsappButton(lead)),
-                if (lead.email != null) ...[
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.email_outlined),
-                      label: const Text('Email'),
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => EmailComposeScreen(lead: lead)),
-                      ),
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 10),
+            ],
+            for (final section in orderedSections)
+              if (_isEnabled(section['section_key'] as String)) ...[
+                _buildSection(section['section_key'] as String, lead),
+                const SizedBox(height: 10),
               ],
-            ),
             const SizedBox(height: 10),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.folder_outlined),
-              label: const Text('Documents'),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => DocumentsScreen(leadId: lead.id)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.school_outlined),
-              label: const Text('Admissions & Fees'),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => AdmissionsFeesScreen(leadId: lead.id)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.phone_in_talk_outlined),
-              label: const Text('Calls & Voice Notes'),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => CallsVoiceNotesScreen(leadId: lead.id, leadPhone: lead.phone, leadName: lead.fullName)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.event_available_outlined),
-              label: const Text('Meetings & Campus Tours'),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => MeetingsScreen(leadId: lead.id, leadName: lead.fullName, leadPhone: lead.phone)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.flight_takeoff_outlined),
-              label: const Text('Visa, Travel & Student'),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => JourneyScreen(leadId: lead.id)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.diversity_3_outlined),
-              label: const Text('Alumni Network'),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => AlumniMatchScreen(leadId: lead.id)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.privacy_tip_outlined),
-              label: const Text('Consent & Compliance'),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => ComplianceScreen(leadId: lead.id, leadName: lead.fullName)),
-              ),
-            ),
-            const SizedBox(height: 20),
             const Text('Communication History', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 8),
             if (_comms.isEmpty)
@@ -217,6 +289,78 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
     );
   }
 
+  Widget _buildSection(String key, Lead lead) {
+    switch (key) {
+      case 'ai_insight':
+        return _aiSection();
+      case 'calling_cockpit':
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Theme.of(context).colorScheme.primary,
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CockpitScreen(leadId: lead.id))),
+        );
+      case 'whatsapp':
+        if (lead.phone == null) return const SizedBox.shrink();
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Colors.green,
+          onPressed: () async {
+            final link = await _api.getWhatsAppChatLink(lead.id, 'Hi ${lead.fullName}, following up on your enquiry.');
+            await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
+            await _api.confirmWhatsAppSent(lead.id, 'Hi ${lead.fullName}, following up on your enquiry.', 'Counselor');
+            _load();
+          },
+        );
+      case 'documents':
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Colors.blueGrey,
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DocumentsScreen(leadId: lead.id))),
+        );
+      case 'admissions_fees':
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Colors.indigo,
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdmissionsFeesScreen(leadId: lead.id))),
+        );
+      case 'calls_voice_notes':
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Colors.teal,
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CallsVoiceNotesScreen(leadId: lead.id))),
+        );
+      case 'meetings':
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Colors.orange,
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MeetingsScreen(leadId: lead.id))),
+        );
+      case 'visa_travel_student':
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Colors.cyan,
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => JourneyScreen(leadId: lead.id))),
+        );
+      case 'alumni':
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Colors.purple,
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AlumniMatchScreen(leadId: lead.id))),
+        );
+      case 'consent_compliance':
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Colors.brown,
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => ComplianceScreen(leadId: lead.id, leadName: lead.fullName)),
+          ),
+        );
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
   Widget _customFieldTile(Lead lead, Map<String, dynamic> def) {
     final key = def['field_key'] as String;
     final currentValue = lead.customFields[key];
@@ -226,7 +370,7 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: DropdownButtonFormField<String>(
-          value: options.contains(currentValue) ? currentValue as String : null,
+          initialValue: options.contains(currentValue) ? currentValue as String : null,
           decoration: InputDecoration(labelText: def['label'], isDense: true, border: const OutlineInputBorder()),
           items: options.map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
           onChanged: (v) async {
@@ -277,30 +421,11 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
     );
   }
 
-  Widget _whatsappButton(Lead lead) {
-    if (lead.phone == null) return const SizedBox.shrink();
-    return OutlinedButton.icon(
-      icon: const Icon(Icons.chat, color: Colors.green),
-      label: const Text('Send WhatsApp (free)'),
-      onPressed: () async {
-        final link = await _api.getWhatsAppChatLink(
-          lead.id,
-          'Hi ${lead.fullName}, following up on your enquiry.',
-        );
-        await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
-        await _api.confirmWhatsAppSent(
-          lead.id,
-          'Hi ${lead.fullName}, following up on your enquiry.',
-          'Counselor',
-        );
-        _load();
-      },
-    );
-  }
-
   Widget _aiSection() {
+    final label = _labelFor('ai_insight');
+    final color = _colorFor('ai_insight', Colors.deepPurple);
     return Card(
-      color: Colors.deepPurple.withValues(alpha: 0.05),
+      color: color.withValues(alpha: 0.05),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -308,9 +433,9 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.auto_awesome, color: Colors.deepPurple, size: 20),
+                Icon(_iconFor('ai_insight'), color: color, size: 20),
                 const SizedBox(width: 8),
-                const Text('AI Insight', style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
                 const Spacer(),
                 TextButton(
                   onPressed: _analyzing ? null : _runAnalysis,
