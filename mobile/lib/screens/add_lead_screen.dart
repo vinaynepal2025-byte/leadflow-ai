@@ -116,7 +116,7 @@ class _AddLeadScreenState extends State<AddLeadScreen> {
                 SizedBox(
                   width: 110,
                   child: DropdownButtonFormField<String>(
-                    initialValue: _countryCode,
+                    value: _countryCode,
                     isExpanded: true,
                     decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
                     items: kCountryCodes.map((c) => DropdownMenuItem(
