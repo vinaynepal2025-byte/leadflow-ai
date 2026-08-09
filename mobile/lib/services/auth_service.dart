@@ -2,9 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'api_service.dart';
 
 class AuthService {
-  static const String baseUrl = 'http://localhost:3000';
+  // Was a separate hardcoded 'http://localhost:3000' constant here,
+  // completely independent of ApiService.baseUrl -- Server Setup and the
+  // main.dart loadBaseUrl() fix had no effect on login/register because
+  // of this. Now reads the same configurable, persisted URL as every
+  // other API call in the app.
+  static String get baseUrl => ApiService.baseUrl;
   static const _tokenKey = 'leadflow_token';
   static const _tenantKey = 'leadflow_tenant_id';
   static const _userNameKey = 'leadflow_user_name';
