@@ -22,6 +22,7 @@ const DEFAULTS = [
   { section_key: 'visa_travel_student',  default_label: 'Visa, Travel & Student',  sort_order: 7 },
   { section_key: 'alumni',               default_label: 'Alumni Network',          sort_order: 8 },
   { section_key: 'consent_compliance',   default_label: 'Consent & Compliance',    sort_order: 9 },
+  { section_key: 'lead_notes',           default_label: 'Notes',                   sort_order: 10 },
 ];
 
 // Ensures a tenant has all 10 built-in section rows. Safe to call every

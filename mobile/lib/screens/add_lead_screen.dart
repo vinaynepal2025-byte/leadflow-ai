@@ -1,6 +1,23 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 
+const List<Map<String, String>> kCountryCodes = [
+  {'code': '+91', 'flag': '🇮🇳', 'name': 'India'},
+  {'code': '+977', 'flag': '🇳🇵', 'name': 'Nepal'},
+  {'code': '+1', 'flag': '🇺🇸', 'name': 'USA/Canada'},
+  {'code': '+44', 'flag': '🇬🇧', 'name': 'UK'},
+  {'code': '+61', 'flag': '🇦🇺', 'name': 'Australia'},
+  {'code': '+64', 'flag': '🇳🇿', 'name': 'New Zealand'},
+  {'code': '+971', 'flag': '🇦🇪', 'name': 'UAE'},
+  {'code': '+966', 'flag': '🇸🇦', 'name': 'Saudi Arabia'},
+  {'code': '+65', 'flag': '🇸🇬', 'name': 'Singapore'},
+  {'code': '+49', 'flag': '🇩🇪', 'name': 'Germany'},
+  {'code': '+33', 'flag': '🇫🇷', 'name': 'France'},
+  {'code': '+880', 'flag': '🇧🇩', 'name': 'Bangladesh'},
+  {'code': '+94', 'flag': '🇱🇰', 'name': 'Sri Lanka'},
+  {'code': '+92', 'flag': '🇵🇰', 'name': 'Pakistan'},
+];
+
 class AddLeadScreen extends StatefulWidget {
   const AddLeadScreen({super.key});
 
@@ -19,6 +36,7 @@ class _AddLeadScreenState extends State<AddLeadScreen> {
   final _parentNameCtrl = TextEditingController();
   final _parentPhoneCtrl = TextEditingController();
   String _source = 'Website';
+  String _countryCode = '+91';
   bool _saving = false;
 
   static const sources = ['Website', 'Walk-in', 'Referral', 'Facebook Ad', 'Instagram', 'Other'];
@@ -59,6 +77,7 @@ class _AddLeadScreenState extends State<AddLeadScreen> {
       await _api.createLead(
         fullName: _nameCtrl.text.trim(),
         phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
+        phoneCountryCode: _phoneCtrl.text.trim().isEmpty ? null : _countryCode,
         email: _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
         source: _source,
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
@@ -91,13 +110,34 @@ class _AddLeadScreenState extends State<AddLeadScreen> {
               validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _phoneCtrl,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                labelText: 'Phone (with country code, e.g. 91...)',
-                border: OutlineInputBorder(),
-              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 110,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _countryCode,
+                    isExpanded: true,
+                    decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                    items: kCountryCodes.map((c) => DropdownMenuItem(
+                      value: c['code'],
+                      child: Text('${c['flag']} ${c['code']}', overflow: TextOverflow.ellipsis),
+                    )).toList(),
+                    onChanged: (v) => setState(() => _countryCode = v ?? _countryCode),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextFormField(
+                    controller: _phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Phone number',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             TextFormField(

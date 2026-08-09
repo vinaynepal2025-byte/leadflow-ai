@@ -55,9 +55,86 @@ class ApiService {
     return data.map((e) => Lead.fromJson(e)).toList();
   }
 
+  // Soft-delete — moves the lead to Trash (recoverable via restoreLead),
+  // does NOT permanently remove it or its history. Backend used to return
+  // 204 for a hard delete; now returns 200 + a small JSON body.
   Future<void> deleteLead(String id) async {
     final res = await http.delete(Uri.parse('$baseUrl/leads/$id'), headers: _headers);
-    if (res.statusCode != 204) throw Exception('Could not delete lead');
+    if (res.statusCode != 200) throw Exception('Could not delete lead');
+  }
+
+  Future<Lead> restoreLead(String id) async {
+    final res = await http.post(Uri.parse('$baseUrl/leads/$id/restore'), headers: _headers);
+    _checkOk(res);
+    return Lead.fromJson(jsonDecode(res.body));
+  }
+
+  Future<List<Lead>> getTrashedLeads() async {
+    final res = await http.get(Uri.parse('$baseUrl/leads/trash'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.map((j) => Lead.fromJson(j)).toList();
+  }
+
+  Future<int> bulkDeleteLeads(List<String> leadIds, {String? deletedBy}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/leads/bulk-delete'),
+      headers: _headers,
+      body: jsonEncode({'lead_ids': leadIds, 'deleted_by': deletedBy}),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body)['deleted_count'] as int;
+  }
+
+  Future<int> bulkRestoreLeads(List<String> leadIds) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/leads/bulk-restore'),
+      headers: _headers,
+      body: jsonEncode({'lead_ids': leadIds}),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body)['restored_count'] as int;
+  }
+
+  // ---------- Lead Notes ----------
+
+  Future<List<Map<String, dynamic>>> getLeadNotes(String leadId) async {
+    final res = await http.get(Uri.parse('$baseUrl/lead-notes?lead_id=$leadId'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> createLeadNote({
+    required String leadId,
+    required String noteText,
+    String? authorName,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/lead-notes'),
+      headers: _headers,
+      body: jsonEncode({'lead_id': leadId, 'note_text': noteText, 'author_name': authorName}),
+    );
+    _checkOk(res, expected: 201);
+    return jsonDecode(res.body);
+  }
+
+  Future<Map<String, dynamic>> updateLeadNote(String id, {String? noteText, bool? pinned}) async {
+    final body = <String, dynamic>{};
+    if (noteText != null) body['note_text'] = noteText;
+    if (pinned != null) body['pinned'] = pinned;
+    final res = await http.patch(
+      Uri.parse('$baseUrl/lead-notes/$id'),
+      headers: _headers,
+      body: jsonEncode(body),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body);
+  }
+
+  Future<void> deleteLeadNote(String id) async {
+    final res = await http.delete(Uri.parse('$baseUrl/lead-notes/$id'), headers: _headers);
+    _checkOk(res);
   }
 
   Future<Lead> getLead(String id) async {
@@ -69,6 +146,7 @@ class ApiService {
   Future<Lead> createLead({
     required String fullName,
     String? phone,
+    String? phoneCountryCode,
     String? email,
     String? source,
     String? assignedTo,
@@ -83,6 +161,7 @@ class ApiService {
       body: jsonEncode({
         'full_name': fullName,
         'phone': phone,
+        'phone_country_code': phoneCountryCode,
         'email': email,
         'source': source,
         'assigned_to': assignedTo,

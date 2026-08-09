@@ -44,6 +44,7 @@ const Map<String, String> kLeadDetailDefaultLabels = {
   'visa_travel_student': 'Visa, Travel & Student',
   'alumni': 'Alumni Network',
   'consent_compliance': 'Consent & Compliance',
+  'lead_notes': 'Notes',
 };
 
 const Map<String, String> kLeadDetailDefaultIcons = {
@@ -57,6 +58,7 @@ const Map<String, String> kLeadDetailDefaultIcons = {
   'visa_travel_student': 'flight_takeoff_outlined',
   'alumni': 'diversity_3_outlined',
   'consent_compliance': 'privacy_tip_outlined',
+  'lead_notes': 'description_outlined',
 };
 
 class CustomizeLeadDetailScreen extends StatefulWidget {

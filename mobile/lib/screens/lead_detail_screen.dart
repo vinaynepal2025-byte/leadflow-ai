@@ -13,6 +13,7 @@ import 'journey_screen.dart';
 import 'alumni_match_screen.dart';
 import 'compliance_screen.dart';
 import 'cockpit_screen.dart';
+import 'lead_notes_screen.dart';
 import 'customize_lead_detail_screen.dart';
 
 // Must stay in sync with backend/routes/leadDetailSections.js DEFAULTS
@@ -53,6 +54,7 @@ const Map<String, String> _kDefaultLabels = {
   'visa_travel_student': 'Visa, Travel & Student',
   'alumni': 'Alumni Network',
   'consent_compliance': 'Consent & Compliance',
+  'lead_notes': 'Notes',
 };
 
 const Map<String, String> _kDefaultIcons = {
@@ -66,6 +68,7 @@ const Map<String, String> _kDefaultIcons = {
   'visa_travel_student': 'flight_takeoff_outlined',
   'alumni': 'diversity_3_outlined',
   'consent_compliance': 'privacy_tip_outlined',
+  'lead_notes': 'description_outlined',
 };
 
 class LeadDetailScreen extends StatefulWidget {
@@ -355,6 +358,12 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
             context,
             MaterialPageRoute(builder: (_) => ComplianceScreen(leadId: lead.id, leadName: lead.fullName)),
           ),
+        );
+      case 'lead_notes':
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Colors.amber.shade800,
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LeadNotesScreen(leadId: lead.id, leadName: lead.fullName))),
         );
       default:
         final config = _configFor(key);
