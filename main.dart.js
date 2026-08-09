@@ -117296,7 +117296,7 @@ A.vV.prototype={
 BU(a,b,c){return this.aK6(a,b,c)},
 aK6(a,b,c){var s=0,r=A.k(t.P),q,p=this,o,n,m,l,k
 var $async$BU=A.f(function(d,e){if(d===1)return A.h(e,r)
-while(true)switch(s){case 0:o=A.a3("http://localhost:3000/auth/login",0,null)
+while(true)switch(s){case 0:o=A.a3($.af+"/auth/login",0,null)
 n=t.N
 m=A.x(["Content-Type","application/json"],n,n)
 s=3
@@ -117314,7 +117314,7 @@ return A.j($async$BU,r)},
 Cu(a,b,c,d){return this.aMz(a,b,c,d)},
 aMz(a,b,c,d){var s=0,r=A.k(t.P),q,p=this,o,n,m,l,k
 var $async$Cu=A.f(function(e,f){if(e===1)return A.h(f,r)
-while(true)switch(s){case 0:o=A.a3("http://localhost:3000/auth/register",0,null)
+while(true)switch(s){case 0:o=A.a3($.af+"/auth/register",0,null)
 n=t.N
 m=A.x(["Content-Type","application/json"],n,n)
 s=3
