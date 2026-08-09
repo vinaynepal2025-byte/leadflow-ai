@@ -1539,6 +1539,100 @@ class ApiService {
   }
 
 
+  // ---------- Flyer Studio v2 (canvas engine) ----------
+
+  Future<Map<String, dynamic>> createFlyerProject({
+    required String title,
+    String? leadId,
+    double? canvasWidth,
+    double? canvasHeight,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/flyer-projects'),
+      headers: _headers,
+      body: jsonEncode({
+        'title': title,
+        if (leadId != null) 'lead_id': leadId,
+        if (canvasWidth != null) 'canvas_width': canvasWidth,
+        if (canvasHeight != null) 'canvas_height': canvasHeight,
+      }),
+    );
+    if (res.statusCode != 201) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Could not create flyer project');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getFlyerProject(String id) async {
+    final res = await http.get(Uri.parse('$baseUrl/flyer-projects/$id'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> getFlyerProjects({String? leadId}) async {
+    final uri = Uri.parse('$baseUrl/flyer-projects').replace(
+      queryParameters: leadId != null ? {'lead_id': leadId} : null,
+    );
+    final res = await http.get(uri, headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> updateFlyerProjectCanvas(
+      String id, List<Map<String, dynamic>> canvasJson) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/flyer-projects/$id'),
+      headers: _headers,
+      body: jsonEncode({'canvas_json': canvasJson}),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> uploadFlyerElementImage(String projectId, String filePath) async {
+    final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/element-image');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll({'x-tenant-id': tenantId})
+      ..files.add(await http.MultipartFile.fromPath('file', filePath));
+    final streamed = await request.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 201) throw Exception('Image upload failed: $body');
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
+
+  Future<void> uploadFlyerRender(String projectId, List<int> pngBytes) async {
+    final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/render');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll({'x-tenant-id': tenantId})
+      ..files.add(http.MultipartFile.fromBytes('file', pngBytes, filename: 'flyer-render.png'));
+    final streamed = await request.send();
+    if (streamed.statusCode != 200) {
+      final body = await streamed.stream.bytesToString();
+      throw Exception('Render upload failed: $body');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getTenantLogos() async {
+    final res = await http.get(Uri.parse('$baseUrl/tenant-logos'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> generateFlyerAI(String projectId, String prompt) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/flyer-projects/$projectId/ai-generate'),
+      headers: _headers,
+      body: jsonEncode({'prompt': prompt}),
+    );
+    if (res.statusCode != 200) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'AI generation failed');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+
   // ---------- Lead Folders (Phase 6) ----------
 
   Future<List<Map<String, dynamic>>> getLeadFolders() async {
