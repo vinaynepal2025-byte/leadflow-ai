@@ -34,10 +34,6 @@ void main() {
       return true;
     };
 
-    ApiService.loadBaseUrl().catchError((e) {
-      log('loadBaseUrl failed: $e');
-    });
-
     runApp(const _DiagRoot());
     log('runApp called');
   }, (error, stack) {
@@ -68,6 +64,13 @@ class _DiagRootState extends State<_DiagRoot> {
   }
 
   Future<void> _boot() async {
+    try {
+      await ApiService.loadBaseUrl();
+      log('loadBaseUrl() done: ${ApiService.baseUrl}');
+    } catch (e) {
+      log('loadBaseUrl() FAILED: $e');
+    }
+
     try {
       _glass = GlassSettings();
       log('GlassSettings constructed');
