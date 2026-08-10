@@ -1620,6 +1620,41 @@ class ApiService {
     return data.cast<Map<String, dynamic>>();
   }
 
+  Future<Map<String, dynamic>> uploadTenantLogo({
+    required String filePath,
+    String? label,
+    bool isDefault = false,
+  }) async {
+    final uri = Uri.parse('$baseUrl/tenant-logos');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll({'x-tenant-id': tenantId})
+      ..fields['label'] = label ?? ''
+      ..fields['is_default'] = isDefault.toString()
+      ..files.add(await http.MultipartFile.fromPath('file', filePath));
+    final streamed = await request.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 201) throw Exception('Logo upload failed: $body');
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateTenantLogo(String id, {String? label, bool? isDefault}) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/tenant-logos/$id'),
+      headers: _headers,
+      body: jsonEncode({
+        if (label != null) 'label': label,
+        if (isDefault != null) 'is_default': isDefault,
+      }),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteTenantLogo(String id) async {
+    final res = await http.delete(Uri.parse('$baseUrl/tenant-logos/$id'), headers: _headers);
+    _checkOk(res);
+  }
+
   Future<Map<String, dynamic>> generateFlyerAI(String projectId, String prompt) async {
     final res = await http.post(
       Uri.parse('$baseUrl/flyer-projects/$projectId/ai-generate'),

@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 import 'customize_appearance_screen.dart';
 import 'customize_lead_detail_screen.dart';
+import 'flyer_studio/logo_library_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -49,13 +50,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _uploadLogo() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.image);
-    if (result == null || result.files.single.path == null) return;
-    await _api.uploadLogo(result.files.single.path!, result.files.single.name);
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logo uploaded')));
-  }
-
   Future<void> _saveServerUrl() async {
     setState(() => _serverTestResult = 'Testing...');
     await ApiService.setBaseUrl(_serverUrlCtrl.text.trim());
@@ -79,12 +73,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           const Text('Consultancy Branding', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _uploadLogo,
-            icon: const Icon(Icons.image_outlined),
-            label: const Text('Upload Logo'),
-          ),
           const SizedBox(height: 12),
           TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Consultancy Name', border: OutlineInputBorder())),
           const SizedBox(height: 12),
@@ -133,6 +121,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: const Text('Show, hide, reorder, and restyle lead-screen buttons'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeLeadDetailScreen())),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.workspace_premium_outlined),
+              title: const Text('Brand Logos'),
+              subtitle: const Text('Upload and manage logos for flyers and branded documents'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LogoLibraryScreen())),
             ),
           ),
         ],
