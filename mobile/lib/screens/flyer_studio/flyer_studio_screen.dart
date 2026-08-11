@@ -31,8 +31,8 @@ import 'package:image_picker/image_picker.dart';
 
 import 'flyer_element.dart';
 import 'flyer_canvas_element_widget.dart';
-import '../services/api_service.dart';
-import '../widgets/color_picker_dialog.dart';
+import '../../services/api_service.dart';
+import '../../widgets/color_picker_dialog.dart';
 
 class FlyerStudioScreen extends StatefulWidget {
   final String? projectId;
