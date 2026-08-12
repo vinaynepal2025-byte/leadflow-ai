@@ -16,7 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import '../widgets/glass_widgets.dart';
-import 'flyer_studio_screen.dart';
+import 'flyer_studio/flyer_history_screen.dart';
 
 class CockpitScreen extends StatefulWidget {
   final String leadId;
@@ -381,7 +381,7 @@ class _CockpitScreenState extends State<CockpitScreen> {
               TextButton.icon(
                 onPressed: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => FlyerStudioScreen(leadId: widget.leadId)),
+                  MaterialPageRoute(builder: (_) => FlyerHistoryScreen(leadId: widget.leadId)),
                 ),
                 icon: const Icon(Icons.image, size: 18),
                 label: const Text('Flyer'),
