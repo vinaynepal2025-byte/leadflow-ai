@@ -1,41 +1,33 @@
-// FlyerStudioScreen — Flyer Studio v2's main editor.
+// FlyerStudioScreen — Flyer Studio v2's editor.
 //
-// Design principles this screen follows:
+// Design principles:
 // - Freeform canvas, zero fixed templates: every element is independently
-//   positioned/sized/rotated/layered (see flyer_element.dart).
-// - Client-side render: the final flyer image is produced on-device via
-//   RepaintBoundary -> toImage() (wired in _exportAndShare), never on the
-//   server. This is why there's no server-side design-rendering dependency
-//   (sharp/libvips) for the final output.
-// - AI is an accelerant, never a black box: "Generate with AI" proposes a
-//   starting layout the counselor can still drag/resize/restyle by hand —
-//   it never locks them into AI-only editing.
-//
-// NOT YET WIRED (deliberately flagged, not silently skipped):
-// - The 4 ApiService calls below (createFlyerProject / getFlyerProject /
-//   updateFlyerProjectCanvas / uploadFlyerElementImage / generateFlyerAI /
-//   getTenantLogos) are written assuming ApiService's established static-
-//   method + baseUrl + x-tenant-id-header convention (matching every other
-//   module in this app). They need a final cross-check against the live
-//   api_service.dart before this compiles — see the accompanying message.
-// - Inline title-rename (tap-to-edit) — deferred, title is set at creation.
-// - Multi-select / group-move — deferred, single-element selection only.
-// - Snap-to-grid / alignment guides — deferred to a fast-follow polish pass.
+//   positioned/sized/rotated/layered/locked (see flyer_element.dart).
+// - Client-side render: the final image is produced on-device via
+//   RepaintBoundary -> toImage() -> PNG, so what the counselor sees is
+//   exactly what gets sent, and there's no server rendering dependency.
+// - AI is an accelerant, never a cage: "Generate with AI" proposes a
+//   starting layout that stays fully hand-editable afterwards.
+// - Autosave over manual save: a counselor building a flyer between calls
+//   should never lose work to a backgrounded app. Manual save still exists
+//   for reassurance, but isn't load-bearing.
 
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:image_picker/image_picker.dart';
-import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-import 'flyer_element.dart';
-import 'flyer_canvas_element_widget.dart';
 import '../../services/api_service.dart';
 import '../../widgets/color_picker_dialog.dart';
+import 'flyer_element.dart';
+import 'flyer_canvas_element_widget.dart';
 
 class FlyerStudioScreen extends StatefulWidget {
   final String? projectId;
@@ -57,22 +49,33 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   double _canvasWidth = 1080;
   double _canvasHeight = 1350;
   String _backgroundColor = '#FFFFFF';
+  String? _backgroundImageUrl;
   List<FlyerElement> _elements = [];
 
   String? _selectedId;
   bool _loading = true;
   bool _saving = false;
   bool _generatingAI = false;
+  bool _exporting = false;
+  bool _dirty = false;
   String? _error;
+  List<FlyerSnapGuide> _snapGuides = const [];
 
+  Timer? _autosaveTimer;
   final List<String> _undoStack = [];
   final List<String> _redoStack = [];
-  static const int _maxHistory = 30;
+  static const int _maxHistory = 40;
 
   @override
   void initState() {
     super.initState();
     _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    _autosaveTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _bootstrap() async {
@@ -122,17 +125,28 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     _canvasWidth = (data['canvas_width'] as num?)?.toDouble() ?? 1080;
     _canvasHeight = (data['canvas_height'] as num?)?.toDouble() ?? 1350;
     _backgroundColor = data['background_color']?.toString() ?? '#FFFFFF';
-    final rawElements = (data['canvas_json'] as List?) ?? [];
-    _elements = rawElements
+    _backgroundImageUrl = data['background_image_url']?.toString();
+    final raw = (data['canvas_json'] as List?) ?? [];
+    _elements = raw
         .whereType<Map>()
         .map((e) => FlyerElement.fromJson(Map<String, dynamic>.from(e)))
         .toList();
+    _sortElements();
   }
 
-  // ---------------------------------------------------------------------
-  // Undo / redo — snapshot-based (simple, robust, matches this project's
-  // "explainable over clever" philosophy used elsewhere, e.g. engagementTrend).
-  // ---------------------------------------------------------------------
+  void _sortElements() => _elements.sort((a, b) => a.zIndex.compareTo(b.zIndex));
+
+  FlyerElement? get _selected {
+    if (_selectedId == null) return null;
+    for (final e in _elements) {
+      if (e.id == _selectedId) return e;
+    }
+    return null;
+  }
+
+  // ------------------------------------------------------------------
+  // History + autosave
+  // ------------------------------------------------------------------
 
   String _snapshot() => jsonEncode(_elements.map((e) => e.toJson()).toList());
 
@@ -142,149 +156,139 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     _redoStack.clear();
   }
 
-  void _restoreFromEncodedSnapshot(String snapshot) {
+  void _restoreSnapshot(String snapshot) {
     try {
-      final rawList = jsonDecode(snapshot) as List;
+      final raw = jsonDecode(snapshot) as List;
       setState(() {
-        _elements = rawList
+        _elements = raw
             .whereType<Map>()
             .map((e) => FlyerElement.fromJson(Map<String, dynamic>.from(e)))
             .toList();
+        _sortElements();
         _selectedId = null;
       });
+      _markDirty();
     } catch (_) {
-      // Corrupt snapshot (shouldn't happen — we only ever write via
-      // jsonEncode above) — fail safe by leaving the canvas untouched
-      // rather than crashing the editor.
+      // Snapshots are always written via jsonEncode, so this shouldn't
+      // happen — but fail by leaving the canvas untouched rather than
+      // crashing an editor with unsaved work in it.
     }
   }
 
   void _undo() {
     if (_undoStack.isEmpty) return;
     _redoStack.add(_snapshot());
-    final prev = _undoStack.removeLast();
-    _restoreFromEncodedSnapshot(prev);
+    _restoreSnapshot(_undoStack.removeLast());
   }
 
   void _redo() {
     if (_redoStack.isEmpty) return;
     _undoStack.add(_snapshot());
-    final next = _redoStack.removeLast();
-    _restoreFromEncodedSnapshot(next);
+    _restoreSnapshot(_redoStack.removeLast());
   }
 
-  // ---------------------------------------------------------------------
-  // Element mutations
-  // ---------------------------------------------------------------------
-
-  void _selectElement(String? id) => setState(() => _selectedId = id);
-
-  void _onElementChanged(FlyerElement el) {
-    setState(() {}); // element is mutated in-place by the wrapper widget
-  }
-
-  void _addTextElement() {
-    _pushUndo();
-    final el = FlyerElement(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      type: FlyerElementType.text,
-      x: _canvasWidth / 2 - 120,
-      y: _canvasHeight / 2 - 30,
-      width: 240,
-      height: 60,
-      text: 'Double-tap to edit',
-      fontSize: 28,
-      zIndex: _nextZIndex(),
-    );
-    setState(() {
-      _elements.add(el);
-      _selectedId = el.id;
+  /// Debounced autosave. Editing is a burst activity (drag, drag, drag,
+  /// type) so saving on every frame would hammer the API; 2.5s after the
+  /// last change is late enough to batch and early enough that a killed
+  /// app rarely costs more than one edit.
+  void _markDirty() {
+    _dirty = true;
+    _autosaveTimer?.cancel();
+    _autosaveTimer = Timer(const Duration(milliseconds: 2500), () {
+      _save(silent: true);
     });
   }
 
-  int _nextZIndex() =>
-      _elements.isEmpty ? 0 : (_elements.map((e) => e.zIndex).reduce(math.max) + 1);
-
-  Future<void> _addImageElement({bool asLogoPicker = false}) async {
-    if (asLogoPicker) {
-      await _showLogoPicker();
-      return;
-    }
-    final picked = await _imagePicker.pickImage(source: ImageSource.gallery, imageQuality: 85);
-    if (picked == null || _projectId == null) return;
-
+  Future<void> _save({bool silent = false}) async {
+    if (_projectId == null || _saving) return;
     setState(() => _saving = true);
     try {
-      final result = await _api.uploadFlyerElementImage(_projectId!, picked.path);
-      final url = result['image_url']?.toString();
-      _pushUndo();
-      final el = FlyerElement(
-        id: DateTime.now().microsecondsSinceEpoch.toString(),
-        type: FlyerElementType.image,
-        x: _canvasWidth / 2 - 150,
-        y: _canvasHeight / 2 - 150,
-        width: 300,
-        height: 300,
-        url: url,
-        zIndex: _nextZIndex(),
+      await _api.updateFlyerProjectCanvas(
+        _projectId!,
+        _elements.map((e) => e.toJson()).toList(),
       );
-      setState(() {
-        _elements.add(el);
-        _selectedId = el.id;
-      });
+      _dirty = false;
+      if (!silent) _showSnack('Saved');
     } catch (e) {
-      _showSnack('Image upload failed: $e');
+      if (!silent) _showSnack('Save failed: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  Future<void> _showLogoPicker() async {
-    List<dynamic> logos = [];
-    try {
-      logos = await _api.getTenantLogos();
-    } catch (e) {
-      _showSnack('Could not load logos: $e');
-      return;
-    }
-    if (!mounted) return;
-    if (logos.isEmpty) {
-      _showSnack('No saved logos yet — add one from Settings first.');
-      return;
-    }
-    await showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Wrap(
-          children: logos.map((l) {
-            final logo = Map<String, dynamic>.from(l);
-            return ListTile(
-              leading: const Icon(Icons.workspace_premium),
-              title: Text(logo['label']?.toString() ?? 'Logo'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pushUndo();
-                final el = FlyerElement(
-                  id: DateTime.now().microsecondsSinceEpoch.toString(),
-                  type: FlyerElementType.logo,
-                  x: 40,
-                  y: 40,
-                  width: 160,
-                  height: 160,
-                  fit: 'contain',
-                  url: logo['image_url']?.toString(),
-                  zIndex: _nextZIndex(),
-                );
-                setState(() {
-                  _elements.add(el);
-                  _selectedId = el.id;
-                });
-              },
-            );
-          }).toList(),
-        ),
-      ),
-    );
+  Future<bool> _confirmExit() async {
+    _autosaveTimer?.cancel();
+    if (!_dirty) return true;
+    await _save(silent: true);
+    return true;
+  }
+
+  // ------------------------------------------------------------------
+  // Element operations
+  // ------------------------------------------------------------------
+
+  void _selectElement(String? id) => setState(() => _selectedId = id);
+
+  void _onElementChanged(FlyerElement el) {
+    setState(() {});
+    _markDirty();
+  }
+
+  int _nextZIndex() =>
+      _elements.isEmpty ? 0 : (_elements.map((e) => e.zIndex).reduce(math.max) + 1);
+
+  void _addElement(FlyerElement el) {
+    _pushUndo();
+    setState(() {
+      _elements.add(el);
+      _sortElements();
+      _selectedId = el.id;
+    });
+    _markDirty();
+  }
+
+  String _newId() => DateTime.now().microsecondsSinceEpoch.toString();
+
+  void _addTextElement() {
+    _addElement(FlyerElement(
+      id: _newId(),
+      type: FlyerElementType.text,
+      x: _canvasWidth * 0.1,
+      y: _canvasHeight / 2 - 40,
+      width: _canvasWidth * 0.8,
+      height: 90,
+      text: 'Your text here',
+      fontSize: _canvasWidth * 0.05,
+      fontFamily: 'Montserrat',
+      fontWeight: 'bold',
+      textAlign: 'center',
+      zIndex: _nextZIndex(),
+    ));
+  }
+
+  void _addShapeElement() {
+    _addElement(FlyerElement(
+      id: _newId(),
+      type: FlyerElementType.shape,
+      x: _canvasWidth * 0.15,
+      y: _canvasHeight * 0.4,
+      width: _canvasWidth * 0.7,
+      height: _canvasHeight * 0.12,
+      shapeColor: '#1B2A4A',
+      zIndex: _nextZIndex(),
+    ));
+  }
+
+  void _duplicateSelected() {
+    final el = _selected;
+    if (el == null) return;
+    final copy = el.clone();
+    copy.id = _newId();
+    copy.x += _canvasWidth * 0.03;
+    copy.y += _canvasHeight * 0.02;
+    copy.zIndex = _nextZIndex();
+    copy.locked = false;
+    _addElement(copy);
   }
 
   void _deleteSelected() {
@@ -294,41 +298,347 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       _elements.removeWhere((e) => e.id == _selectedId);
       _selectedId = null;
     });
+    _markDirty();
+  }
+
+  void _nudge(double dx, double dy) {
+    final el = _selected;
+    if (el == null || el.locked) return;
+    setState(() {
+      el.x += dx;
+      el.y += dy;
+    });
+    _markDirty();
   }
 
   void _reorderLayer(String id, int direction) {
     _pushUndo();
     setState(() {
+      _sortElements();
       final idx = _elements.indexWhere((e) => e.id == id);
       if (idx < 0) return;
       final swapWith = idx + direction;
       if (swapWith < 0 || swapWith >= _elements.length) return;
-      final a = _elements[idx].zIndex;
+      final tmp = _elements[idx].zIndex;
       _elements[idx].zIndex = _elements[swapWith].zIndex;
-      _elements[swapWith].zIndex = a;
-      _elements.sort((x, y) => x.zIndex.compareTo(y.zIndex));
+      _elements[swapWith].zIndex = tmp;
+      _sortElements();
     });
+    _markDirty();
   }
 
-  // ---------------------------------------------------------------------
-  // Save / AI generate / export
-  // ---------------------------------------------------------------------
+  Future<void> _editTextElement(FlyerElement el) async {
+    if (el.type != FlyerElementType.text) return;
+    final controller = TextEditingController(text: el.text ?? '');
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Text'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 6,
+          minLines: 2,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            hintText: 'Type your text',
+            helperText: 'Enter for a new line',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+    _pushUndo();
+    setState(() => el.text = result);
+    _markDirty();
+  }
 
-  Future<void> _save() async {
-    if (_projectId == null) return;
+  Future<void> _replaceElementImage(FlyerElement el) async {
+    final picked =
+        await _imagePicker.pickImage(source: ImageSource.gallery, imageQuality: 90);
+    if (picked == null || _projectId == null) return;
     setState(() => _saving = true);
     try {
-      await _api.updateFlyerProjectCanvas(
-        _projectId!,
-        _elements.map((e) => e.toJson()).toList(),
-      );
-      _showSnack('Saved');
+      final result = await _api.uploadFlyerElementImage(_projectId!, picked.path);
+      _pushUndo();
+      setState(() => el.url = result['image_url']?.toString());
+      _markDirty();
     } catch (e) {
-      _showSnack('Save failed: $e');
+      _showSnack('Image upload failed: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
+
+  Future<void> _addImageElement() async {
+    final picked =
+        await _imagePicker.pickImage(source: ImageSource.gallery, imageQuality: 90);
+    if (picked == null || _projectId == null) return;
+    setState(() => _saving = true);
+    try {
+      final result = await _api.uploadFlyerElementImage(_projectId!, picked.path);
+      _addElement(FlyerElement(
+        id: _newId(),
+        type: FlyerElementType.image,
+        x: _canvasWidth * 0.15,
+        y: _canvasHeight * 0.25,
+        width: _canvasWidth * 0.7,
+        height: _canvasWidth * 0.7,
+        url: result['image_url']?.toString(),
+        zIndex: _nextZIndex(),
+      ));
+    } catch (e) {
+      _showSnack('Image upload failed: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _addLogoElement() async {
+    List<Map<String, dynamic>> logos = [];
+    try {
+      logos = await _api.getTenantLogos();
+    } catch (e) {
+      _showSnack('Could not load logos: $e');
+      return;
+    }
+    if (!mounted) return;
+    if (logos.isEmpty) {
+      _showSnack('No saved logos yet — add one in Settings > Brand Logos');
+      return;
+    }
+    await showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: logos.map((l) {
+            final logo = Map<String, dynamic>.from(l);
+            return ListTile(
+              leading: logo['image_url'] != null
+                  ? Image.network(logo['image_url'].toString(),
+                      width: 40, height: 40, fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) =>
+                          const Icon(Icons.workspace_premium))
+                  : const Icon(Icons.workspace_premium),
+              title: Text(logo['label']?.toString() ?? 'Logo'),
+              subtitle: logo['is_default'] == true ? const Text('Default') : null,
+              onTap: () {
+                Navigator.pop(ctx);
+                _addElement(FlyerElement(
+                  id: _newId(),
+                  type: FlyerElementType.logo,
+                  x: _canvasWidth * 0.35,
+                  y: _canvasHeight * 0.05,
+                  width: _canvasWidth * 0.3,
+                  height: _canvasWidth * 0.18,
+                  fit: 'contain',
+                  url: logo['image_url']?.toString(),
+                  zIndex: _nextZIndex(),
+                ));
+              },
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Canvas-level settings
+  // ------------------------------------------------------------------
+
+  Future<void> _renameFlyer() async {
+    final controller = TextEditingController(text: _title);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename Flyer'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == null || result.isEmpty || _projectId == null) return;
+    setState(() => _title = result);
+    try {
+      await _api.updateFlyerProject(_projectId!, title: result);
+    } catch (e) {
+      _showSnack('Rename failed: $e');
+    }
+  }
+
+  Future<void> _changeCanvasSize() async {
+    final preset = await showModalBottomSheet<FlyerCanvasPreset>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Canvas Size',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            ...kFlyerCanvasPresets.map((p) {
+              final isCurrent = p.width == _canvasWidth && p.height == _canvasHeight;
+              return ListTile(
+                leading: Icon(
+                  isCurrent ? Icons.check_circle : Icons.crop_original,
+                  color: isCurrent ? const Color(0xFF4C6FFF) : null,
+                ),
+                title: Text(p.name),
+                subtitle: Text('${p.note}  ·  ${p.width.toInt()}×${p.height.toInt()}'),
+                onTap: () => Navigator.pop(ctx, p),
+              );
+            }),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (preset == null || _projectId == null) return;
+    if (preset.width == _canvasWidth && preset.height == _canvasHeight) return;
+
+    // Scale existing elements proportionally so a design isn't destroyed by
+    // a size change — switching a finished 4:5 flyer to a Story should
+    // reflow it, not scatter everything off-canvas.
+    final scaleX = preset.width / _canvasWidth;
+    final scaleY = preset.height / _canvasHeight;
+    _pushUndo();
+    setState(() {
+      for (final el in _elements) {
+        el.x *= scaleX;
+        el.y *= scaleY;
+        el.width *= scaleX;
+        el.height *= scaleY;
+        if (el.type == FlyerElementType.text) el.fontSize *= scaleX;
+      }
+      _canvasWidth = preset.width;
+      _canvasHeight = preset.height;
+    });
+    try {
+      await _api.updateFlyerProject(
+        _projectId!,
+        canvasWidth: preset.width,
+        canvasHeight: preset.height,
+      );
+      _markDirty();
+    } catch (e) {
+      _showSnack('Could not change size: $e');
+    }
+  }
+
+  Future<void> _changeBackgroundColor() async {
+    final picked = await showDialog<Color>(
+      context: context,
+      builder: (_) => ColorPickerDialog(
+        initial: flyerHexToColor(_backgroundColor),
+        title: 'Background Colour',
+      ),
+    );
+    if (picked == null || _projectId == null) return;
+    setState(() => _backgroundColor = flyerColorToHex(picked));
+    try {
+      await _api.updateFlyerProject(_projectId!, backgroundColor: _backgroundColor);
+    } catch (e) {
+      _showSnack('Could not save background: $e');
+    }
+  }
+
+  Future<void> _changeBackgroundImage() async {
+    final picked =
+        await _imagePicker.pickImage(source: ImageSource.gallery, imageQuality: 90);
+    if (picked == null || _projectId == null) return;
+    setState(() => _saving = true);
+    try {
+      final result = await _api.uploadFlyerBackground(_projectId!, picked.path);
+      setState(() =>
+          _backgroundImageUrl = result['background_image_url']?.toString());
+    } catch (e) {
+      _showSnack('Background upload failed: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  void _showBackgroundSheet() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            ListTile(
+              leading: Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: flyerHexToColor(_backgroundColor),
+                  border: Border.all(color: Colors.grey.shade400),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              title: const Text('Background colour'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _changeBackgroundColor();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.wallpaper),
+              title: const Text('Background photo'),
+              subtitle: Text(_backgroundImageUrl == null ? 'None' : 'Tap to replace'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _changeBackgroundImage();
+              },
+            ),
+            if (_backgroundImageUrl != null)
+              ListTile(
+                leading: const Icon(Icons.hide_image_outlined),
+                title: const Text('Remove background photo'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() => _backgroundImageUrl = null);
+                  _showSnack('Removed from view — re-open to restore from server');
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.aspect_ratio),
+              title: const Text('Canvas size'),
+              subtitle: Text('${_canvasWidth.toInt()}×${_canvasHeight.toInt()}'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _changeCanvasSize();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // AI + export
+  // ------------------------------------------------------------------
 
   Future<void> _generateWithAI() async {
     if (_projectId == null) return;
@@ -337,14 +647,24 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Generate with AI'),
-        content: TextField(
-          controller: promptController,
-          autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'e.g. "MBBS admission open, navy and gold, urgent tone"',
-            border: OutlineInputBorder(),
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: promptController,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                hintText: 'e.g. "MBBS admission open, navy and gold, urgent tone"',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'AI proposes a layout. Everything stays editable afterwards.',
+              style: TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -363,11 +683,12 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('Replace current design?'),
           content: const Text(
-            'AI will generate a new layout. Your current elements will be replaced — this can be undone.',
-          ),
+              'AI will generate a new layout, replacing what is on the canvas. You can undo this.'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Replace')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true), child: const Text('Replace')),
           ],
         ),
       );
@@ -377,16 +698,18 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     setState(() => _generatingAI = true);
     try {
       final result = await _api.generateFlyerAI(_projectId!, prompt);
-      final rawList = (result['canvas_json'] as List?) ?? [];
+      final raw = (result['canvas_json'] as List?) ?? [];
       _pushUndo();
       setState(() {
-        _elements = rawList
+        _elements = raw
             .whereType<Map>()
             .map((e) => FlyerElement.fromJson(Map<String, dynamic>.from(e)))
             .toList();
+        _sortElements();
         _selectedId = null;
       });
-      _showSnack('AI layout applied — tap Save to keep it');
+      _markDirty();
+      _showSnack('AI layout applied — drag anything to adjust');
     } catch (e) {
       _showSnack('AI generation failed: $e');
     } finally {
@@ -395,149 +718,238 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   }
 
   Future<void> _exportAndShare() async {
+    if (_projectId == null) return;
+    // Deselect and drop editor chrome so handles/borders don't end up
+    // baked into the exported PNG.
+    setState(() {
+      _selectedId = null;
+      _exporting = true;
+    });
+    await Future.delayed(const Duration(milliseconds: 120));
+
     try {
       final boundary =
           _canvasRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) return;
-      final image = await boundary.toImage(pixelRatio: 2.0);
+
+      // Render at full canvas resolution regardless of screen size, so a
+      // flyer designed on a 6-inch phone still exports at 1080px+.
+      final onScreenWidth = boundary.size.width;
+      final pixelRatio = (_canvasWidth / onScreenWidth).clamp(1.0, 4.0);
+      final image = await boundary.toImage(pixelRatio: pixelRatio);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null || _projectId == null) return;
+      if (byteData == null) return;
       final bytes = byteData.buffer.asUint8List();
-      // Write to a temp file first: the OS share-sheet (and WhatsApp /
+
+      // Write to a temp file first: the OS share sheet (and WhatsApp /
       // Instagram specifically) need a real file, not raw bytes.
       final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/flyer-${DateTime.now().millisecondsSinceEpoch}.png');
+      final safeTitle = _title.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-');
+      final file = File(
+          '${dir.path}/$safeTitle-${DateTime.now().millisecondsSinceEpoch}.png');
       await file.writeAsBytes(bytes);
 
-      // Archive to storage too, so the flyer is recoverable from the
-      // history screen later. Deliberately non-fatal: sharing is the
-      // user's actual intent here, so a backup failure warns but never
-      // blocks the share sheet from opening.
+      // Archive to storage too, so the flyer shows a thumbnail in history
+      // later. Deliberately non-fatal: sharing is the user's actual intent,
+      // so a backup failure warns but never blocks the share sheet.
       try {
         await _api.uploadFlyerRender(_projectId!, bytes);
       } catch (e) {
-        _showSnack('Shared, but cloud backup failed: $e');
+        _showSnack('Shared, but cloud backup failed');
       }
 
       await Share.shareXFiles([XFile(file.path)], text: _title);
     } catch (e) {
       _showSnack('Export failed: $e');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
     }
   }
 
   void _showSnack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+    );
   }
 
-  // ---------------------------------------------------------------------
+  // ------------------------------------------------------------------
   // Build
-  // ---------------------------------------------------------------------
+  // ------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
-    final selected =
-        _selectedId == null ? null : _elements.firstWhere((e) => e.id == _selectedId, orElse: () => _elements.first);
+    final selected = _selected;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_title, overflow: TextOverflow.ellipsis),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.undo),
-            onPressed: _undoStack.isEmpty ? null : _undo,
-            tooltip: 'Undo',
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        final ok = await _confirmExit();
+        if (ok && mounted) Navigator.pop(context);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: GestureDetector(
+            onTap: _renameFlyer,
+            child: Row(
+              children: [
+                Flexible(child: Text(_title, overflow: TextOverflow.ellipsis)),
+                const SizedBox(width: 4),
+                const Icon(Icons.edit, size: 14),
+              ],
+            ),
           ),
-          IconButton(
-            icon: const Icon(Icons.redo),
-            onPressed: _redoStack.isEmpty ? null : _redo,
-            tooltip: 'Redo',
-          ),
-          IconButton(
-            icon: _generatingAI
-                ? const SizedBox(
-                    width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.auto_awesome),
-            onPressed: _generatingAI ? null : _generateWithAI,
-            tooltip: 'Generate with AI',
-          ),
-          IconButton(
-            icon: const Icon(Icons.layers),
-            onPressed: _showLayersSheet,
-            tooltip: 'Layers',
-          ),
-          IconButton(
-            icon: _saving
-                ? const SizedBox(
-                    width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.save),
-            onPressed: _saving ? null : _save,
-            tooltip: 'Save',
-          ),
-          IconButton(
-            icon: const Icon(Icons.ios_share),
-            onPressed: _exportAndShare,
-            tooltip: 'Export & Share',
-          ),
-        ],
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.undo),
+              onPressed: _undoStack.isEmpty ? null : _undo,
+              tooltip: 'Undo',
+            ),
+            IconButton(
+              icon: const Icon(Icons.redo),
+              onPressed: _redoStack.isEmpty ? null : _redo,
+              tooltip: 'Redo',
+            ),
+            IconButton(
+              icon: _generatingAI
+                  ? const SizedBox(
+                      width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.auto_awesome),
+              onPressed: _generatingAI ? null : _generateWithAI,
+              tooltip: 'Generate with AI',
+            ),
+            PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'layers') _showLayersSheet();
+                if (v == 'background') _showBackgroundSheet();
+                if (v == 'save') _save();
+                if (v == 'rename') _renameFlyer();
+              },
+              itemBuilder: (ctx) => const [
+                PopupMenuItem(value: 'layers', child: Text('Layers')),
+                PopupMenuItem(value: 'background', child: Text('Background & size')),
+                PopupMenuItem(value: 'rename', child: Text('Rename')),
+                PopupMenuItem(value: 'save', child: Text('Save now')),
+              ],
+            ),
+          ],
+        ),
+        floatingActionButton: _loading || _error != null
+            ? null
+            : FloatingActionButton.extended(
+                onPressed: _exporting ? null : _exportAndShare,
+                icon: _exporting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.share),
+                label: const Text('Share'),
+              ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+                ? Center(
+                    child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!)))
+                : Column(
+                    children: [
+                      Expanded(child: _buildCanvasArea()),
+                      if (selected != null) _buildStylePanel(selected),
+                      _buildToolbar(),
+                    ],
+                  ),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!)))
-              : Column(
-                  children: [
-                    Expanded(child: _buildCanvasArea()),
-                    if (selected != null) _buildStylePanel(selected),
-                    _buildToolbar(),
-                  ],
-                ),
     );
   }
 
   Widget _buildCanvasArea() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxW = math.min(constraints.maxWidth - 16, 420.0);
-        final scale = maxW / _canvasWidth;
+        final availableW = constraints.maxWidth - 24;
+        final availableH = constraints.maxHeight - 24;
+        // Fit the whole canvas on screen in both axes — a Story (9:16)
+        // canvas must not overflow vertically just because it's tall.
+        final scale = math.min(
+          availableW / _canvasWidth,
+          availableH / _canvasHeight,
+        );
+        final displayW = _canvasWidth * scale;
         final displayH = _canvasHeight * scale;
 
         return Center(
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: RepaintBoundary(
-                key: _canvasRepaintKey,
-                child: GestureDetector(
-                  onTap: () => _selectElement(null),
-                  child: Container(
-                    width: maxW,
-                    height: displayH,
-                    decoration: BoxDecoration(
-                      color: flyerHexToColor(_backgroundColor),
-                      border: Border.all(color: Colors.grey.shade300),
-                      boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 8)],
-                    ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: RepaintBoundary(
+              key: _canvasRepaintKey,
+              child: GestureDetector(
+                onTap: () => _selectElement(null),
+                child: Container(
+                  width: displayW,
+                  height: displayH,
+                  decoration: BoxDecoration(
+                    color: flyerHexToColor(_backgroundColor),
+                    boxShadow: _exporting
+                        ? null
+                        : const [BoxShadow(color: Colors.black26, blurRadius: 8)],
+                  ),
+                  child: ClipRect(
                     child: Stack(
-                      clipBehavior: Clip.none,
-                      children: (_elements..sort((a, b) => a.zIndex.compareTo(b.zIndex)))
-                          .map((el) => FlyerCanvasElementWidget(
-                                key: ValueKey(el.id),
-                                element: el,
-                                scale: scale,
-                                selected: el.id == _selectedId,
-                                onTap: () => _selectElement(el.id),
-                                onChanged: _onElementChanged,
-                                onDragStart: _pushUndo,
-                                onDragEnd: () {},
-                                onDelete: () {
-                                  setState(() {
-                                    _elements.removeWhere((e) => e.id == el.id);
-                                    _selectedId = null;
-                                  });
-                                },
-                              ))
-                          .toList(),
+                      clipBehavior: Clip.hardEdge,
+                      children: [
+                        if (_backgroundImageUrl != null)
+                          Positioned.fill(
+                            child: Image.network(
+                              _backgroundImageUrl!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                            ),
+                          ),
+                        ..._elements.map((el) => FlyerCanvasElementWidget(
+                              key: ValueKey(el.id),
+                              element: el,
+                              scale: scale,
+                              selected: !_exporting && el.id == _selectedId,
+                              exporting: _exporting,
+                              canvasWidth: _canvasWidth,
+                              canvasHeight: _canvasHeight,
+                              onTap: () => _selectElement(el.id),
+                              onDoubleTap: () {
+                                if (el.type == FlyerElementType.text) {
+                                  _selectElement(el.id);
+                                  _editTextElement(el);
+                                } else {
+                                  _selectElement(el.id);
+                                  _replaceElementImage(el);
+                                }
+                              },
+                              onChanged: _onElementChanged,
+                              onDragStart: _pushUndo,
+                              onDragEnd: () {},
+                              onDelete: () {
+                                _pushUndo();
+                                setState(() {
+                                  _elements.removeWhere((e) => e.id == el.id);
+                                  _selectedId = null;
+                                });
+                                _markDirty();
+                              },
+                              onSnapGuides: (guides) {
+                                if (guides.length != _snapGuides.length) {
+                                  setState(() => _snapGuides = guides);
+                                }
+                              },
+                            )),
+                        if (_snapGuides.isNotEmpty && !_exporting)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: FlyerSnapGuidePainter(
+                                    guides: _snapGuides, scale: scale),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 ),
@@ -550,39 +962,47 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   }
 
   Widget _buildToolbar() {
+    final hasSelection = _selectedId != null;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       decoration: BoxDecoration(
         border: Border(top: BorderSide(color: Colors.grey.shade300)),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _toolbarButton(Icons.text_fields, 'Text', _addTextElement),
-          _toolbarButton(Icons.add_photo_alternate, 'Image', () => _addImageElement()),
-          _toolbarButton(
-              Icons.workspace_premium, 'Logo', () => _addImageElement(asLogoPicker: true)),
-          _toolbarButton(
-            Icons.delete_outline,
-            'Delete',
-            _selectedId == null ? null : _deleteSelected,
-          ),
-        ],
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _toolbarButton(Icons.text_fields, 'Text', _addTextElement),
+            _toolbarButton(Icons.add_photo_alternate, 'Photo', _addImageElement),
+            _toolbarButton(Icons.workspace_premium, 'Logo', _addLogoElement),
+            _toolbarButton(Icons.rectangle, 'Shape', _addShapeElement),
+            _toolbarButton(Icons.wallpaper, 'Background', _showBackgroundSheet),
+            _toolbarButton(Icons.layers, 'Layers', _showLayersSheet),
+            _toolbarButton(
+                Icons.copy, 'Duplicate', hasSelection ? _duplicateSelected : null),
+            _toolbarButton(
+                Icons.delete_outline, 'Delete', hasSelection ? _deleteSelected : null),
+          ],
+        ),
       ),
     );
   }
 
   Widget _toolbarButton(IconData icon, String label, VoidCallback? onTap) {
+    final disabled = onTap == null;
     return InkWell(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+      child: Container(
+        width: 72,
+        padding: const EdgeInsets.symmetric(vertical: 6),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: onTap == null ? Colors.grey.shade400 : null),
+            Icon(icon, size: 22, color: disabled ? Colors.grey.shade400 : null),
+            const SizedBox(height: 2),
             Text(label,
-                style: TextStyle(fontSize: 11, color: onTap == null ? Colors.grey.shade400 : null)),
+                style: TextStyle(
+                    fontSize: 10, color: disabled ? Colors.grey.shade400 : null)),
           ],
         ),
       ),
@@ -590,103 +1010,290 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   }
 
   Widget _buildStylePanel(FlyerElement el) {
-    if (el.type == FlyerElementType.text) {
-      return Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.grey.shade200))),
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 190),
+      decoration:
+          BoxDecoration(border: Border(top: BorderSide(color: Colors.grey.shade200))),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButton<String>(
-                    value: kFlyerFontFamilies.contains(el.fontFamily)
-                        ? el.fontFamily
-                        : kFlyerFontFamilies.first,
-                    isExpanded: true,
-                    items: kFlyerFontFamilies
-                        .map((f) => DropdownMenuItem(value: f, child: Text(f, style: TextStyle(fontFamily: f))))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setState(() => el.fontFamily = v);
-                    },
-                  ),
-                ),
-                IconButton(
-                  icon: Icon(el.fontWeight == 'bold' ? Icons.format_bold : Icons.format_bold_outlined),
-                  onPressed: () => setState(
-                      () => el.fontWeight = el.fontWeight == 'bold' ? 'normal' : 'bold'),
-                ),
-                IconButton(
-                  icon: Container(width: 20, height: 20, color: flyerHexToColor(el.color)),
-                  onPressed: () async {
-                    final picked = await showDialog<Color>(
-                      context: context,
-                      builder: (_) => ColorPickerDialog(initial: flyerHexToColor(el.color), title: 'Text Color'),
-                    );
-                    if (picked != null) {
-                      setState(() => el.color =
-                          '#${picked.value.toRadixString(16).substring(2).toUpperCase()}');
-                    }
-                  },
-                ),
-              ],
-            ),
-            Row(
-              children: [
-                const Icon(Icons.format_size, size: 18),
-                Expanded(
-                  child: Slider(
-                    value: el.fontSize.clamp(8, 120),
-                    min: 8,
-                    max: 120,
-                    onChanged: (v) => setState(() => el.fontSize = v),
-                  ),
-                ),
-                for (final a in ['left', 'center', 'right'])
-                  IconButton(
-                    icon: Icon(
-                      a == 'left'
-                          ? Icons.format_align_left
-                          : a == 'center'
-                              ? Icons.format_align_center
-                              : Icons.format_align_right,
-                      color: el.textAlign == a ? const Color(0xFF4C6FFF) : null,
-                    ),
-                    onPressed: () => setState(() => el.textAlign = a),
-                  ),
-              ],
-            ),
+            _buildNudgeRow(el),
+            if (el.type == FlyerElementType.text) ..._textControls(el),
+            if (el.type == FlyerElementType.image || el.type == FlyerElementType.logo)
+              ..._imageControls(el),
+            if (el.type == FlyerElementType.shape) ..._shapeControls(el),
           ],
         ),
-      );
-    }
-    if (el.type == FlyerElementType.image || el.type == FlyerElementType.logo) {
-      return Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.grey.shade200))),
-        child: Row(
-          children: [
-            const Icon(Icons.opacity, size: 18),
-            Expanded(
-              child: Slider(
-                value: el.opacity.clamp(0.1, 1.0),
-                min: 0.1,
-                max: 1.0,
-                onChanged: (v) => setState(() => el.opacity = v),
+      ),
+    );
+  }
+
+  Widget _buildNudgeRow(FlyerElement el) {
+    final step = _canvasWidth * 0.01;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text('Nudge', style: TextStyle(fontSize: 11, color: Colors.grey)),
+        IconButton(
+            icon: const Icon(Icons.keyboard_arrow_left, size: 20),
+            onPressed: () => _nudge(-step, 0)),
+        IconButton(
+            icon: const Icon(Icons.keyboard_arrow_up, size: 20),
+            onPressed: () => _nudge(0, -step)),
+        IconButton(
+            icon: const Icon(Icons.keyboard_arrow_down, size: 20),
+            onPressed: () => _nudge(0, step)),
+        IconButton(
+            icon: const Icon(Icons.keyboard_arrow_right, size: 20),
+            onPressed: () => _nudge(step, 0)),
+        const SizedBox(width: 8),
+        IconButton(
+          icon: const Icon(Icons.center_focus_strong, size: 20),
+          tooltip: 'Centre horizontally',
+          onPressed: () {
+            setState(() => el.x = _canvasWidth / 2 - el.width / 2);
+            _markDirty();
+          },
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _textControls(FlyerElement el) {
+    return [
+      Row(
+        children: [
+          Expanded(
+            child: DropdownButton<String>(
+              value: kFlyerFontFamilies.contains(el.fontFamily)
+                  ? el.fontFamily
+                  : kFlyerFontFamilies.first,
+              isExpanded: true,
+              items: kFlyerFontFamilies
+                  .map((f) => DropdownMenuItem(
+                      value: f, child: Text(f, style: TextStyle(fontFamily: f))))
+                  .toList(),
+              onChanged: (v) {
+                if (v == null) return;
+                setState(() => el.fontFamily = v);
+                _markDirty();
+              },
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit_note),
+            tooltip: 'Edit text',
+            onPressed: () => _editTextElement(el),
+          ),
+        ],
+      ),
+      Row(
+        children: [
+          IconButton(
+            icon: Icon(Icons.format_bold,
+                color: el.fontWeight == 'bold' ? const Color(0xFF4C6FFF) : null),
+            onPressed: () {
+              setState(() =>
+                  el.fontWeight = el.fontWeight == 'bold' ? 'normal' : 'bold');
+              _markDirty();
+            },
+          ),
+          IconButton(
+            icon: Icon(Icons.format_italic,
+                color: el.italic ? const Color(0xFF4C6FFF) : null),
+            onPressed: () {
+              setState(() => el.italic = !el.italic);
+              _markDirty();
+            },
+          ),
+          IconButton(
+            icon: Icon(Icons.format_underlined,
+                color: el.underline ? const Color(0xFF4C6FFF) : null),
+            onPressed: () {
+              setState(() => el.underline = !el.underline);
+              _markDirty();
+            },
+          ),
+          for (final a in ['left', 'center', 'right'])
+            IconButton(
+              icon: Icon(
+                a == 'left'
+                    ? Icons.format_align_left
+                    : a == 'center'
+                        ? Icons.format_align_center
+                        : Icons.format_align_right,
+                color: el.textAlign == a ? const Color(0xFF4C6FFF) : null,
+              ),
+              onPressed: () {
+                setState(() => el.textAlign = a);
+                _markDirty();
+              },
+            ),
+          IconButton(
+            icon: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: flyerHexToColor(el.color),
+                border: Border.all(color: Colors.grey.shade400),
+                shape: BoxShape.circle,
               ),
             ),
-            TextButton(
-              onPressed: () => setState(() => el.fit = el.fit == 'cover' ? 'contain' : 'cover'),
-              child: Text(el.fit == 'cover' ? 'Fill' : 'Fit'),
+            onPressed: () async {
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(
+                    initial: flyerHexToColor(el.color), title: 'Text Colour'),
+              );
+              if (picked != null) {
+                setState(() => el.color = flyerColorToHex(picked));
+                _markDirty();
+              }
+            },
+          ),
+        ],
+      ),
+      _sliderRow(
+        icon: Icons.format_size,
+        value: el.fontSize.clamp(8, _canvasWidth * 0.25),
+        min: 8,
+        max: _canvasWidth * 0.25,
+        onChanged: (v) {
+          setState(() => el.fontSize = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.opacity,
+        value: el.opacity.clamp(0.1, 1.0),
+        min: 0.1,
+        max: 1.0,
+        onChanged: (v) {
+          setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+    ];
+  }
+
+  List<Widget> _imageControls(FlyerElement el) {
+    return [
+      Row(
+        children: [
+          TextButton.icon(
+            icon: const Icon(Icons.swap_horiz, size: 18),
+            label: const Text('Replace'),
+            onPressed: () => _replaceElementImage(el),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() => el.fit = el.fit == 'cover' ? 'contain' : 'cover');
+              _markDirty();
+            },
+            child: Text(el.fit == 'cover' ? 'Fill' : 'Fit'),
+          ),
+        ],
+      ),
+      _sliderRow(
+        icon: Icons.opacity,
+        value: el.opacity.clamp(0.1, 1.0),
+        min: 0.1,
+        max: 1.0,
+        onChanged: (v) {
+          setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.rounded_corner,
+        value: el.cornerRadius.clamp(0, 200),
+        min: 0,
+        max: 200,
+        onChanged: (v) {
+          setState(() => el.cornerRadius = v);
+          _markDirty();
+        },
+      ),
+    ];
+  }
+
+  List<Widget> _shapeControls(FlyerElement el) {
+    return [
+      Row(
+        children: [
+          IconButton(
+            icon: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: flyerHexToColor(el.shapeColor),
+                border: Border.all(color: Colors.grey.shade400),
+                shape: BoxShape.circle,
+              ),
             ),
-          ],
+            onPressed: () async {
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(
+                    initial: flyerHexToColor(el.shapeColor), title: 'Shape Colour'),
+              );
+              if (picked != null) {
+                setState(() => el.shapeColor = flyerColorToHex(picked));
+                _markDirty();
+              }
+            },
+          ),
+          TextButton(
+            onPressed: () {
+              setState(
+                  () => el.shapeKind = el.shapeKind == 'circle' ? 'rect' : 'circle');
+              _markDirty();
+            },
+            child: Text(el.shapeKind == 'circle' ? 'Circle' : 'Rectangle'),
+          ),
+        ],
+      ),
+      _sliderRow(
+        icon: Icons.opacity,
+        value: el.opacity.clamp(0.1, 1.0),
+        min: 0.1,
+        max: 1.0,
+        onChanged: (v) {
+          setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+      if (el.shapeKind != 'circle')
+        _sliderRow(
+          icon: Icons.rounded_corner,
+          value: el.cornerRadius.clamp(0, 200),
+          min: 0,
+          max: 200,
+          onChanged: (v) {
+            setState(() => el.cornerRadius = v);
+            _markDirty();
+          },
         ),
-      );
-    }
-    return const SizedBox.shrink();
+    ];
+  }
+
+  Widget _sliderRow({
+    required IconData icon,
+    required double value,
+    required double min,
+    required double max,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: Colors.grey.shade600),
+        Expanded(
+          child: Slider(value: value, min: min, max: max, onChanged: onChanged),
+        ),
+      ],
+    );
   }
 
   void _showLayersSheet() {
@@ -696,59 +1303,84 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
-            final sorted = [..._elements]..sort((a, b) => b.zIndex.compareTo(a.zIndex));
+            final sorted = [..._elements]
+              ..sort((a, b) => b.zIndex.compareTo(a.zIndex));
             return SafeArea(
               child: SizedBox(
-                height: MediaQuery.of(ctx).size.height * 0.5,
+                height: MediaQuery.of(ctx).size.height * 0.55,
                 child: Column(
                   children: [
                     const Padding(
                       padding: EdgeInsets.all(12),
-                      child: Text('Layers', style: TextStyle(fontWeight: FontWeight.bold)),
+                      child: Text('Layers  ·  top to bottom',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
                     Expanded(
-                      child: ListView.builder(
-                        itemCount: sorted.length,
-                        itemBuilder: (ctx, i) {
-                          final el = sorted[i];
-                          return ListTile(
-                            leading: Icon(_iconFor(el.type)),
-                            title: Text(_labelFor(el)),
-                            selected: el.id == _selectedId,
-                            onTap: () {
-                              _selectElement(el.id);
-                              Navigator.pop(ctx);
-                            },
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.arrow_upward, size: 18),
-                                  onPressed: () {
-                                    _reorderLayer(el.id, 1);
-                                    setSheetState(() {});
+                      child: sorted.isEmpty
+                          ? const Center(child: Text('Nothing on the canvas yet'))
+                          : ListView.builder(
+                              itemCount: sorted.length,
+                              itemBuilder: (ctx, i) {
+                                final el = sorted[i];
+                                return ListTile(
+                                  dense: true,
+                                  leading: Icon(_iconFor(el.type), size: 20),
+                                  title: Text(_labelFor(el),
+                                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                                  selected: el.id == _selectedId,
+                                  onTap: () {
+                                    _selectElement(el.id);
+                                    Navigator.pop(ctx);
                                   },
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.arrow_downward, size: 18),
-                                  onPressed: () {
-                                    _reorderLayer(el.id, -1);
-                                    setSheetState(() {});
-                                  },
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline, size: 18),
-                                  onPressed: () {
-                                    _pushUndo();
-                                    setState(() => _elements.removeWhere((e) => e.id == el.id));
-                                    setSheetState(() {});
-                                  },
-                                ),
-                              ],
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: Icon(
+                                            el.locked ? Icons.lock : Icons.lock_open,
+                                            size: 17),
+                                        onPressed: () {
+                                          setState(() => el.locked = !el.locked);
+                                          setSheetState(() {});
+                                          _markDirty();
+                                        },
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.arrow_upward, size: 17),
+                                        onPressed: () {
+                                          _reorderLayer(el.id, 1);
+                                          setSheetState(() {});
+                                        },
+                                      ),
+                                      IconButton(
+                                        icon:
+                                            const Icon(Icons.arrow_downward, size: 17),
+                                        onPressed: () {
+                                          _reorderLayer(el.id, -1);
+                                          setSheetState(() {});
+                                        },
+                                      ),
+                                      IconButton(
+                                        icon:
+                                            const Icon(Icons.delete_outline, size: 17),
+                                        onPressed: () {
+                                          _pushUndo();
+                                          setState(() {
+                                            _elements
+                                                .removeWhere((e) => e.id == el.id);
+                                            if (_selectedId == el.id) {
+                                              _selectedId = null;
+                                            }
+                                          });
+                                          setSheetState(() {});
+                                          _markDirty();
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
                             ),
-                          );
-                        },
-                      ),
                     ),
                   ],
                 ),
@@ -769,14 +1401,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       case FlyerElementType.logo:
         return Icons.workspace_premium;
       case FlyerElementType.shape:
-        return Icons.square;
+        return Icons.rectangle;
     }
   }
 
   String _labelFor(FlyerElement el) {
     if (el.type == FlyerElementType.text) {
-      final t = el.text ?? '';
-      return t.length > 24 ? '${t.substring(0, 24)}…' : (t.isEmpty ? 'Text' : t);
+      final t = (el.text ?? '').replaceAll('\n', ' ');
+      if (t.isEmpty) return 'Text';
+      return t.length > 28 ? '${t.substring(0, 28)}…' : t;
     }
     return flyerElementTypeToString(el.type);
   }

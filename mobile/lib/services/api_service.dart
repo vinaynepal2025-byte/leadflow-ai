@@ -1617,6 +1617,38 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> updateFlyerProject(
+    String id, {
+    String? title,
+    String? backgroundColor,
+    double? canvasWidth,
+    double? canvasHeight,
+  }) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/flyer-projects/$id'),
+      headers: _headers,
+      body: jsonEncode({
+        if (title != null) 'title': title,
+        if (backgroundColor != null) 'background_color': backgroundColor,
+        if (canvasWidth != null) 'canvas_width': canvasWidth,
+        if (canvasHeight != null) 'canvas_height': canvasHeight,
+      }),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> uploadFlyerBackground(String projectId, String filePath) async {
+    final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/background');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll({'x-tenant-id': tenantId})
+      ..files.add(await http.MultipartFile.fromPath('file', filePath));
+    final streamed = await request.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 200) throw Exception('Background upload failed: $body');
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
+
   Future<void> deleteFlyerProject(String id) async {
     final res = await http.delete(Uri.parse('$baseUrl/flyer-projects/$id'), headers: _headers);
     _checkOk(res);

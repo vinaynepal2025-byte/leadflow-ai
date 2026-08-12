@@ -3,6 +3,11 @@
 // these. This mirrors the backend's `canvas_json` array shape exactly
 // (flyerProjects.js), so toJson()/fromJson() round-trip cleanly through
 // PATCH /flyer-projects/:id with zero server-side transformation needed.
+//
+// New fields are always written with a safe default in fromJson, so a
+// project saved by an older build of the app still opens correctly in a
+// newer one — canvas_json is schemaless JSONB on the server precisely so
+// this stays true as the editor gains features.
 
 enum FlyerElementType { text, image, logo, shape }
 
@@ -33,11 +38,10 @@ String flyerElementTypeToString(FlyerElementType t) {
   }
 }
 
-// The 8 real bundled Google Fonts from the earlier "premium fonts" fix —
-// reusing this exact list keeps Flyer Studio visually consistent with the
-// rest of the app's typography system, and lets the AI-generate endpoint
-// whitelist against a font set that's guaranteed to actually render
-// on-device (no network font-fetch, ships in the APK).
+// The bundled font families. Keeping Flyer Studio on the same set as the
+// rest of the app means every font here is guaranteed to render on-device
+// (shipped in the APK, no network fetch), and gives the AI-generate
+// endpoint a safe whitelist to validate against.
 const List<String> kFlyerFontFamilies = [
   'SpaceGrotesk',
   'Inter',
@@ -49,6 +53,59 @@ const List<String> kFlyerFontFamilies = [
   'OpenSans',
 ];
 
+/// Canvas size presets. A flyer that's going to Instagram Stories has very
+/// different proportions from one going to WhatsApp or a printed A4 poster,
+/// and getting that wrong means the design is cropped or letterboxed at the
+/// worst possible moment — right when it's being sent to a lead.
+class FlyerCanvasPreset {
+  final String id;
+  final String name;
+  final String note;
+  final double width;
+  final double height;
+
+  const FlyerCanvasPreset({
+    required this.id,
+    required this.name,
+    required this.note,
+    required this.width,
+    required this.height,
+  });
+}
+
+const List<FlyerCanvasPreset> kFlyerCanvasPresets = [
+  FlyerCanvasPreset(
+      id: 'portrait',
+      name: 'Flyer / Post (4:5)',
+      note: 'Best all-round for WhatsApp & Instagram feed',
+      width: 1080,
+      height: 1350),
+  FlyerCanvasPreset(
+      id: 'square',
+      name: 'Square (1:1)',
+      note: 'Instagram & Facebook feed',
+      width: 1080,
+      height: 1080),
+  FlyerCanvasPreset(
+      id: 'story',
+      name: 'Story / Reel (9:16)',
+      note: 'Instagram & WhatsApp status',
+      width: 1080,
+      height: 1920),
+  FlyerCanvasPreset(
+      id: 'landscape',
+      name: 'Landscape (16:9)',
+      note: 'Facebook link posts, presentations',
+      width: 1200,
+      height: 675),
+  FlyerCanvasPreset(
+      id: 'a4',
+      name: 'A4 Poster (print)',
+      note: 'For printing and PDF handouts',
+      width: 2480,
+      height: 3508),
+];
+
 class FlyerElement {
   String id;
   FlyerElementType type;
@@ -56,25 +113,32 @@ class FlyerElement {
   double y;
   double width;
   double height;
-  double rotation; // degrees, 0-360
+  double rotation; // degrees
   int zIndex;
+  bool locked;
+  double opacity;
 
   // Text-specific
   String? text;
   double fontSize;
   String fontFamily;
-  String color; // hex, e.g. "#000000"
+  String color; // hex "#RRGGBB"
   String fontWeight; // 'normal' | 'bold'
+  bool italic;
+  bool underline;
   String textAlign; // 'left' | 'center' | 'right'
   String? backgroundColor; // hex or null (transparent)
+  double lineHeight;
+  double letterSpacing;
 
   // Image / logo-specific
   String? url;
   String fit; // 'cover' | 'contain'
-  double opacity;
+  double cornerRadius;
 
   // Shape-specific
   String shapeColor;
+  String shapeKind; // 'rect' | 'circle'
 
   FlyerElement({
     required this.id,
@@ -85,17 +149,24 @@ class FlyerElement {
     this.height = 100,
     this.rotation = 0,
     this.zIndex = 0,
+    this.locked = false,
+    this.opacity = 1.0,
     this.text,
     this.fontSize = 24,
     this.fontFamily = 'Roboto',
     this.color = '#000000',
     this.fontWeight = 'normal',
+    this.italic = false,
+    this.underline = false,
     this.textAlign = 'left',
     this.backgroundColor,
+    this.lineHeight = 1.2,
+    this.letterSpacing = 0,
     this.url,
     this.fit = 'cover',
-    this.opacity = 1.0,
+    this.cornerRadius = 0,
     this.shapeColor = '#CCCCCC',
+    this.shapeKind = 'rect',
   });
 
   factory FlyerElement.fromJson(Map<String, dynamic> json) {
@@ -109,17 +180,24 @@ class FlyerElement {
       height: (json['height'] as num?)?.toDouble() ?? 100,
       rotation: (json['rotation'] as num?)?.toDouble() ?? 0,
       zIndex: (json['zIndex'] as num?)?.toInt() ?? 0,
+      locked: json['locked'] == true,
+      opacity: (json['opacity'] as num?)?.toDouble() ?? 1.0,
       text: json['text']?.toString(),
       fontSize: (json['fontSize'] as num?)?.toDouble() ?? 24,
       fontFamily: json['fontFamily']?.toString() ?? 'Roboto',
       color: json['color']?.toString() ?? '#000000',
       fontWeight: json['fontWeight']?.toString() ?? 'normal',
+      italic: json['italic'] == true,
+      underline: json['underline'] == true,
       textAlign: json['textAlign']?.toString() ?? 'left',
       backgroundColor: json['backgroundColor']?.toString(),
+      lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.2,
+      letterSpacing: (json['letterSpacing'] as num?)?.toDouble() ?? 0,
       url: json['url']?.toString(),
       fit: json['fit']?.toString() ?? 'cover',
-      opacity: (json['opacity'] as num?)?.toDouble() ?? 1.0,
+      cornerRadius: (json['cornerRadius'] as num?)?.toDouble() ?? 0,
       shapeColor: json['shapeColor']?.toString() ?? '#CCCCCC',
+      shapeKind: json['shapeKind']?.toString() ?? 'rect',
     );
   }
 
@@ -133,6 +211,8 @@ class FlyerElement {
       'height': height,
       'rotation': rotation,
       'zIndex': zIndex,
+      'locked': locked,
+      'opacity': opacity,
     };
     if (type == FlyerElementType.text) {
       map['text'] = text ?? '';
@@ -140,15 +220,20 @@ class FlyerElement {
       map['fontFamily'] = fontFamily;
       map['color'] = color;
       map['fontWeight'] = fontWeight;
+      map['italic'] = italic;
+      map['underline'] = underline;
       map['textAlign'] = textAlign;
+      map['lineHeight'] = lineHeight;
+      map['letterSpacing'] = letterSpacing;
       if (backgroundColor != null) map['backgroundColor'] = backgroundColor;
     } else if (type == FlyerElementType.image || type == FlyerElementType.logo) {
       map['url'] = url ?? '';
       map['fit'] = fit;
-      map['opacity'] = opacity;
+      map['cornerRadius'] = cornerRadius;
     } else if (type == FlyerElementType.shape) {
       map['shapeColor'] = shapeColor;
-      map['opacity'] = opacity;
+      map['shapeKind'] = shapeKind;
+      map['cornerRadius'] = cornerRadius;
     }
     return map;
   }
