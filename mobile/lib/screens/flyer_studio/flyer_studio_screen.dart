@@ -624,7 +624,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                   onPressed: () async {
                     final picked = await showDialog<Color>(
                       context: context,
-                      builder: (_) => ColorPickerDialog(initialColor: flyerHexToColor(el.color)),
+                      builder: (_) => ColorPickerDialog(initial: flyerHexToColor(el.color), title: 'Text Color'),
                     );
                     if (picked != null) {
                       setState(() => el.color =
