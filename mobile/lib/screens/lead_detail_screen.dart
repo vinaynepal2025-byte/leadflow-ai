@@ -15,6 +15,7 @@ import 'compliance_screen.dart';
 import 'cockpit_screen.dart';
 import 'lead_notes_screen.dart';
 import 'customize_lead_detail_screen.dart';
+import 'flyer_studio/flyer_history_screen.dart';
 
 // Must stay in sync with backend/routes/leadDetailSections.js DEFAULTS
 // and screens/customize_lead_detail_screen.dart -- three places carry
@@ -55,6 +56,7 @@ const Map<String, String> _kDefaultLabels = {
   'alumni': 'Alumni Network',
   'consent_compliance': 'Consent & Compliance',
   'lead_notes': 'Notes',
+  'flyer_studio': 'Make a Flyer',
 };
 
 const Map<String, String> _kDefaultIcons = {
@@ -69,6 +71,7 @@ const Map<String, String> _kDefaultIcons = {
   'alumni': 'diversity_3_outlined',
   'consent_compliance': 'privacy_tip_outlined',
   'lead_notes': 'description_outlined',
+  'flyer_studio': 'auto_awesome_mosaic_outlined',
 };
 
 class LeadDetailScreen extends StatefulWidget {
@@ -364,6 +367,12 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
           sectionKey: key,
           defaultColor: Colors.amber.shade800,
           onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LeadNotesScreen(leadId: lead.id, leadName: lead.fullName))),
+        );
+      case 'flyer_studio':
+        return _styledButton(
+          sectionKey: key,
+          defaultColor: Colors.deepPurple,
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FlyerHistoryScreen(leadId: lead.id))),
         );
       default:
         final config = _configFor(key);
