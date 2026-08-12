@@ -28,6 +28,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'flyer_element.dart';
 import 'flyer_canvas_element_widget.dart';
@@ -45,6 +48,7 @@ class FlyerStudioScreen extends StatefulWidget {
 }
 
 class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
+  final ApiService _api = ApiService();
   final GlobalKey _canvasRepaintKey = GlobalKey();
   final ImagePicker _imagePicker = ImagePicker();
 
@@ -85,7 +89,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       _error = null;
     });
     try {
-      final data = await ApiService.getFlyerProject(id);
+      final data = await _api.getFlyerProject(id);
       _applyProjectData(data);
     } catch (e) {
       setState(() => _error = 'Could not load flyer: $e');
@@ -100,7 +104,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       _error = null;
     });
     try {
-      final data = await ApiService.createFlyerProject(
+      final data = await _api.createFlyerProject(
         title: 'Untitled Flyer',
         leadId: widget.leadId,
       );
@@ -211,7 +215,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
 
     setState(() => _saving = true);
     try {
-      final result = await ApiService.uploadFlyerElementImage(_projectId!, picked.path);
+      final result = await _api.uploadFlyerElementImage(_projectId!, picked.path);
       final url = result['image_url']?.toString();
       _pushUndo();
       final el = FlyerElement(
@@ -238,7 +242,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   Future<void> _showLogoPicker() async {
     List<dynamic> logos = [];
     try {
-      logos = await ApiService.getTenantLogos();
+      logos = await _api.getTenantLogos();
     } catch (e) {
       _showSnack('Could not load logos: $e');
       return;
@@ -314,7 +318,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     if (_projectId == null) return;
     setState(() => _saving = true);
     try {
-      await ApiService.updateFlyerProjectCanvas(
+      await _api.updateFlyerProjectCanvas(
         _projectId!,
         _elements.map((e) => e.toJson()).toList(),
       );
@@ -372,7 +376,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
 
     setState(() => _generatingAI = true);
     try {
-      final result = await ApiService.generateFlyerAI(_projectId!, prompt);
+      final result = await _api.generateFlyerAI(_projectId!, prompt);
       final rawList = (result['canvas_json'] as List?) ?? [];
       _pushUndo();
       setState(() {
@@ -399,8 +403,23 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null || _projectId == null) return;
       final bytes = byteData.buffer.asUint8List();
-      await ApiService.uploadFlyerRender(_projectId!, bytes);
-      _showSnack('Flyer rendered — ready to share from Layers menu');
+      // Write to a temp file first: the OS share-sheet (and WhatsApp /
+      // Instagram specifically) need a real file, not raw bytes.
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/flyer-${DateTime.now().millisecondsSinceEpoch}.png');
+      await file.writeAsBytes(bytes);
+
+      // Archive to storage too, so the flyer is recoverable from the
+      // history screen later. Deliberately non-fatal: sharing is the
+      // user's actual intent here, so a backup failure warns but never
+      // blocks the share sheet from opening.
+      try {
+        await _api.uploadFlyerRender(_projectId!, bytes);
+      } catch (e) {
+        _showSnack('Shared, but cloud backup failed: $e');
+      }
+
+      await Share.shareXFiles([XFile(file.path)], text: _title);
     } catch (e) {
       _showSnack('Export failed: $e');
     }

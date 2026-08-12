@@ -1546,6 +1546,8 @@ class ApiService {
     String? leadId,
     double? canvasWidth,
     double? canvasHeight,
+    List<Map<String, dynamic>>? canvasJson,
+    String? backgroundColor,
   }) async {
     final res = await http.post(
       Uri.parse('$baseUrl/flyer-projects'),
@@ -1555,6 +1557,8 @@ class ApiService {
         if (leadId != null) 'lead_id': leadId,
         if (canvasWidth != null) 'canvas_width': canvasWidth,
         if (canvasHeight != null) 'canvas_height': canvasHeight,
+        if (canvasJson != null) 'canvas_json': canvasJson,
+        if (backgroundColor != null) 'background_color': backgroundColor,
       }),
     );
     if (res.statusCode != 201) {
@@ -1611,6 +1615,11 @@ class ApiService {
       final body = await streamed.stream.bytesToString();
       throw Exception('Render upload failed: $body');
     }
+  }
+
+  Future<void> deleteFlyerProject(String id) async {
+    final res = await http.delete(Uri.parse('$baseUrl/flyer-projects/$id'), headers: _headers);
+    _checkOk(res);
   }
 
   Future<List<Map<String, dynamic>>> getTenantLogos() async {

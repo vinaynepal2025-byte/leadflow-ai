@@ -8,6 +8,7 @@ import 'calendar_screen.dart';
 import 'colleges_screen.dart';
 import 'team_screen.dart';
 import 'parent_crm_screen.dart';
+import 'flyer_studio/flyer_history_screen.dart';
 import 'custom_fields_builder_screen.dart';
 import 'pipeline_builder_screen.dart';
 import 'social_links_screen.dart';
@@ -25,6 +26,12 @@ class MoreScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('More')),
       body: ListView(
         children: [
+          ListTile(
+            leading: const Icon(Icons.auto_awesome_mosaic_outlined),
+            title: const Text('Flyer Studio'),
+            subtitle: const Text('Design and share promotional flyers'),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FlyerHistoryScreen())),
+          ),
           ListTile(
             leading: const Icon(Icons.family_restroom_outlined),
             title: const Text('Parent CRM'),
