@@ -175,6 +175,16 @@ class ApiService {
     return Lead.fromJson(jsonDecode(res.body));
   }
 
+  Future<Map<String, dynamic>> updateLead(String id, Map<String, dynamic> fields) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/leads/$id'),
+      headers: _headers,
+      body: jsonEncode(fields),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Lead> updateLeadStage(String id, String newStage) async {
     final res = await http.patch(
       Uri.parse('$baseUrl/leads/$id'),
@@ -655,16 +665,91 @@ class ApiService {
     return data.cast<Map<String, dynamic>>();
   }
 
-  Future<void> logCall({required String leadId, required String outcome, int? durationSeconds, String? notes, String? calledBy}) async {
+  Future<Map<String, dynamic>> logCall({
+    required String leadId,
+    required String outcome,
+    String? notes,
+    String? calledBy,
+    int? durationSeconds,
+    String? phoneUsed,
+    String? channel,
+    String? direction,
+    String? followUpAt,
+  }) async {
     final res = await http.post(
       Uri.parse('$baseUrl/calls'),
       headers: _headers,
       body: jsonEncode({
-        'lead_id': leadId, 'outcome': outcome, 'duration_seconds': durationSeconds,
-        'notes': notes, 'called_by': calledBy,
+        'lead_id': leadId,
+        'outcome': outcome,
+        if (notes != null) 'notes': notes,
+        if (calledBy != null) 'called_by': calledBy,
+        if (durationSeconds != null) 'duration_seconds': durationSeconds,
+        if (phoneUsed != null) 'phone_used': phoneUsed,
+        if (channel != null) 'channel': channel,
+        if (direction != null) 'direction': direction,
+        if (followUpAt != null) 'follow_up_at': followUpAt,
       }),
     );
-    _checkOk(res, expected: 201);
+    if (res.statusCode != 201) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Could not log call');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getCallStats(String leadId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/calls/stats').replace(queryParameters: {'lead_id': leadId}),
+      headers: _headers,
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getBestTimeToCall(String leadId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/calls/best-time').replace(queryParameters: {'lead_id': leadId}),
+      headers: _headers,
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateCall(
+    String id, {
+    String? outcome,
+    String? notes,
+    int? durationSeconds,
+    String? followUpAt,
+  }) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/calls/$id'),
+      headers: _headers,
+      body: jsonEncode({
+        if (outcome != null) 'outcome': outcome,
+        if (notes != null) 'notes': notes,
+        if (durationSeconds != null) 'duration_seconds': durationSeconds,
+        if (followUpAt != null) 'follow_up_at': followUpAt,
+      }),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteCall(String id) async {
+    final res = await http.delete(Uri.parse('$baseUrl/calls/$id'), headers: _headers);
+    _checkOk(res);
+  }
+
+  Future<Map<String, dynamic>> prepareCall(String leadId) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/call-prep/$leadId'),
+      headers: _headers,
+    );
+    if (res.statusCode != 200) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Could not prepare call');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   // ---------- Voice Notes ----------
