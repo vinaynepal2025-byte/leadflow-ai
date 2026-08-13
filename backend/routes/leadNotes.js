@@ -21,14 +21,24 @@ const NOTE_TAGS = [
 // but it's wrapped so any AI failure just leaves both fields null.
 async function classifyNote(noteText) {
   try {
-    const prompt = `Classify this counselor's note about an education-admission lead. Respond ONLY with JSON: {"tags": [...from this exact list: ${NOTE_TAGS.join(', ')}, pick 1-3 that apply...], "sentiment": "positive" | "neutral" | "negative"}
+    const prompt = `You are classifying a counselor's note about an education-admission lead.
 
-Note: "${noteText}"`;
-    const result = await generateJson(prompt, { maxTokens: 300 });
+Note: "${noteText}"
+
+Allowed tags (pick 1-3 that genuinely apply, fewer if only one clearly fits): ${NOTE_TAGS.join(', ')}
+
+Respond ONLY with valid JSON, no other text, in exactly this shape:
+{
+  "tags": ["tag-from-the-allowed-list"],
+  "sentiment": "positive"
+}
+(sentiment must be exactly one of: positive, neutral, negative)`;
+    const result = await generateJson(prompt, { maxTokens: 1000 });
     const tags = Array.isArray(result.tags) ? result.tags.filter((t) => NOTE_TAGS.includes(t)) : [];
     const sentiment = ['positive', 'neutral', 'negative'].includes(result.sentiment) ? result.sentiment : null;
     return { tags: tags.length ? JSON.stringify(tags) : null, sentiment };
-  } catch (_) {
+  } catch (err) {
+    console.error('Note classification failed (non-fatal, note still saves):', err.message);
     return { tags: null, sentiment: null };
   }
 }
