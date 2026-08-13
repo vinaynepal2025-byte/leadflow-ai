@@ -24,6 +24,7 @@ const DEFAULTS = [
   { section_key: 'consent_compliance',   default_label: 'Consent & Compliance',    sort_order: 9 },
   { section_key: 'lead_notes',           default_label: 'Notes',                   sort_order: 10 },
   { section_key: 'flyer_studio',         default_label: 'Make a Flyer',            sort_order: 11 },
+  { section_key: 'activity_timeline',     default_label: 'Activity Timeline',       sort_order: 12 },
 ];
 
 // Ensures a tenant has all 10 built-in section rows. Safe to call every

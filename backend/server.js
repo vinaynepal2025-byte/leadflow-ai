@@ -132,6 +132,7 @@ app.use('/tenant-logos', require('./routes/tenantLogos'));
 app.use('/flyer-projects', require('./routes/flyerProjects'));
 app.use('/share-targets', require('./routes/shareTargets'));
 app.use('/call-prep', require('./routes/callPrep'));
+app.use('/leads', require('./routes/leadTimeline'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`LeadFlow AI backend running on port ${PORT}`));

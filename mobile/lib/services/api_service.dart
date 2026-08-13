@@ -318,6 +318,40 @@ class ApiService {
     _checkOk(res, expected: 201);
   }
 
+  Future<Map<String, dynamic>> getLeadTimeline(String leadId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/leads/$leadId/timeline'),
+      headers: _headers,
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> updateReminder(
+    String id, {
+    String? title,
+    String? dueAt,
+    String? status,
+    String? assignedTo,
+  }) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/reminders/$id'),
+      headers: _headers,
+      body: jsonEncode({
+        if (title != null) 'title': title,
+        if (dueAt != null) 'due_at': dueAt,
+        if (status != null) 'status': status,
+        if (assignedTo != null) 'assigned_to': assignedTo,
+      }),
+    );
+    _checkOk(res);
+  }
+
+  Future<void> deleteReminder(String id) async {
+    final res = await http.delete(Uri.parse('$baseUrl/reminders/$id'), headers: _headers);
+    _checkOk(res);
+  }
+
   Future<void> markReminderDone(String id) async {
     final res = await http.patch(
       Uri.parse('$baseUrl/reminders/$id'),
