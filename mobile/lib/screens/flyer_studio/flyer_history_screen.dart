@@ -107,7 +107,7 @@ class _FlyerHistoryScreenState extends State<FlyerHistoryScreen> {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => FlyerStudioScreen(projectId: created['id']?.toString()),
+          builder: (_) => FlyerStudioScreen(projectId: created['id']?.toString(), leadId: widget.leadId),
         ),
       );
       _load();
@@ -133,7 +133,7 @@ class _FlyerHistoryScreenState extends State<FlyerHistoryScreen> {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => FlyerStudioScreen(projectId: created['id']?.toString()),
+          builder: (_) => FlyerStudioScreen(projectId: created['id']?.toString(), leadId: widget.leadId),
         ),
       );
       _load();
@@ -249,7 +249,7 @@ class _FlyerHistoryScreenState extends State<FlyerHistoryScreen> {
         onTap: () async {
           await Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => FlyerStudioScreen(projectId: id)),
+            MaterialPageRoute(builder: (_) => FlyerStudioScreen(projectId: id, leadId: widget.leadId)),
           );
           _load();
         },

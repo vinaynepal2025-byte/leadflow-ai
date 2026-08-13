@@ -1734,6 +1734,36 @@ class ApiService {
     return jsonDecode(body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> getFlyerShareLink(String projectId, {String? leadId, String? message}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/flyer-projects/$projectId/share-link'),
+      headers: _headers,
+      body: jsonEncode({
+        if (leadId != null) 'lead_id': leadId,
+        if (message != null) 'message': message,
+      }),
+    );
+    if (res.statusCode != 200) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Could not create share link');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> confirmFlyerSent(String projectId, String leadId, {String? message}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/flyer-projects/$projectId/confirm-sent'),
+      headers: _headers,
+      body: jsonEncode({
+        'lead_id': leadId,
+        if (message != null) 'message': message,
+        'created_by': 'Counselor',
+      }),
+    );
+    if (res.statusCode != 201) {
+      throw Exception('Could not log the send');
+    }
+  }
+
   Future<void> deleteFlyerProject(String id) async {
     final res = await http.delete(Uri.parse('$baseUrl/flyer-projects/$id'), headers: _headers);
     _checkOk(res);

@@ -23,6 +23,7 @@ import 'package:flutter/rendering.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/api_service.dart';
 import '../../widgets/color_picker_dialog.dart';
@@ -766,6 +767,97 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
   }
 
+  /// Share options. Sending straight to the lead is listed first and framed
+  /// by name, because that is the actual job to be done -- the generic share
+  /// sheet costs three extra taps (pick app, search contact, pick contact) at
+  /// exactly the moment the counsellor is trying to move fast.
+  Future<void> _showShareOptions() async {
+    if (widget.leadId == null) {
+      await _exportAndShare();
+      return;
+    }
+    await showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.send, color: Color(0xFF25D366)),
+              title: const Text('Send to this lead on WhatsApp'),
+              subtitle: const Text('Opens their chat directly'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _sendToLead();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.ios_share),
+              title: const Text('Share as image'),
+              subtitle: const Text('Any app, pick the contact yourself'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _exportAndShare();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Render, upload, then open this specific lead's WhatsApp chat with the
+  /// flyer link already in the message box.
+  Future<void> _sendToLead() async {
+    if (_projectId == null || widget.leadId == null) return;
+
+    setState(() {
+      _selectedId = null;
+      _exporting = true;
+    });
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    try {
+      final boundary =
+          _canvasRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) return;
+      final onScreenWidth = boundary.size.width;
+      final pixelRatio = (_canvasWidth / onScreenWidth).clamp(1.0, 4.0);
+      final image = await boundary.toImage(pixelRatio: pixelRatio);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return;
+
+      // The link points at the stored render, so the upload has to land
+      // before the link is requested -- not in parallel.
+      await _api.uploadFlyerRender(_projectId!, byteData.buffer.asUint8List());
+
+      final share = await _api.getFlyerShareLink(_projectId!, leadId: widget.leadId);
+      final link = share['whatsapp_link']?.toString();
+
+      if (link == null || link.isEmpty) {
+        _showSnack(share['warning']?.toString() ?? 'This lead has no phone number on file');
+        return;
+      }
+
+      final launched = await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
+      if (!launched) {
+        _showSnack('Could not open WhatsApp');
+        return;
+      }
+
+      // wa.me gives no delivery callback, so record the hand-off ourselves --
+      // otherwise the flyer never appears in the lead's communication history.
+      try {
+        await _api.confirmFlyerSent(_projectId!, widget.leadId!,
+            message: share['message']?.toString());
+      } catch (_) {}
+    } catch (e) {
+      _showSnack('Could not send: $e');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   void _showSnack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -838,7 +930,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         floatingActionButton: _loading || _error != null
             ? null
             : FloatingActionButton.extended(
-                onPressed: _exporting ? null : _exportAndShare,
+                onPressed: _exporting ? null : _showShareOptions,
                 icon: _exporting
                     ? const SizedBox(
                         width: 18,

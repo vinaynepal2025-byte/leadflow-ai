@@ -4,6 +4,7 @@ const { randomUUID } = require('crypto');
 const db = require('../db');
 const { uploadFile, getSignedUrl } = require('../services/supabaseStorage');
 const { generateJson } = require('../services/aiProvider');
+const { buildWhatsAppLink } = require('../services/phone');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -244,6 +245,104 @@ Rules: 4-8 elements total. All x/y/width/height must fit within the ${canvasW}x$
   }
 
   res.json({ canvas_json: validated });
+});
+
+// POST /flyer-projects/:id/share-link  { lead_id }
+// Turns a finished flyer into something that can be sent to one specific
+// person in one tap.
+//
+// The OS share sheet already works, but it costs the counsellor three extra
+// steps at the worst possible moment: pick WhatsApp, search the contact,
+// pick the right one. The lead's number is already in the CRM, so the app
+// can open that exact chat directly.
+//
+// Sends a link rather than the image bytes because wa.me cannot attach
+// media -- so the signed URL is deliberately long-lived (7 days) instead of
+// the 5 minutes used for internal document reads. The trade-off is
+// conscious: this URL is going to a prospective student who may open it
+// hours later on a patchy connection, and it only ever exposes a marketing
+// flyer the consultancy is actively trying to publicise -- not a document,
+// a recording, or anything about the lead.
+router.post('/:id/share-link', async (req, res) => {
+  const tid = tenantId(req);
+  const project = await db.prepare('SELECT * FROM flyer_projects WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!project) return res.status(404).json({ error: 'Flyer project not found' });
+
+  if (!project.rendered_image_path) {
+    return res.status(400).json({ error: 'Render the flyer before sharing it' });
+  }
+
+  const SEVEN_DAYS = 7 * 24 * 60 * 60;
+  let imageUrl;
+  try {
+    imageUrl = await getSignedUrl(project.rendered_image_path, SEVEN_DAYS);
+  } catch (err) {
+    return res.status(502).json({ error: `Could not create share link: ${err.message}` });
+  }
+
+  const leadId = req.body.lead_id || project.lead_id;
+  if (!leadId) {
+    // No lead attached: still useful as a copyable link for a broadcast or
+    // a status post, just without the direct-chat shortcut.
+    return res.json({ image_url: imageUrl, whatsapp_link: null, lead_id: null });
+  }
+
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, leadId);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+  if (!lead.phone) {
+    return res.json({
+      image_url: imageUrl,
+      whatsapp_link: null,
+      lead_id: lead.id,
+      lead_name: lead.full_name,
+      warning: 'This lead has no phone number on file',
+    });
+  }
+
+  const tenant = await db.prepare('SELECT default_country_code FROM tenants WHERE id = ?').get(tid);
+  const greeting = (req.body.message && String(req.body.message).trim())
+    || `Hi ${lead.full_name || 'there'}, sharing this with you.`;
+  // Link on its own line: WhatsApp renders a preview for a trailing URL,
+  // and the greeting stays readable instead of being buried mid-sentence.
+  const message = `${greeting}\n\n${imageUrl}`;
+
+  const link = buildWhatsAppLink(
+    lead.phone,
+    lead.phone_country_code,
+    message,
+    tenant && tenant.default_country_code,
+  );
+
+  res.json({
+    image_url: imageUrl,
+    whatsapp_link: link,
+    message,
+    lead_id: lead.id,
+    lead_name: lead.full_name,
+    expires_in_days: 7,
+  });
+});
+
+// POST /flyer-projects/:id/confirm-sent  { lead_id, message }
+// wa.me has no delivery callback, so the app confirms the hand-off itself.
+// Without this the flyer would never appear in the lead's communication
+// history, and the counsellor would have no record of what was sent when.
+router.post('/:id/confirm-sent', async (req, res) => {
+  const tid = tenantId(req);
+  const { lead_id, message, created_by } = req.body;
+  if (!lead_id) return res.status(400).json({ error: 'lead_id is required' });
+
+  const project = await db.prepare('SELECT title FROM flyer_projects WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!project) return res.status(404).json({ error: 'Flyer project not found' });
+
+  const id = randomUUID();
+  await db.prepare(`
+    INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body, created_by)
+    VALUES (?, ?, ?, 'whatsapp-link', 'outbound', ?, ?)
+  `).run(id, tid, lead_id, message || `Sent flyer: ${project.title || 'Untitled'}`, created_by || null);
+
+  res.status(201).json(await db.prepare('SELECT * FROM communications WHERE id = ?').get(id));
 });
 
 // DELETE /flyer-projects/:id
