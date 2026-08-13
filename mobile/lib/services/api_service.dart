@@ -1448,6 +1448,14 @@ class ApiService {
   }
 
 
+  // ---------- Lead 360 (unified cross-module intelligence) ----------
+
+  Future<Map<String, dynamic>> getLead360(String leadId) async {
+    final res = await http.get(Uri.parse('$baseUrl/lead360/$leadId'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   // ---------- Calling Cockpit ----------
 
   Future<Map<String, dynamic>> getCockpit(String leadId) async {
