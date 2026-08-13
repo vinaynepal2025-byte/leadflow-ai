@@ -15,6 +15,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
 import '../widgets/glass_widgets.dart';
 import 'flyer_studio/flyer_history_screen.dart';
 
@@ -166,6 +167,32 @@ class _CockpitScreenState extends State<CockpitScreen> {
     }
   }
 
+  static const _offerStatuses = ['active', 'accepted', 'expired', 'withdrawn'];
+
+  Color _offerStatusColor(String status) {
+    switch (status) {
+      case 'accepted':
+        return AppColors.successGreen;
+      case 'expired':
+        return AppColors.slate;
+      case 'withdrawn':
+        return AppColors.coralAlert;
+      default:
+        return AppColors.signalAmber; // active
+    }
+  }
+
+  Future<void> _changeOfferStatus(String offerId, String status) async {
+    try {
+      await _api.updateOfferStatus(offerId, status);
+      _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not update offer: $e')));
+      }
+    }
+  }
+
   Future<void> _showAddOfferDialog() async {
     final textCtrl = TextEditingController();
     final amountCtrl = TextEditingController();
@@ -304,13 +331,37 @@ class _CockpitScreenState extends State<CockpitScreen> {
             ],
           ),
           if (_offers.isEmpty) const Text('No offers logged yet', style: TextStyle(color: Colors.grey)),
-          ..._offers.map((o) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(o['offer_text'] ?? ''),
-                subtitle: Text(
-                  '${o['amount'] != null ? '₹${o['amount']} · ' : ''}${o['status']}',
+          ..._offers.map((o) {
+            final status = (o['status'] as String?) ?? 'active';
+            final color = _offerStatusColor(status);
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(o['offer_text'] ?? ''),
+              subtitle: Text(o['amount'] != null ? '₹${o['amount']}' : 'No amount specified'),
+              trailing: PopupMenuButton<String>(
+                initialValue: status,
+                onSelected: (v) => _changeOfferStatus(o['id'] as String, v),
+                itemBuilder: (ctx) => _offerStatuses
+                    .map((s) => PopupMenuItem(value: s, child: Text(s[0].toUpperCase() + s.substring(1))))
+                    .toList(),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: color.withValues(alpha: 0.4)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(status, style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 12)),
+                      Icon(Icons.arrow_drop_down, size: 16, color: color),
+                    ],
+                  ),
                 ),
-              )),
+              ),
+            );
+          }),
         ],
       ),
     );

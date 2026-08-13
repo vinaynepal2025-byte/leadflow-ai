@@ -3,6 +3,7 @@ import '../models/lead.dart';
 import '../services/api_service.dart';
 import '../widgets/stage_chip.dart';
 import '../widgets/swipeable_card.dart';
+import '../widgets/score_badge.dart';
 import '../l10n/app_strings.dart';
 import 'lead_detail_screen.dart';
 import 'add_lead_screen.dart';
@@ -28,11 +29,26 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
   bool _selectionMode = false;
   final Set<String> _selectedIds = {};
 
+  // lead_id -> {score, temperature, ...} from /scoring/ranked, fetched
+  // once per screen load (not per row) to avoid an N+1 call storm.
+  Map<String, Map<String, dynamic>> _scores = {};
+
   @override
   void initState() {
     super.initState();
     _leadsFuture = _api.getLeads();
     _loadStages();
+    _loadScores();
+  }
+
+  Future<void> _loadScores() async {
+    try {
+      final ranked = await _api.getRankedLeads();
+      if (!mounted) return;
+      setState(() => _scores = {for (final s in ranked) s['lead_id'] as String: s});
+    } catch (_) {
+      // Non-critical — list still works without score badges.
+    }
   }
 
   Future<void> _loadStages() async {
@@ -44,6 +60,7 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
     setState(() {
       _leadsFuture = _isTrashView ? _api.getTrashedLeads() : _api.getLeads(stage: _stageFilter);
     });
+    _loadScores();
   }
 
   void _selectTrashView() {
@@ -298,7 +315,20 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
                 }
               },
             )
-          : StageChip(stage: lead.stage),
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                StageChip(stage: lead.stage),
+                if (_scores[lead.id] != null) ...[
+                  const SizedBox(height: 4),
+                  ScoreBadgeCompact(
+                    score: _scores[lead.id]!['score'] as int,
+                    temperature: _scores[lead.id]!['temperature'] as String,
+                  ),
+                ],
+              ],
+            ),
       onTap: () async {
         if (_selectionMode) {
           _toggleSelected(lead.id);

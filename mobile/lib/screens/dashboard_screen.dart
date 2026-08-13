@@ -21,14 +21,28 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   final ApiService _api = ApiService();
   late Future<Map<String, dynamic>> _future;
+  int _unreadCount = 0;
 
   @override
   void initState() {
     super.initState();
     _future = _api.getAnalyticsSummary();
+    _loadUnreadCount();
   }
 
-  void _refresh() => setState(() => _future = _api.getAnalyticsSummary());
+  Future<void> _loadUnreadCount() async {
+    try {
+      final count = await _api.getUnreadCount();
+      if (mounted) setState(() => _unreadCount = count);
+    } catch (_) {
+      // Non-critical — dashboard still works without the badge.
+    }
+  }
+
+  void _refresh() {
+    setState(() => _future = _api.getAnalyticsSummary());
+    _loadUnreadCount();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,9 +61,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CampaignsScreen())),
           ),
           IconButton(
-            icon: const Icon(Icons.notifications_outlined),
+            icon: Badge(
+              label: Text('$_unreadCount'),
+              isLabelVisible: _unreadCount > 0,
+              child: const Icon(Icons.notifications_outlined),
+            ),
             tooltip: 'Notifications',
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen())),
+            onPressed: () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+              _loadUnreadCount();
+            },
           ),
           IconButton(
             icon: const Icon(Icons.logout),
