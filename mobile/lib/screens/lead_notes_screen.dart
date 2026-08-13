@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 
@@ -121,6 +122,8 @@ class _LeadNotesScreenState extends State<LeadNotesScreen> {
                           itemBuilder: (context, i) {
                             final note = _notes[i];
                             final pinned = note['pinned'] == true;
+                            final sentiment = note['sentiment'] as String?;
+                            final tags = (note['tags'] != null) ? (jsonDecode(note['tags']) as List).cast<String>() : <String>[];
                             return Card(
                               color: pinned ? Colors.amber.withValues(alpha: 0.08) : null,
                               margin: const EdgeInsets.only(bottom: 8),
@@ -130,6 +133,44 @@ class _LeadNotesScreenState extends State<LeadNotesScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(note['note_text'] ?? ''),
+                                    if (tags.isNotEmpty || sentiment != null) ...[
+                                      const SizedBox(height: 8),
+                                      Wrap(
+                                        spacing: 6,
+                                        runSpacing: 4,
+                                        children: [
+                                          if (sentiment != null)
+                                            Chip(
+                                              visualDensity: VisualDensity.compact,
+                                              label: Text(sentiment, style: const TextStyle(fontSize: 10)),
+                                              avatar: Icon(
+                                                sentiment == 'positive'
+                                                    ? Icons.sentiment_satisfied
+                                                    : sentiment == 'negative'
+                                                        ? Icons.sentiment_dissatisfied
+                                                        : Icons.sentiment_neutral,
+                                                size: 14,
+                                                color: sentiment == 'positive'
+                                                    ? Colors.green
+                                                    : sentiment == 'negative'
+                                                        ? Colors.red
+                                                        : Colors.grey,
+                                              ),
+                                              backgroundColor: (sentiment == 'positive'
+                                                      ? Colors.green
+                                                      : sentiment == 'negative'
+                                                          ? Colors.red
+                                                          : Colors.grey)
+                                                  .withValues(alpha: 0.1),
+                                            ),
+                                          ...tags.map((t) => Chip(
+                                                visualDensity: VisualDensity.compact,
+                                                label: Text(t, style: const TextStyle(fontSize: 10)),
+                                                backgroundColor: Colors.blue.withValues(alpha: 0.08),
+                                              )),
+                                        ],
+                                      ),
+                                    ],
                                     const SizedBox(height: 8),
                                     Row(
                                       children: [

@@ -105,6 +105,15 @@ class ApiService {
     return data.cast<Map<String, dynamic>>();
   }
 
+  Future<Map<String, dynamic>> getNoteSentimentTrend(String leadId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/lead-notes/sentiment-trend').replace(queryParameters: {'lead_id': leadId}),
+      headers: _headers,
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> createLeadNote({
     required String leadId,
     required String noteText,
@@ -238,6 +247,46 @@ class ApiService {
     );
     _checkOk(res);
     return jsonDecode(res.body)['chat_link'] as String;
+  }
+
+  Future<List<Map<String, dynamic>>> getWhatsAppTemplates() async {
+    final res = await http.get(Uri.parse('$baseUrl/whatsapp/templates'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<String> previewWhatsAppTemplate(String templateId, String leadId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/whatsapp/templates/$templateId/preview').replace(queryParameters: {'lead_id': leadId}),
+      headers: _headers,
+    );
+    _checkOk(res);
+    return jsonDecode(res.body)['preview'] as String;
+  }
+
+  Future<void> scheduleWhatsAppMessage({required String leadId, required String bodyText, required String sendAt}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/whatsapp/schedule'),
+      headers: _headers,
+      body: jsonEncode({'lead_id': leadId, 'body_text': bodyText, 'send_at': sendAt}),
+    );
+    _checkOk(res, expected: 201);
+  }
+
+  Future<List<Map<String, dynamic>>> getScheduledMessages(String leadId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/whatsapp/scheduled').replace(queryParameters: {'lead_id': leadId}),
+      headers: _headers,
+    );
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<void> cancelScheduledMessage(String id) async {
+    final res = await http.delete(Uri.parse('$baseUrl/whatsapp/scheduled/$id'), headers: _headers);
+    _checkOk(res, expected: 204);
   }
 
   Future<void> confirmWhatsAppSent(String leadId, String message, String createdBy) async {

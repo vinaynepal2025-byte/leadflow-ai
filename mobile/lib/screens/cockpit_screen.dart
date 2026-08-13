@@ -167,6 +167,78 @@ class _CockpitScreenState extends State<CockpitScreen> {
     }
   }
 
+  Future<void> _pickTemplate() async {
+    List<Map<String, dynamic>> templates;
+    try {
+      templates = await _api.getWhatsAppTemplates();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not load templates: $e')));
+      return;
+    }
+    if (!mounted) return;
+    if (templates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No templates set up yet')));
+      return;
+    }
+    final chosen = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: templates
+              .map((t) => ListTile(
+                    title: Text(t['name']),
+                    subtitle: Text(t['body_text'], maxLines: 2, overflow: TextOverflow.ellipsis),
+                    onTap: () => Navigator.pop(context, t),
+                  ))
+              .toList(),
+        ),
+      ),
+    );
+    if (chosen == null) return;
+    try {
+      final preview = await _api.previewWhatsAppTemplate(chosen['id'], widget.leadId);
+      setState(() {
+        _draft = {'message_text': preview, 'reasoning': 'From template: ${chosen['name']}'};
+        _draftController.text = preview;
+      });
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not load template: $e')));
+    }
+  }
+
+  Future<void> _scheduleDialog() async {
+    final text = _draftController.text.trim();
+    if (text.isEmpty) return;
+    DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(days: 1)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 90)),
+    );
+    if (picked == null || !mounted) return;
+    final time = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 10, minute: 0));
+    if (time == null) return;
+    final sendAt = DateTime(picked.year, picked.month, picked.day, time.hour, time.minute);
+
+    try {
+      await _api.scheduleWhatsAppMessage(leadId: widget.leadId, bodyText: text, sendAt: sendAt.toIso8601String());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_whatsappApiConfigured
+              ? 'Scheduled — will send automatically at the chosen time'
+              : 'Scheduled — you\'ll get a reminder to tap Send at the chosen time')),
+        );
+        setState(() {
+          _draft = null;
+          _draftController.clear();
+        });
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not schedule: $e')));
+    }
+  }
+
   static const _offerStatuses = ['active', 'accepted', 'expired', 'withdrawn'];
 
   Color _offerStatusColor(String status) {
@@ -441,7 +513,13 @@ class _CockpitScreenState extends State<CockpitScreen> {
           ),
           const SizedBox(height: 8),
           if (_draft == null && !_draftLoading)
-            GlassButton(onPressed: _fetchDraft, child: const Text('Draft a personalized WhatsApp message')),
+            Row(
+              children: [
+                Expanded(child: GlassButton(onPressed: _fetchDraft, child: const Text('Draft a personalized WhatsApp message'))),
+                const SizedBox(width: 8),
+                OutlinedButton(onPressed: _pickTemplate, child: const Text('Use Template')),
+              ],
+            ),
           if (_draftLoading) const Center(child: CircularProgressIndicator()),
           if (_draftError != null) Text(_draftError!, style: const TextStyle(color: Colors.red)),
           if (_draft != null) ...[
@@ -474,6 +552,11 @@ class _CockpitScreenState extends State<CockpitScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                IconButton(
+                  onPressed: _scheduleDialog,
+                  icon: const Icon(Icons.schedule_send_outlined),
+                  tooltip: 'Schedule for later',
+                ),
                 TextButton(onPressed: _fetchDraft, child: const Text('Redraft')),
               ],
             ),
