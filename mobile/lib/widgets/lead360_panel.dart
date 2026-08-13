@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import 'glass_widgets.dart';
 import 'score_badge.dart';
 
 /// The Lead Detail screen's hero panel — the single place that shows
@@ -60,32 +61,28 @@ class Lead360Panel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (loading && data == null) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(
-            children: const [
-              SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-              SizedBox(width: 12),
-              Text('Reading across every module for this lead…'),
-            ],
-          ),
+      return GlassContainer(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: const [
+            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 12),
+            Text('Reading across every module for this lead…'),
+          ],
         ),
       );
     }
 
     if (error != null && data == null) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Icon(Icons.cloud_off, color: AppColors.slate),
-              const SizedBox(width: 10),
-              const Expanded(child: Text('Lead 360 unavailable right now.')),
-              TextButton(onPressed: onRefresh, child: const Text('Retry')),
-            ],
-          ),
+      return GlassContainer(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(Icons.cloud_off, color: AppColors.slate),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Lead 360 unavailable right now.')),
+            TextButton(onPressed: onRefresh, child: const Text('Retry')),
+          ],
         ),
       );
     }
@@ -99,14 +96,11 @@ class Lead360Panel extends StatelessWidget {
     final hasAiError = ai == null || ai['error'] != null;
     final activeOffers = (data!['active_offers'] as List? ?? []);
 
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    return GlassContainer(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
             Row(
               children: [
                 Icon(Icons.hub_outlined, color: AppColors.inkNavy, size: 20),
@@ -223,10 +217,9 @@ class Lead360Panel extends StatelessWidget {
                       style: TextStyle(color: AppColors.successGreen, fontSize: 12)),
                 ],
               ),
-            ],
+          ],
           ],
         ),
-      ),
-    );
+      );
   }
 }

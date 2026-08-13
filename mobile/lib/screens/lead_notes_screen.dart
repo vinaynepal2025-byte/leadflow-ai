@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../widgets/sentiment_trend_sparkline.dart';
 
 class LeadNotesScreen extends StatefulWidget {
   final String leadId;
@@ -15,6 +16,7 @@ class _LeadNotesScreenState extends State<LeadNotesScreen> {
   final _api = ApiService();
   final _noteCtrl = TextEditingController();
   List<Map<String, dynamic>> _notes = [];
+  List<Map<String, dynamic>> _sentimentPoints = [];
   bool _loading = true;
   bool _sending = false;
 
@@ -22,6 +24,17 @@ class _LeadNotesScreenState extends State<LeadNotesScreen> {
   void initState() {
     super.initState();
     _load();
+    _loadSentimentTrend();
+  }
+
+  Future<void> _loadSentimentTrend() async {
+    try {
+      final trend = await _api.getNoteSentimentTrend(widget.leadId);
+      if (!mounted) return;
+      setState(() => _sentimentPoints = (trend['points'] as List).cast<Map<String, dynamic>>());
+    } catch (_) {
+      // Non-critical — notes list still works without the trend sparkline.
+    }
   }
 
   @override
@@ -48,6 +61,7 @@ class _LeadNotesScreenState extends State<LeadNotesScreen> {
       await _api.createLeadNote(leadId: widget.leadId, noteText: text, authorName: null);
       _noteCtrl.clear();
       await _load();
+      _loadSentimentTrend();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not add note: $e')));
     } finally {
@@ -107,6 +121,11 @@ class _LeadNotesScreenState extends State<LeadNotesScreen> {
       appBar: AppBar(title: Text('Notes — ${widget.leadName}')),
       body: Column(
         children: [
+          if (_sentimentPoints.length >= 2)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: SentimentTrendSparkline(points: _sentimentPoints),
+            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
