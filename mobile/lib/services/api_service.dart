@@ -536,6 +536,37 @@ class ApiService {
     _checkOk(res);
   }
 
+  Future<void> deleteFee(String id) async {
+    final res = await http.delete(Uri.parse('$baseUrl/fees/$id'), headers: _headers);
+    _checkOk(res, expected: 204);
+  }
+
+  Future<Map<String, dynamic>> createFeePlan({
+    required String leadId,
+    required String feeType,
+    required double totalAmount,
+    required int numInstallments,
+    required String startDate,
+    String frequency = 'monthly',
+    String? notes,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/fees/plan'),
+      headers: _headers,
+      body: jsonEncode({
+        'lead_id': leadId,
+        'fee_type': feeType,
+        'total_amount': totalAmount,
+        'num_installments': numInstallments,
+        'start_date': startDate,
+        'frequency': frequency,
+        'notes': notes,
+      }),
+    );
+    _checkOk(res, expected: 201);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   // ---------- Campaigns ----------
 
   Future<List<Map<String, dynamic>>> getCampaigns() async {

@@ -297,6 +297,157 @@ class _FeesTabState extends State<_FeesTab> {
     }
   }
 
+  Future<void> _addPlanDialog() async {
+    final typeCtrl = TextEditingController(text: 'Tuition Fee');
+    final totalCtrl = TextEditingController();
+    final countCtrl = TextEditingController(text: '3');
+    String frequency = 'monthly';
+    DateTime startDate = DateTime.now();
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Create Installment Plan'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(controller: typeCtrl, decoration: const InputDecoration(labelText: 'Fee Type')),
+                TextField(
+                  controller: totalCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Total Amount (₹)'),
+                ),
+                TextField(
+                  controller: countCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Number of Installments'),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Text('Frequency: '),
+                    DropdownButton<String>(
+                      value: frequency,
+                      items: const [
+                        DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
+                        DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
+                      ],
+                      onChanged: (v) => setDialogState(() => frequency = v ?? 'monthly'),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    const Text('Starts: '),
+                    TextButton(
+                      onPressed: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: startDate,
+                          firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                          lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+                        );
+                        if (picked != null) setDialogState(() => startDate = picked);
+                      },
+                      child: Text('${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Create Plan')),
+          ],
+        ),
+      ),
+    );
+
+    final total = double.tryParse(totalCtrl.text.trim());
+    final count = int.tryParse(countCtrl.text.trim());
+    if (saved == true && typeCtrl.text.trim().isNotEmpty && total != null && count != null && count > 0) {
+      try {
+        final startStr =
+            '${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}';
+        await _api.createFeePlan(
+          leadId: widget.leadId,
+          feeType: typeCtrl.text.trim(),
+          totalAmount: total,
+          numInstallments: count,
+          startDate: startStr,
+          frequency: frequency,
+        );
+        _refresh();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$count installments created — reminders set for each due date')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+        }
+      }
+    }
+  }
+
+  Future<void> _confirmDelete(Map<String, dynamic> fee) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete this fee record?'),
+        content: Text('${fee['fee_type']} — ₹${fee['amount']}. This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await _api.deleteFee(fee['id']);
+      _refresh();
+    }
+  }
+
+  void _showAddOptions() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.receipt_long_outlined),
+              title: const Text('Single Fee'),
+              subtitle: const Text('One-off charge or payment'),
+              onTap: () {
+                Navigator.pop(context);
+                _addDialog();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.calendar_view_month_outlined),
+              title: const Text('Installment Plan (EMI)'),
+              subtitle: const Text('Split a total into scheduled installments'),
+              onTap: () {
+                Navigator.pop(context);
+                _addPlanDialog();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -316,34 +467,66 @@ class _FeesTabState extends State<_FeesTab> {
             itemBuilder: (context, i) {
               final f = fees[i];
               final paid = f['status'] == 'paid';
+              final isInstallment = f['plan_id'] != null;
               return ListTile(
-                title: Text(f['fee_type']),
-                subtitle: Text('₹${f['amount']} ${f['due_date'] != null ? '• due ${f['due_date']}' : ''}'),
-                trailing: paid
-                    ? const Chip(label: Text('Paid'), backgroundColor: Color(0x1A4CAF50))
-                    : Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.payments_outlined, size: 20),
-                            tooltip: 'Send payment link',
-                            onPressed: () => _sendPaymentLink(context, f['id']),
-                          ),
-                          TextButton(
-                            onPressed: () async {
-                              await _api.markFeePaid(f['id']);
-                              _refresh();
-                            },
-                            child: const Text('Mark Paid'),
-                          ),
-                        ],
+                title: Row(
+                  children: [
+                    Expanded(child: Text(f['fee_type'])),
+                    if (isInstallment)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        margin: const EdgeInsets.only(left: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '${f['installment_number']}/${f['total_installments']}',
+                          style: const TextStyle(fontSize: 11, color: Colors.blue, fontWeight: FontWeight.w600),
+                        ),
                       ),
+                  ],
+                ),
+                subtitle: Text('₹${f['amount']} ${f['due_date'] != null ? '• due ${f['due_date']}' : ''}'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (paid)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 4),
+                        child: Chip(label: Text('Paid'), backgroundColor: Color(0x1A4CAF50)),
+                      )
+                    else ...[
+                      IconButton(
+                        icon: const Icon(Icons.payments_outlined, size: 20),
+                        tooltip: 'Send payment link',
+                        onPressed: () => _sendPaymentLink(context, f['id']),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          await _api.markFeePaid(f['id']);
+                          _refresh();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(const SnackBar(content: Text('Marked paid — receipt generated in Documents')));
+                          }
+                        },
+                        child: const Text('Mark Paid'),
+                      ),
+                    ],
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 20, color: Colors.grey),
+                      tooltip: 'Delete',
+                      onPressed: () => _confirmDelete(f),
+                    ),
+                  ],
+                ),
               );
             },
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(onPressed: _addDialog, child: const Icon(Icons.add)),
+      floatingActionButton: FloatingActionButton(onPressed: _showAddOptions, child: const Icon(Icons.add)),
     );
   }
 }

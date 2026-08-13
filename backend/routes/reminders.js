@@ -8,6 +8,26 @@ function tenantId(req) {
   return req.header('x-tenant-id') || 'demo-consultancy';
 }
 
+// Reusable by other modules (fees, documents, visa, etc.) so a deadline
+// discovered anywhere in the app lands in the same "what should I do now"
+// list instead of each module inventing its own reminder mechanism.
+// Silently no-ops if the lead doesn't exist for this tenant, rather than
+// throwing — a reminder is a helpful side-effect, not a critical path;
+// the caller's primary write (fee/document/etc.) should still succeed.
+async function createReminder(tid, { leadId, title, dueAt, assignedTo }) {
+  if (!leadId || !title || !dueAt) return null;
+  const lead = await db.prepare('SELECT id FROM leads WHERE tenant_id = ? AND id = ?').get(tid, leadId);
+  if (!lead) return null;
+
+  const id = randomUUID();
+  await db.prepare(`
+    INSERT INTO reminders (id, tenant_id, lead_id, title, due_at, assigned_to)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, tid, leadId, title, dueAt, assignedTo || null);
+
+  return db.prepare('SELECT * FROM reminders WHERE id = ?').get(id);
+}
+
 // GET /reminders?status=pending&due_before=2026-08-01
 // Default: today's + overdue pending reminders — the "what should I do now" list
 router.get('/', async (req, res) => {
@@ -81,4 +101,4 @@ router.delete('/:id', async (req, res) => {
   res.status(204).send();
 });
 
-module.exports = router;
+module.exports = { router, createReminder };
