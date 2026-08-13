@@ -110,6 +110,27 @@ async function buildLead360(tenantId, leadId) {
         message: `${v.country} visa interview in ${daysBetween(now, v.interview_date)} day(s)`,
       });
     }
+
+    // Cross-check this visa's required-document checklist (Phase 3)
+    // against what's actually in Documents — closes the loop so a
+    // missing document surfaces here even before the counselor thinks
+    // to check the Visa tab.
+    if (v.status !== 'Approved' && v.status !== 'Rejected') {
+      const required = await db.prepare(
+        'SELECT doc_type FROM visa_checklist_items WHERE tenant_id = ? AND country = ? AND visa_type = ?'
+      ).all(tenantId, v.country, v.visa_type);
+      if (required.length > 0) {
+        const docsByType = new Set(documents.filter((d) => d.status !== 'rejected').map((d) => d.doc_type.trim().toLowerCase()));
+        const missing = required.filter((r) => !docsByType.has(r.doc_type.trim().toLowerCase()));
+        if (missing.length > 0) {
+          alerts.push({
+            severity: missing.length === required.length ? 'warning' : 'info',
+            module: 'visa_travel_student',
+            message: `${v.country} visa checklist: ${missing.length}/${required.length} document(s) still missing`,
+          });
+        }
+      }
+    }
   }
 
   // ---------- Travel ----------

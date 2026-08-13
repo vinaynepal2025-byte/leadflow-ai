@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import 'documents_screen.dart';
 
 class JourneyScreen extends StatelessWidget {
   final String leadId;
@@ -73,26 +74,116 @@ class _VisaTabState extends State<_VisaTab> {
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, i) {
               final v = apps[i];
-              return ListTile(
+              return ExpansionTile(
                 title: Text(v['country']),
                 subtitle: Text(v['embassy_location'] ?? ''),
-                trailing: DropdownButton<String>(
-                  value: v['status'],
-                  underline: const SizedBox.shrink(),
-                  items: statuses.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 11)))).toList(),
-                  onChanged: (val) async {
-                    if (val != null) {
-                      await _api.updateVisaApplication(v['id'], {'status': val});
-                      _refresh();
-                    }
-                  },
+                trailing: SizedBox(
+                  width: 150,
+                  child: DropdownButton<String>(
+                    value: v['status'],
+                    isExpanded: true,
+                    underline: const SizedBox.shrink(),
+                    items: statuses.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 11)))).toList(),
+                    onChanged: (val) async {
+                      if (val != null) {
+                        await _api.updateVisaApplication(v['id'], {'status': val});
+                        _refresh();
+                      }
+                    },
+                  ),
                 ),
+                children: [_VisaChecklist(visaId: v['id'], leadId: widget.leadId)],
               );
             },
           );
         },
       ),
       floatingActionButton: FloatingActionButton(onPressed: _addDialog, child: const Icon(Icons.add)),
+    );
+  }
+}
+
+// Per-country required-document checklist for a visa application,
+// cross-referenced live against Documents — the concrete "no loopholes"
+// piece: instead of the counselor remembering what's needed, the system
+// shows exactly what's missing and lets them jump straight to uploading it.
+class _VisaChecklist extends StatefulWidget {
+  final String visaId;
+  final String leadId;
+  const _VisaChecklist({required this.visaId, required this.leadId});
+
+  @override
+  State<_VisaChecklist> createState() => _VisaChecklistState();
+}
+
+class _VisaChecklistState extends State<_VisaChecklist> {
+  final _api = ApiService();
+  late Future<Map<String, dynamic>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _api.getVisaChecklist(widget.visaId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
+        if (snapshot.hasError) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('No checklist template set up for this country yet.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+          );
+        }
+        final data = snapshot.data!;
+        final checklist = (data['checklist'] as List? ?? []).cast<Map<String, dynamic>>();
+        if (checklist.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('No checklist template set up for this country yet.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+          );
+        }
+        return Column(
+          children: checklist.map((item) {
+            final status = item['status'] as String;
+            final ok = status == 'verified';
+            final pending = status == 'pending';
+            final rejected = status == 'rejected';
+            final color = ok ? Colors.green : (rejected ? Colors.red : (pending ? Colors.orange : Colors.grey));
+            final icon = ok
+                ? Icons.check_circle
+                : rejected
+                    ? Icons.cancel
+                    : pending
+                        ? Icons.hourglass_bottom
+                        : Icons.radio_button_unchecked;
+            return ListTile(
+              dense: true,
+              leading: Icon(icon, color: color, size: 20),
+              title: Text(item['doc_type'], style: const TextStyle(fontSize: 13)),
+              trailing: (status == 'missing' || rejected)
+                  ? TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => DocumentsScreen(leadId: widget.leadId)),
+                        );
+                      },
+                      child: const Text('Upload', style: TextStyle(fontSize: 12)),
+                    )
+                  : Text(status, style: TextStyle(color: color, fontSize: 11)),
+            );
+          }).toList(),
+        );
+      },
     );
   }
 }

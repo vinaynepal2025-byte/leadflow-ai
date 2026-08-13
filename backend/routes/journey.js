@@ -2,6 +2,7 @@ const express = require('express');
 const { randomUUID } = require('crypto');
 const db = require('../db');
 const { createNotification } = require('./notifications');
+const { createReminder } = require('./reminders');
 
 const router = express.Router();
 
@@ -84,14 +85,92 @@ router.patch('/visa/:id', async (req, res) => {
     });
   }
   if (req.body.interview_date) {
-    await db.prepare(`
-      INSERT INTO reminders (id, tenant_id, lead_id, title, due_at, assigned_to)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(randomUUID(), tid, existing.lead_id, `Visa interview — ${existing.country}`,
-      new Date(new Date(req.body.interview_date).getTime() - 24 * 60 * 60 * 1000).toISOString(), null);
+    await createReminder(tid, {
+      leadId: existing.lead_id,
+      title: `Visa interview — ${existing.country}`,
+      dueAt: new Date(new Date(req.body.interview_date).getTime() - 24 * 60 * 60 * 1000).toISOString(),
+    });
   }
 
   res.json(await db.prepare('SELECT * FROM visa_applications WHERE id = ?').get(req.params.id));
+});
+
+// ---------- Visa document checklist ----------
+//
+// Tenant-configurable master templates (country + visa_type -> required
+// doc_types), cross-referenced against the lead's actual Documents rows.
+// This is the concrete "no loopholes" fix for visa applications: instead
+// of a counselor remembering what's needed for each country, the system
+// tracks it and tells them exactly what's missing.
+
+// GET /journey/checklist-templates?country=USA&visa_type=Student
+router.get('/checklist-templates', async (req, res) => {
+  const tid = tenantId(req);
+  const { country, visa_type } = req.query;
+  let query = 'SELECT * FROM visa_checklist_items WHERE tenant_id = ?';
+  const params = [tid];
+  if (country) {
+    query += ' AND country = ?';
+    params.push(country);
+  }
+  if (visa_type) {
+    query += ' AND visa_type = ?';
+    params.push(visa_type);
+  }
+  query += ' ORDER BY country, visa_type, display_order';
+  res.json(await db.prepare(query).all(...params));
+});
+
+// POST /journey/checklist-templates — tenant adds/customizes a required doc
+router.post('/checklist-templates', async (req, res) => {
+  const tid = tenantId(req);
+  const { country, visa_type, doc_type, display_order } = req.body;
+  if (!country || !doc_type) return res.status(400).json({ error: 'country and doc_type are required' });
+
+  const id = randomUUID();
+  await db.prepare(`
+    INSERT INTO visa_checklist_items (id, tenant_id, country, visa_type, doc_type, display_order)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, tid, country, visa_type || 'Student', doc_type, display_order || 0);
+
+  res.status(201).json(await db.prepare('SELECT * FROM visa_checklist_items WHERE id = ?').get(id));
+});
+
+// DELETE /journey/checklist-templates/:id
+router.delete('/checklist-templates/:id', async (req, res) => {
+  const tid = tenantId(req);
+  const result = await db.prepare('DELETE FROM visa_checklist_items WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Checklist item not found' });
+  res.status(204).send();
+});
+
+// GET /journey/visa/:id/checklist — the actual per-lead, per-visa view:
+// every required doc for this visa's country/type, marked against what
+// the lead has actually uploaded (matched by doc_type, case-insensitive).
+router.get('/visa/:id/checklist', async (req, res) => {
+  const tid = tenantId(req);
+  const visa = await db.prepare('SELECT * FROM visa_applications WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!visa) return res.status(404).json({ error: 'Visa application not found' });
+
+  const required = await db.prepare(
+    'SELECT * FROM visa_checklist_items WHERE tenant_id = ? AND country = ? AND visa_type = ? ORDER BY display_order'
+  ).all(tid, visa.country, visa.visa_type);
+
+  const leadDocs = await db.prepare('SELECT doc_type, status FROM documents WHERE tenant_id = ? AND lead_id = ?')
+    .all(tid, visa.lead_id);
+  const docsByType = new Map();
+  for (const d of leadDocs) docsByType.set(d.doc_type.trim().toLowerCase(), d.status);
+
+  const checklist = required.map((item) => {
+    const match = docsByType.get(item.doc_type.trim().toLowerCase());
+    return {
+      doc_type: item.doc_type,
+      status: match || 'missing', // 'missing' | 'pending' | 'verified' | 'rejected'
+    };
+  });
+
+  const missingCount = checklist.filter((c) => c.status === 'missing' || c.status === 'rejected').length;
+  res.json({ visa_id: visa.id, country: visa.country, visa_type: visa.visa_type, checklist, missing_count: missingCount });
 });
 
 // ---------- Travel ----------
@@ -124,6 +203,14 @@ router.post('/travel', async (req, res) => {
   `).run(id, tid, lead_id, departure_date || null, departure_city || null, arrival_date || null,
     arrival_city || null, airline || null, flight_number || null, accommodation || null,
     pickup_arranged ? 1 : 0, pickup_contact || null, notes || null);
+
+  if (departure_date) {
+    await createReminder(tid, {
+      leadId: lead_id,
+      title: `Confirm airport pickup — departs ${departure_date}`,
+      dueAt: new Date(new Date(departure_date).getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+  }
 
   res.status(201).json(await db.prepare('SELECT * FROM travel_plans WHERE id = ?').get(id));
 });

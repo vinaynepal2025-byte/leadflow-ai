@@ -1280,6 +1280,12 @@ class ApiService {
     _checkOk(res);
   }
 
+  Future<Map<String, dynamic>> getVisaChecklist(String visaId) async {
+    final res = await http.get(Uri.parse('$baseUrl/journey/visa/$visaId/checklist'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> getTravelPlans(String leadId) async {
     final res = await http.get(Uri.parse('$baseUrl/journey/travel').replace(queryParameters: {'lead_id': leadId}), headers: _headers);
     _checkOk(res);
