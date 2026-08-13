@@ -387,6 +387,7 @@ class ApiService {
     required String filePath,
     required String fileName,
     String? uploadedBy,
+    String? expiryDate,
   }) async {
     final uri = Uri.parse('$baseUrl/documents');
     final request = http.MultipartRequest('POST', uri)
@@ -395,12 +396,23 @@ class ApiService {
       ..fields['doc_type'] = docType
       ..fields['uploaded_by'] = uploadedBy ?? ''
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
+    if (expiryDate != null) request.fields['expiry_date'] = expiryDate;
 
     final streamed = await request.send();
     if (streamed.statusCode != 201) {
       final body = await streamed.stream.bytesToString();
       throw Exception('Upload failed: $body');
     }
+  }
+
+  Future<List<String>> getDocTypes(String leadId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/documents/doc-types').replace(queryParameters: {'lead_id': leadId}),
+      headers: _headers,
+    );
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<String>();
   }
 
   String getDocumentDownloadUrl(String docId) => '$baseUrl/documents/$docId/download';
@@ -1426,6 +1438,22 @@ class ApiService {
       body: jsonEncode({'lead_id': leadId, 'consent_type': consentType, 'granted': granted, 'method': method}),
     );
     _checkOk(res, expected: 201);
+  }
+
+  Future<List<Map<String, dynamic>>> getConsentTemplates() async {
+    final res = await http.get(Uri.parse('$baseUrl/compliance/consent-templates'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<void> saveConsentTemplate({required String consentType, required String title, required String bodyText}) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/compliance/consent-templates/$consentType'),
+      headers: _headers,
+      body: jsonEncode({'title': title, 'body_text': bodyText}),
+    );
+    _checkOk(res, expected: 200);
   }
 
   Future<Map<String, dynamic>> exportLeadData(String leadId) async {

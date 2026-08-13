@@ -11,12 +11,18 @@ class DocumentsScreen extends StatefulWidget {
   State<DocumentsScreen> createState() => _DocumentsScreenState();
 }
 
+class _DocPick {
+  final String docType;
+  final String? expiryDate;
+  _DocPick(this.docType, this.expiryDate);
+}
+
 class _DocumentsScreenState extends State<DocumentsScreen> {
   final ApiService _api = ApiService();
   late Future<List<Map<String, dynamic>>> _future;
   bool _uploading = false;
 
-  static const docTypes = ['Passport', 'Marksheet', 'Photo', 'Certificate', 'Other'];
+  static const _fallbackDocTypes = ['Passport', 'Marksheet', 'Photo', 'Certificate', 'Bank Statement', 'Other'];
 
   @override
   void initState() {
@@ -31,17 +37,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     if (result == null || result.files.single.path == null) return;
 
     final file = result.files.single;
-    final docType = await _askDocType();
-    if (docType == null) return;
+    final picked = await _askDocTypeAndExpiry();
+    if (picked == null) return;
 
     setState(() => _uploading = true);
     try {
       await _api.uploadDocument(
         leadId: widget.leadId,
-        docType: docType,
+        docType: picked.docType,
         filePath: file.path!,
         fileName: file.name,
         uploadedBy: 'Counselor',
+        expiryDate: picked.expiryDate,
       );
       _refresh();
     } catch (e) {
@@ -53,17 +60,92 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
   }
 
-  Future<String?> _askDocType() {
-    return showDialog<String>(
+  Future<_DocPick?> _askDocTypeAndExpiry() async {
+    // Pulls in whatever this lead's active visa checklists actually
+    // require (e.g. "I-20 Form", "CAS Letter") on top of the universal
+    // defaults, so the type picked here can exact-match the checklist
+    // instead of everything specialized falling into "Other".
+    List<String> types;
+    try {
+      types = await _api.getDocTypes(widget.leadId);
+    } catch (_) {
+      types = _fallbackDocTypes;
+    }
+
+    String? selected;
+    final customCtrl = TextEditingController();
+    DateTime? expiry;
+
+    return showDialog<_DocPick>(
       context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('What type of document?'),
-        children: docTypes
-            .map((t) => SimpleDialogOption(
-                  onPressed: () => Navigator.pop(context, t),
-                  child: Text(t),
-                ))
-            .toList(),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Document details'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Type', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: types.map((t) {
+                    return ChoiceChip(
+                      label: Text(t, style: const TextStyle(fontSize: 12)),
+                      selected: selected == t,
+                      onSelected: (_) => setDialogState(() => selected = t),
+                    );
+                  }).toList(),
+                ),
+                TextField(
+                  controller: customCtrl,
+                  decoration: const InputDecoration(labelText: 'Or type a custom name'),
+                  onChanged: (v) => setDialogState(() => selected = null),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Text('Expiry (optional): '),
+                    TextButton(
+                      onPressed: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: DateTime.now().add(const Duration(days: 365)),
+                          firstDate: DateTime.now(),
+                          lastDate: DateTime.now().add(const Duration(days: 365 * 15)),
+                        );
+                        if (picked != null) setDialogState(() => expiry = picked);
+                      },
+                      child: Text(expiry == null
+                          ? 'Set date'
+                          : '${expiry!.year}-${expiry!.month.toString().padLeft(2, '0')}-${expiry!.day.toString().padLeft(2, '0')}'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () {
+                final docType = customCtrl.text.trim().isNotEmpty ? customCtrl.text.trim() : selected;
+                if (docType == null) return;
+                Navigator.pop(
+                  context,
+                  _DocPick(
+                    docType,
+                    expiry == null
+                        ? null
+                        : '${expiry!.year}-${expiry!.month.toString().padLeft(2, '0')}-${expiry!.day.toString().padLeft(2, '0')}',
+                  ),
+                );
+              },
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -100,10 +182,15 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, i) {
               final d = docs[i];
+              final expiryDate = d['expiry_date'] as String?;
+              final isExpired = expiryDate != null && DateTime.tryParse(expiryDate)?.isBefore(DateTime.now()) == true;
               return ListTile(
                 leading: Icon(Icons.description_outlined, color: _statusColor(d['status'])),
                 title: Text(d['doc_type']),
-                subtitle: Text(d['file_name']),
+                subtitle: Text(
+                  expiryDate != null ? '${d['file_name']} • ${isExpired ? 'EXPIRED' : 'expires'} $expiryDate' : d['file_name'],
+                  style: isExpired ? const TextStyle(color: Colors.red, fontWeight: FontWeight.w600) : null,
+                ),
                 trailing: Chip(
                   label: Text(d['status'], style: const TextStyle(fontSize: 11)),
                   backgroundColor: _statusColor(d['status']).withValues(alpha: 0.12),

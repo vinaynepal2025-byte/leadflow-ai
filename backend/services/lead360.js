@@ -98,6 +98,23 @@ async function buildLead360(tenantId, leadId) {
       message: `${pendingDocs.length} document(s) awaiting verification`,
     });
   }
+  const expiredDocs = documents.filter((d) => d.expiry_date && new Date(d.expiry_date).getTime() < now);
+  const expiringSoonDocs = documents.filter(
+    (d) => d.expiry_date && daysBetween(now, d.expiry_date) >= 0 && daysBetween(now, d.expiry_date) <= 60
+  );
+  if (expiredDocs.length > 0) {
+    alerts.push({
+      severity: 'critical',
+      module: 'documents',
+      message: `${expiredDocs.length} document(s) already expired: ${expiredDocs.map((d) => d.doc_type).join(', ')}`,
+    });
+  } else if (expiringSoonDocs.length > 0) {
+    alerts.push({
+      severity: 'warning',
+      module: 'documents',
+      message: `${expiringSoonDocs.map((d) => d.doc_type).join(', ')} expiring within 60 days`,
+    });
+  }
 
   // ---------- Visa ----------
   for (const v of visaApps) {

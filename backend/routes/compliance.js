@@ -10,6 +10,51 @@ function tenantId(req) {
 
 const CONSENT_TYPES = ['data_processing', 'marketing_contact', 'document_sharing', 'third_party_sharing'];
 
+// ---------- Consent form templates (tenant-customizable legal language) ----------
+//
+// Fulfils the "white-label, fully user-controlled" requirement for
+// compliance text specifically — a tenant operating under DPDP (India),
+// GDPR (EU-facing), or another regime can edit the exact wording shown
+// to a lead when consent is captured, without needing a code change.
+
+// GET /compliance/consent-templates
+router.get('/consent-templates', async (req, res) => {
+  const tid = tenantId(req);
+  const rows = await db.prepare('SELECT * FROM consent_form_templates WHERE tenant_id = ? ORDER BY consent_type').all(tid);
+  res.json(rows);
+});
+
+// PUT /compliance/consent-templates/:consentType — create or update this
+// tenant's wording for one consent type (upsert, since there's exactly
+// one active template per type per tenant).
+router.put('/consent-templates/:consentType', async (req, res) => {
+  const tid = tenantId(req);
+  const consentType = req.params.consentType;
+  const { title, body_text } = req.body;
+  if (!CONSENT_TYPES.includes(consentType)) {
+    return res.status(400).json({ error: `consentType must be one of: ${CONSENT_TYPES.join(', ')}` });
+  }
+  if (!title || !body_text) return res.status(400).json({ error: 'title and body_text are required' });
+
+  const existing = await db.prepare(
+    'SELECT id FROM consent_form_templates WHERE tenant_id = ? AND consent_type = ?'
+  ).get(tid, consentType);
+
+  if (existing) {
+    await db.prepare(
+      "UPDATE consent_form_templates SET title = ?, body_text = ?, updated_at = datetime('now') WHERE id = ?"
+    ).run(title, body_text, existing.id);
+    return res.json(await db.prepare('SELECT * FROM consent_form_templates WHERE id = ?').get(existing.id));
+  }
+
+  const id = randomUUID();
+  await db.prepare(`
+    INSERT INTO consent_form_templates (id, tenant_id, consent_type, title, body_text)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(id, tid, consentType, title, body_text);
+  res.json(await db.prepare('SELECT * FROM consent_form_templates WHERE id = ?').get(id));
+});
+
 // GET /compliance/consent/:leadId — current consent state (latest per type)
 router.get('/consent/:leadId', async (req, res) => {
   const tid = tenantId(req);

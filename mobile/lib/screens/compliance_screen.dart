@@ -13,6 +13,7 @@ class ComplianceScreen extends StatefulWidget {
 class _ComplianceScreenState extends State<ComplianceScreen> {
   final _api = ApiService();
   late Future<Map<String, dynamic>> _future;
+  Map<String, Map<String, dynamic>> _templates = {};
 
   static const consentTypes = ['data_processing', 'marketing_contact', 'document_sharing', 'third_party_sharing'];
   static const consentLabels = {
@@ -26,6 +27,17 @@ class _ComplianceScreenState extends State<ComplianceScreen> {
   void initState() {
     super.initState();
     _future = _api.getConsent(widget.leadId);
+    _loadTemplates();
+  }
+
+  Future<void> _loadTemplates() async {
+    try {
+      final list = await _api.getConsentTemplates();
+      if (!mounted) return;
+      setState(() => _templates = {for (final t in list) t['consent_type'] as String: t});
+    } catch (_) {
+      // Non-critical — toggles still work without the legal-language viewer.
+    }
   }
 
   void _refresh() => setState(() => _future = _api.getConsent(widget.leadId));
@@ -33,6 +45,58 @@ class _ComplianceScreenState extends State<ComplianceScreen> {
   Future<void> _toggleConsent(String type, bool current) async {
     await _api.recordConsent(leadId: widget.leadId, consentType: type, granted: !current, method: 'app');
     _refresh();
+  }
+
+  void _showLegalLanguage(String type) {
+    final t = _templates[type];
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(t?['title'] as String? ?? consentLabels[type]!),
+        content: SingleChildScrollView(
+          child: Text(t?['body_text'] as String? ?? 'No custom language configured for this consent type yet — using the default label only.'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _editLegalLanguage(type);
+            },
+            child: const Text('Edit wording'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editLegalLanguage(String type) async {
+    final t = _templates[type];
+    final titleCtrl = TextEditingController(text: t?['title'] as String? ?? consentLabels[type]);
+    final bodyCtrl = TextEditingController(text: t?['body_text'] as String? ?? '');
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Customize consent language'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title')),
+              TextField(controller: bodyCtrl, decoration: const InputDecoration(labelText: 'Legal text shown to the lead'), maxLines: 6),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (saved == true && titleCtrl.text.trim().isNotEmpty && bodyCtrl.text.trim().isNotEmpty) {
+      await _api.saveConsentTemplate(consentType: type, title: titleCtrl.text.trim(), bodyText: bodyCtrl.text.trim());
+      _loadTemplates();
+    }
   }
 
   Future<void> _exportData() async {
@@ -96,6 +160,11 @@ class _ComplianceScreenState extends State<ComplianceScreen> {
                 final granted = record != null && record['granted'] == 1;
                 return SwitchListTile(
                   contentPadding: EdgeInsets.zero,
+                  secondary: IconButton(
+                    icon: const Icon(Icons.info_outline, size: 20),
+                    tooltip: 'View/edit legal language',
+                    onPressed: () => _showLegalLanguage(type),
+                  ),
                   title: Text(consentLabels[type]!),
                   subtitle: record != null
                       ? Text('Last updated ${record['recorded_at']}', style: const TextStyle(fontSize: 11))

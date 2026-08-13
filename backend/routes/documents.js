@@ -19,10 +19,10 @@ function tenantId(req) {
   return req.header('x-tenant-id') || 'demo-consultancy';
 }
 
-// POST /documents  (multipart/form-data: file, lead_id, doc_type, uploaded_by)
+// POST /documents  (multipart/form-data: file, lead_id, doc_type, uploaded_by, expiry_date)
 router.post('/', upload.single('file'), async (req, res) => {
   const tid = tenantId(req);
-  const { lead_id, doc_type, uploaded_by } = req.body;
+  const { lead_id, doc_type, uploaded_by, expiry_date } = req.body;
   if (!req.file) return res.status(400).json({ error: 'file is required' });
   if (!lead_id || !doc_type) {
     return res.status(400).json({ error: 'lead_id and doc_type are required' });
@@ -46,11 +46,39 @@ router.post('/', upload.single('file'), async (req, res) => {
   // the bucket is private as of 2026-08-08, so downloads go through
   // getSignedUrl() at request-time (see GET /:id/download below).
   await db.prepare(`
-    INSERT INTO documents (id, tenant_id, lead_id, doc_type, file_name, stored_path, uploaded_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, tid, lead_id, doc_type, req.file.originalname, storagePath, uploaded_by || null);
+    INSERT INTO documents (id, tenant_id, lead_id, doc_type, file_name, stored_path, uploaded_by, expiry_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, tid, lead_id, doc_type, req.file.originalname, storagePath, uploaded_by || null, expiry_date || null);
 
   res.status(201).json(await db.prepare('SELECT * FROM documents WHERE id = ?').get(id));
+});
+
+// GET /documents/doc-types?lead_id=xxx — dynamic type suggestions for the
+// upload picker: a small set of universal defaults, PLUS whatever this
+// lead's active visa checklists actually require (so uploading "I-20
+// Form" produces an exact string match against the checklist instead of
+// forcing everything through a generic "Other" that the checklist can
+// never recognize). Tenant-customizable in spirit — the checklist side
+// is already tenant-editable via /journey/checklist-templates.
+const UNIVERSAL_DOC_TYPES = ['Passport', 'Marksheet', 'Photo', 'Certificate', 'Bank Statement', 'Other'];
+router.get('/doc-types', async (req, res) => {
+  const tid = tenantId(req);
+  const { lead_id } = req.query;
+  const types = new Set(UNIVERSAL_DOC_TYPES);
+
+  if (lead_id) {
+    const visas = await db.prepare(
+      "SELECT DISTINCT country, visa_type FROM visa_applications WHERE tenant_id = ? AND lead_id = ? AND status NOT IN ('Approved','Rejected')"
+    ).all(tid, lead_id);
+    for (const v of visas) {
+      const items = await db.prepare(
+        'SELECT doc_type FROM visa_checklist_items WHERE tenant_id = ? AND country = ? AND visa_type = ?'
+      ).all(tid, v.country, v.visa_type);
+      for (const item of items) types.add(item.doc_type);
+    }
+  }
+
+  res.json([...types]);
 });
 
 // GET /documents?lead_id=xxx
@@ -63,17 +91,32 @@ router.get('/', async (req, res) => {
   res.json(rows);
 });
 
-// PATCH /documents/:id  { status: 'verified' | 'rejected' }
+// PATCH /documents/:id  { status?: 'verified' | 'rejected' | 'pending', expiry_date? }
 router.patch('/:id', async (req, res) => {
   const tid = tenantId(req);
-  const { status } = req.body;
-  if (!['pending', 'verified', 'rejected'].includes(status)) {
+  const { status, expiry_date } = req.body;
+  if (status !== undefined && !['pending', 'verified', 'rejected'].includes(status)) {
     return res.status(400).json({ error: 'status must be pending, verified, or rejected' });
+  }
+  if (status === undefined && expiry_date === undefined) {
+    return res.status(400).json({ error: 'Provide status and/or expiry_date to update' });
   }
   const existing = await db.prepare('SELECT * FROM documents WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Document not found' });
 
-  await db.prepare('UPDATE documents SET status = ? WHERE tenant_id = ? AND id = ?').run(status, tid, req.params.id);
+  const updates = [];
+  const values = [];
+  if (status !== undefined) {
+    updates.push('status = ?');
+    values.push(status);
+  }
+  if (expiry_date !== undefined) {
+    updates.push('expiry_date = ?');
+    values.push(expiry_date || null);
+  }
+  values.push(tid, req.params.id);
+  await db.prepare(`UPDATE documents SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
+
   if (status === 'rejected') {
     const lead = await db.prepare('SELECT full_name FROM leads WHERE id = ?').get(existing.lead_id);
     await createNotification(tid, {
