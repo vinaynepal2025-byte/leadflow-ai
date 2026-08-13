@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/lead.dart';
 import '../models/communication.dart';
 import '../services/api_service.dart';
 import '../widgets/stage_chip.dart';
+import '../widgets/score_badge.dart';
+import '../widgets/lead360_panel.dart';
 import 'documents_screen.dart';
 import 'admissions_fees_screen.dart';
 import 'email_compose_screen.dart';
@@ -96,6 +99,15 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
   AiInsight? _insight;
   bool _analyzing = false;
   String? _aiError;
+  Map<String, dynamic>? _score;
+
+  // Lead 360 — unified cross-module intelligence (Phase 1 of the Meta-OS
+  // interconnection layer). Fetched separately from the rest of the
+  // screen (it involves an AI call across many tables, so it shouldn't
+  // block the basic lead view from rendering).
+  Map<String, dynamic>? _lead360;
+  bool _lead360Loading = false;
+  String? _lead360Error;
 
   @override
   void initState() {
@@ -109,6 +121,12 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
     final comms = await _api.getCommunications(widget.leadId);
     final defs = await _api.getCustomFieldDefinitions();
     final stages = await _api.getPipelineStages();
+    try {
+      _score = await _api.getLeadScore(widget.leadId);
+    } catch (_) {
+      _score = null; // non-critical — screen still works without it
+    }
+    unawaited(_loadLead360());
 
     List<Map<String, dynamic>> sections;
     try {
@@ -144,6 +162,64 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
   Future<void> _changeStage(String newStage) async {
     await _api.updateLeadStage(widget.leadId, newStage);
     _load();
+  }
+
+  Future<void> _loadLead360() async {
+    setState(() {
+      _lead360Loading = true;
+      _lead360Error = null;
+    });
+    try {
+      final report = await _api.getLead360(widget.leadId);
+      if (!mounted) return;
+      setState(() {
+        _lead360 = report;
+        _lead360Loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _lead360Error = e.toString();
+        _lead360Loading = false;
+      });
+    }
+  }
+
+  // Alerts from Lead 360 carry a module key that matches the customizable
+  // section keys already used elsewhere on this screen — one map, reused,
+  // instead of a second routing table to keep in sync.
+  void _navigateToModule(String module) {
+    if (_lead == null) return;
+    final lead = _lead!;
+    switch (module) {
+      case 'admissions_fees':
+        Navigator.push(context, MaterialPageRoute(builder: (_) => AdmissionsFeesScreen(leadId: lead.id)));
+        break;
+      case 'documents':
+        Navigator.push(context, MaterialPageRoute(builder: (_) => DocumentsScreen(leadId: lead.id)));
+        break;
+      case 'visa_travel_student':
+        Navigator.push(context, MaterialPageRoute(builder: (_) => JourneyScreen(leadId: lead.id)));
+        break;
+      case 'consent_compliance':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ComplianceScreen(leadId: lead.id, leadName: lead.fullName)),
+        );
+        break;
+      case 'meetings':
+        Navigator.push(context, MaterialPageRoute(builder: (_) => MeetingsScreen(leadId: lead.id)));
+        break;
+      case 'activity_timeline':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => LeadTimelineScreen(leadId: lead.id, leadName: lead.fullName)),
+        );
+        break;
+      case 'calling_cockpit':
+      default:
+        Navigator.push(context, MaterialPageRoute(builder: (_) => CockpitScreen(leadId: lead.id)));
+    }
   }
 
   Map<String, dynamic>? _configFor(String key) {
@@ -231,6 +307,14 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
             Row(
               children: [
                 StageChip(stage: lead.stage),
+                if (_score != null) ...[
+                  const SizedBox(width: 8),
+                  ScoreBadge(
+                    score: _score!['score'] as int,
+                    temperature: _score!['temperature'] as String,
+                    onTap: () => showScoreExplanation(context, _score!),
+                  ),
+                ],
                 const SizedBox(width: 12),
                 Expanded(
                   child: DropdownButton<String>(
@@ -245,6 +329,14 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 16),
+            Lead360Panel(
+              data: _lead360,
+              loading: _lead360Loading,
+              error: _lead360Error,
+              onRefresh: _loadLead360,
+              onAlertTap: _navigateToModule,
             ),
             const SizedBox(height: 16),
             if (lead.phone != null) _infoRow(Icons.phone, lead.phone!),
