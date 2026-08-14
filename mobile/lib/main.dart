@@ -71,6 +71,19 @@ class _DiagRootState extends State<_DiagRoot> {
       log('loadBaseUrl() FAILED: $e');
     }
 
+    // P0 Auth Phase 2: restores a previously logged-in session's token +
+    // tenantId into ApiService before any screen can fire a network
+    // request -- same race-condition-prevention pattern as loadBaseUrl()
+    // above, and for the same reason (a screen rendering and accepting
+    // taps before this finishes would silently send the pre-Phase-2
+    // defaults instead of the real session).
+    try {
+      await ApiService.loadAuthState();
+      log('loadAuthState() done: hasToken=${ApiService.authToken != null}, tenant=${ApiService.tenantId}');
+    } catch (e) {
+      log('loadAuthState() FAILED: $e');
+    }
+
     try {
       _glass = GlassSettings();
       log('GlassSettings constructed');

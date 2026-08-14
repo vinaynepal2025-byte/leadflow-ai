@@ -30,14 +30,47 @@ class ApiService {
     await prefs.setString(_baseUrlKey, baseUrl);
   }
 
-  /// In production, tenantId comes from the logged-in user's session
-  /// (Identity module, not yet built). Fixed for now so every screen works
-  /// end-to-end against the backend that already exists.
-  static const String tenantId = 'demo-consultancy';
+  /// P0 Auth Phase 2: tenantId now comes from the logged-in user's JWT
+  /// (set by AuthService on login/register, restored by loadAuthState() on
+  /// app boot). 'demo-consultancy' remains the fallback for any request
+  /// made before a session exists, so nothing that worked before this
+  /// change stops working.
+  static String tenantId = 'demo-consultancy';
+
+  /// The signed JWT from AuthService, mirrored here (not read from
+  /// AuthService directly) so _headers can stay a synchronous getter --
+  /// every one of the ~150 call sites below already does `headers: _headers`
+  /// and none of them can be made to `await` a Future without touching
+  /// every one individually. AuthService is the source of truth and keeps
+  /// this in sync on login/register/logout; this is just where callers
+  /// that need headers *right now* read it from.
+  static String? authToken;
+
+  /// Restores a persisted session into the static fields above so a
+  /// previously logged-in user doesn't silently fall back to sending no
+  /// Authorization header (and the default demo tenant) after an app
+  /// restart. Mirrors loadBaseUrl()'s pattern exactly; call this from
+  /// main.dart's boot sequence the same way, before any screen can fire a
+  /// network request. Backend Phase 1 is additive-only, so a missing/absent
+  /// token here is never fatal -- it just means requests fall back to the
+  /// pre-Phase-2 x-tenant-id-only behavior, same as always.
+  static Future<void> loadAuthState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedToken = prefs.getString('leadflow_token');
+      final savedTenant = prefs.getString('leadflow_tenant_id');
+      if (savedToken != null && savedToken.isNotEmpty) authToken = savedToken;
+      if (savedTenant != null && savedTenant.isNotEmpty) tenantId = savedTenant;
+    } catch (_) {
+      // No persisted session, or SharedPreferences unavailable -- fall
+      // through to the defaults above, same as a fresh install.
+    }
+  }
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
         'x-tenant-id': tenantId,
+        if (authToken != null) 'Authorization': 'Bearer $authToken',
       };
 
   // ---------- Leads ----------

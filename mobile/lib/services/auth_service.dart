@@ -74,6 +74,17 @@ class AuthService {
     _cachedTenantId = data['user']['tenant_id'] as String?;
     _cachedUserName = data['user']['full_name'] as String?;
 
+    // P0 Auth Phase 2: every other screen's network calls go through
+    // ApiService, not AuthService, so the token/tenant this session just
+    // received has to be mirrored onto ApiService's static fields or the
+    // rest of the app would never actually send it. This is the one place
+    // that mirroring needs to happen -- both login() and register() above
+    // funnel through here.
+    ApiService.authToken = _cachedToken;
+    if (_cachedTenantId != null && _cachedTenantId!.isNotEmpty) {
+      ApiService.tenantId = _cachedTenantId!;
+    }
+
     try {
       final prefs = await SharedPreferences.getInstance().timeout(const Duration(seconds: 5));
       await prefs.setString(_tokenKey, _cachedToken ?? '');
@@ -116,6 +127,14 @@ class AuthService {
     _cachedToken = null;
     _cachedTenantId = null;
     _cachedUserName = null;
+
+    // Mirror the clear onto ApiService too -- otherwise a stale token would
+    // keep being sent (and a stale tenantId kept being used) on any request
+    // made after logout but before the next login, e.g. from a screen that
+    // doesn't immediately redirect to the login screen.
+    ApiService.authToken = null;
+    ApiService.tenantId = 'demo-consultancy';
+
     try {
       final prefs = await SharedPreferences.getInstance().timeout(const Duration(seconds: 5));
       await prefs.remove(_tokenKey);
