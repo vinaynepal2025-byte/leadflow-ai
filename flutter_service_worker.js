@@ -47,7 +47,7 @@ const RESOURCES = {"version.json": "247081c9b8876517d0c7c9ee8613a074",
 "assets/packages/record_web/assets/js/record.fixwebmduration.js": "1f0108ea80c8951ba702ced40cf8cdce",
 "assets/packages/record_web/assets/js/record.worklet.js": "6d247986689d283b7e45ccdf7214c2ff",
 "main.dart.js": "bec35b28dbcdd8d367822bb6335ad5c2",
-"flutter_bootstrap.js": "4ced7aae7279f6208bdd5138de7f98f2",
+"flutter_bootstrap.js": "3359ebfa144d594755c8e48a98d5a274",
 "manifest.json": "26740c0e14004f4bb51588e66945acb8"};
 // The application shell files that are downloaded before a service worker can
 // start.
