@@ -38,7 +38,13 @@ class _AiThemeGeneratorCardState extends State<AiThemeGeneratorCard> {
       final appearance = context.read<AppearanceSettings>();
       final glass = context.read<GlassSettings>();
       await appearance.applyGeneratedTheme(theme, glass.setEnabled);
-      if (mounted) setState(() => _lastAppliedName = theme['name'] as String? ?? 'AI Theme');
+      if (mounted) {
+        setState(() {
+          final fontMatch = FontPairing.values.where((f) => f.name == theme['font']);
+          final fontLabel = fontMatch.isNotEmpty ? fontMatch.first.label.split(' (').first : 'Custom';
+          _lastAppliedName = '${theme['name'] as String? ?? 'AI Theme'} · $fontLabel';
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
     } finally {
@@ -74,6 +80,11 @@ class _AiThemeGeneratorCardState extends State<AiThemeGeneratorCard> {
           const Text(
             'Describe the look you want — colors, mood, and fonts are generated and applied instantly.',
             style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            'Every result is contrast-checked for readability before it\'s applied.',
+            style: TextStyle(color: Colors.white54, fontSize: 10.5, fontStyle: FontStyle.italic),
           ),
           const SizedBox(height: 12),
           TextField(

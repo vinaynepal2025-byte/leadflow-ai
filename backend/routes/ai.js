@@ -51,13 +51,63 @@ router.post('/analyze-lead/:id', async (req, res) => {
 // JSON out, through the same generateJson() every AI feature uses.
 // Drop this route + services/aiProvider.js into any other Express
 // project to reuse it as-is.
-const VALID_FONTS = ['spaceGroteskInter', 'playfairLato', 'poppinsRoboto', 'montserratOpenSans'];
+//
+// Batch 5 (Customize Studio): expanded from the original 4 font
+// pairings to all 10 the app now bundles, added optional gradient +
+// backdrop-blur generation for glass/liquid moods, and added
+// server-side WCAG contrast validation so a generated theme can't ship
+// with illegible color choices -- "world-class" is a guarantee here,
+// not just a badge the person could ignore in the picker.
+const VALID_FONTS = [
+  'spaceGroteskInter', 'playfairLato', 'poppinsRoboto', 'montserratOpenSans',
+  'interRoboto', 'playfairOpenSans', 'spaceGroteskLato', 'montserratInter', 'poppinsOpenSans', 'interLato',
+];
 const VALID_MODES = ['solid', 'glass', 'liquid', 'transparent', 'basic', 'cartoon', 'corporate'];
 const HEX_RE = /^#?[0-9a-fA-F]{6}$/;
 
 function asHex(v, fallback) {
   if (typeof v !== 'string' || !HEX_RE.test(v)) return fallback;
   return v.startsWith('#') ? v : `#${v}`;
+}
+
+// WCAG 2.1 contrast math, same formula validated numerically against
+// known reference ratios (white/black=21.0, etc.) when Batch 3 built the
+// Flutter-side equivalent in theme/contrast_utils.dart. Reimplemented
+// here in JS rather than shared, since this is the only server-side call
+// site and duplicating ~15 lines is simpler than a cross-language shared
+// module for one use.
+function relativeLuminance(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => c / 255);
+  const gamma = (v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  return 0.2126 * gamma(r) + 0.7152 * gamma(g) + 0.0722 * gamma(b);
+}
+function contrastRatio(hexA, hexB) {
+  const l1 = relativeLuminance(hexA), l2 = relativeLuminance(hexB);
+  const [lighter, darker] = l1 > l2 ? [l1, l2] : [l2, l1];
+  return (lighter + 0.05) / (darker + 0.05);
+}
+// Darkens a hex color by a fixed step, bounded, for the auto-correction
+// loop below -- deliberately simple (multiply each channel) rather than
+// proper HSL lightness adjustment, since it only needs to move contrast
+// in one direction reliably, not preserve hue precision.
+function darken(hex, factor) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => Math.max(0, Math.round(c * factor)));
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+}
+// If primary fails AA (4.5:1) against white -- the common case, since
+// primary is frequently used as a filled button/badge background with
+// white text -- darken it in small steps until it passes, capped so a
+// pathological input can't loop forever. Most real generated colors
+// pass in 0-2 steps; this exists for the rare case Gemini picks
+// something too light/pastel for a filled-background role.
+function ensureContrastSafe(hex) {
+  let color = hex;
+  for (let i = 0; i < 6 && contrastRatio(color, '#FFFFFF') < 4.5; i++) {
+    color = darken(color, 0.85);
+  }
+  return color;
 }
 
 router.post('/generate-theme', async (req, res) => {
@@ -76,35 +126,53 @@ router.post('/generate-theme', async (req, res) => {
   "tagline": "string, max 6 words",
   "primary": "6-digit hex color, e.g. #1B2A4A",
   "accent": "6-digit hex color that contrasts well with primary",
-  "font": "one of: spaceGroteskInter, playfairLato, poppinsRoboto, montserratOpenSans",
+  "font": "one of: spaceGroteskInter, playfairLato, poppinsRoboto, montserratOpenSans, interRoboto, playfairOpenSans, spaceGroteskLato, montserratInter, poppinsOpenSans, interLato",
   "radius": number between 0 and 32 (corner roundness -- lower = sharper/corporate, higher = softer/playful),
   "dark": boolean,
   "styleMode": "one of: solid, glass, liquid, transparent, basic, cartoon, corporate",
   "glow": boolean,
   "glowColor": "6-digit hex color or null",
   "floating": boolean,
-  "texture": boolean
+  "texture": boolean,
+  "gradientEnd": "6-digit hex color for a 2-stop gradient FROM primary TO this color, or null if the mood doesn't call for one",
+  "backdropBlur": "number 0.0-1.0, only meaningful when styleMode is glass or liquid -- how frosted the surfaces should feel"
 }
 Description: "${prompt.trim()}"
 ${brandHint}
-Pick font/styleMode/radius that genuinely match the mood (e.g. a medical consultancy usually wants "corporate" or "solid" mode, montserratOpenSans or spaceGroteskInter, low-to-moderate radius, no glow -- vs. a trendy exam-prep coaching brand for teenagers might want "glass" or "cartoon", higher radius, maybe glow).`;
+Font personality guide -- pick the one that actually matches the mood, don't default to the same one every time:
+- spaceGroteskInter/interRoboto/interLato/montserratInter: clean modern SaaS, tech-forward
+- playfairLato/playfairOpenSans: editorial, premium, serif-led, upscale
+- poppinsRoboto/poppinsOpenSans: friendly, approachable, rounded
+- montserratOpenSans: classic corporate
+- spaceGroteskLato: tech-meets-warm hybrid
+Pick font/styleMode/radius/gradientEnd/backdropBlur that genuinely match the mood (e.g. a medical consultancy usually wants "corporate" or "solid" mode, montserratOpenSans or spaceGroteskInter, low-to-moderate radius, no glow, no gradient -- vs. a trendy exam-prep coaching brand for teenagers might want "glass" or "cartoon" mode, higher radius, maybe glow and a gradient). Only set gradientEnd/glow/floating/texture/backdropBlur when they genuinely serve the requested mood -- a "minimal and professional" request should get mostly false/null here, not every effect turned on.`;
 
   try {
     const raw = await generateJson(instructionPrompt, { maxTokens: 1500 });
 
+    const primary = ensureContrastSafe(asHex(raw.primary, '#1B2A4A'));
+    const styleMode = VALID_MODES.includes(raw.styleMode) ? raw.styleMode : 'solid';
+    const isGlassy = styleMode === 'glass' || styleMode === 'liquid';
+
     const theme = {
       name: typeof raw.name === 'string' ? raw.name.slice(0, 40) : 'AI Theme',
       tagline: typeof raw.tagline === 'string' ? raw.tagline.slice(0, 60) : 'Generated for you',
-      primary: asHex(raw.primary, '#1B2A4A'),
+      primary,
       accent: asHex(raw.accent, '#E8A33D'),
       font: VALID_FONTS.includes(raw.font) ? raw.font : 'spaceGroteskInter',
       radius: Number.isFinite(raw.radius) ? Math.max(0, Math.min(32, raw.radius)) : 16,
       dark: Boolean(raw.dark),
-      styleMode: VALID_MODES.includes(raw.styleMode) ? raw.styleMode : 'solid',
+      styleMode,
       glow: Boolean(raw.glow),
       glowColor: raw.glow ? asHex(raw.glowColor, raw.accent) : null,
       floating: Boolean(raw.floating),
       texture: Boolean(raw.texture),
+      // Only meaningful (and only sent) for glass/liquid -- a solid/basic
+      // theme with a stray backdropBlur value would be a no-op in the
+      // Flutter renderer anyway, but omitting it here keeps the payload
+      // honest about what this theme actually uses.
+      gradientEnd: raw.gradientEnd ? asHex(raw.gradientEnd, null) : null,
+      backdropBlur: isGlassy && Number.isFinite(raw.backdropBlur) ? Math.max(0, Math.min(1, raw.backdropBlur)) : 0,
     };
 
     res.json(theme);

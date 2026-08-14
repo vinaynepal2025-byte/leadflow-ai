@@ -16,6 +16,25 @@ class CustomizeAppearanceScreen extends StatefulWidget {
 
 class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
   List<ThemePreset> _customPresets = [];
+  // Batch 5: 'All', a TemplateCategory's .name, or 'Custom' -- screen-
+  // local UI state (not persisted), same as any tab selection the person
+  // can freely change without it being "a setting."
+  String _activeFilter = 'All';
+
+  // Batch 5: category chips filter the static gallery; custom (saved)
+  // presets don't carry a meaningful category (saveCurrentAsPreset
+  // defaults them neutrally), so they only appear under 'All' or their
+  // own 'Custom' chip, never under a specific category filter.
+  List<ThemePreset> get _visibleStaticPresets {
+    if (_activeFilter == 'Custom') return [];
+    if (_activeFilter == 'All') return themePresets;
+    return themePresets.where((p) => p.category.name == _activeFilter).toList();
+  }
+
+  List<ThemePreset> get _visibleCustomPresets {
+    if (_activeFilter == 'All' || _activeFilter == 'Custom') return _customPresets;
+    return [];
+  }
 
   @override
   void initState() {
@@ -184,48 +203,97 @@ class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
+                    // Batch 5: category tabs -- with 19 static templates,
+                    // a single flat scroll was getting long to browse.
+                    // Each TemplateCategory (Batch 2) plus 'Custom' for
+                    // saved presets, plus 'All' as the original behavior.
                     SizedBox(
-                      height: 96,
-                      child: ListView.separated(
+                      height: 32,
+                      child: ListView(
                         scrollDirection: Axis.horizontal,
-                        itemCount: themePresets.length + _customPresets.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 10),
-                        itemBuilder: (context, i) {
-                          final isCustom = i >= themePresets.length;
-                          final p = isCustom ? _customPresets[i - themePresets.length] : themePresets[i];
-                          return GestureDetector(
-                            onTap: () => appearance.applyPreset(p, glass.setEnabled),
-                            onLongPress: isCustom ? () => _confirmDeletePreset(appearance, p.name) : null,
-                            child: Container(
-                              width: 108,
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(colors: [p.primary, p.accent]),
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Stack(
-                                children: [
-                                  Column(
-                                    mainAxisAlignment: MainAxisAlignment.end,
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(p.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12)),
-                                      Text(p.tagline, style: const TextStyle(color: Colors.white70, fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                    ],
-                                  ),
-                                  if (isCustom)
-                                    const Positioned(
-                                      top: 0, right: 0,
-                                      child: Icon(Icons.push_pin, color: Colors.white70, size: 14),
-                                    ),
-                                ],
-                              ),
+                        children: [
+                          'All',
+                          ...TemplateCategory.values.map((c) => c.name),
+                          if (_customPresets.isNotEmpty) 'Custom',
+                        ].map((filter) {
+                          final label = filter == 'All'
+                              ? 'All'
+                              : filter == 'Custom'
+                                  ? 'My Custom'
+                                  : TemplateCategory.values.firstWhere((c) => c.name == filter).label;
+                          final selected = _activeFilter == filter;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(label, style: const TextStyle(fontSize: 12)),
+                              selected: selected,
+                              onSelected: (_) => setState(() => _activeFilter = filter),
+                              visualDensity: VisualDensity.compact,
                             ),
                           );
-                        },
+                        }).toList(),
                       ),
                     ),
+                    const SizedBox(height: 10),
+                    Builder(builder: (context) {
+                      final staticList = _visibleStaticPresets;
+                      final customList = _visibleCustomPresets;
+                      final total = staticList.length + customList.length;
+                      if (total == 0) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 20),
+                          child: Text('No templates in this category yet.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                        );
+                      }
+                      return SizedBox(
+                        height: 96,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: total,
+                          separatorBuilder: (_, __) => const SizedBox(width: 10),
+                          itemBuilder: (context, i) {
+                            final isCustom = i >= staticList.length;
+                            final p = isCustom ? customList[i - staticList.length] : staticList[i];
+                            return GestureDetector(
+                              onTap: () => appearance.applyPreset(p, glass.setEnabled),
+                              onLongPress: isCustom ? () => _confirmDeletePreset(appearance, p.name) : null,
+                              child: Container(
+                                width: 108,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  // Batch 5: use the template's own 2-stop
+                                  // gradient (Batch 2's gradientEnd) when
+                                  // it has one, instead of always showing
+                                  // a flat primary->accent -- Holographic
+                                  // Lens, iOS Liquid Glass etc. now
+                                  // preview the way they'll actually look.
+                                  gradient: LinearGradient(colors: [p.primary, p.gradientEnd ?? p.accent]),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: Stack(
+                                  children: [
+                                    Column(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(p.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12)),
+                                        Text(p.tagline, style: const TextStyle(color: Colors.white70, fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                      ],
+                                    ),
+                                    if (isCustom)
+                                      const Positioned(
+                                        top: 0, right: 0,
+                                        child: Icon(Icons.push_pin, color: Colors.white70, size: 14),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    }),
                     if (_customPresets.isNotEmpty)
                       const Padding(
                         padding: EdgeInsets.only(top: 6),

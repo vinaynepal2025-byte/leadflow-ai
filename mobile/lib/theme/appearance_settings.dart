@@ -974,6 +974,12 @@ class AppearanceSettings extends ChangeNotifier {
     }
     _floatingEnabled = theme['floating'] as bool? ?? false;
     _textureEnabled = theme['texture'] as bool? ?? false;
+    // Batch 5: AI-generated themes can now use a primary-color gradient
+    // and backdrop blur for glass/liquid moods, same fields a static
+    // preset can set (see ThemePreset.gradientEnd/backdropBlur).
+    _primaryGradientEnabled = theme['gradientEnd'] != null;
+    _primaryGradientEnd = theme['gradientEnd'] != null ? parseHex(theme['gradientEnd'] as String?, _primaryColor) : null;
+    _backdropBlurIntensity = ((theme['backdropBlur'] as num?)?.toDouble() ?? 0.0).clamp(0.0, 1.0);
     notifyListeners();
 
     final prefs = await SharedPreferences.getInstance();
@@ -992,6 +998,10 @@ class AppearanceSettings extends ChangeNotifier {
       prefs.setInt(_warningKey, _warningColor.value),
       prefs.setInt(_dangerKey, _dangerColor.value),
       prefs.setInt(_mutedKey, _mutedColor.value),
+      prefs.setBool(_primaryGradientEnabledKey, _primaryGradientEnabled),
+      if (_primaryGradientEnd != null) prefs.setInt(_primaryGradientEndKey, _primaryGradientEnd!.value)
+      else prefs.remove(_primaryGradientEndKey),
+      prefs.setDouble(_backdropBlurIntensityKey, _backdropBlurIntensity),
     ]);
     setGlassEnabled(_styleMode == UIStyleMode.glass || _styleMode == UIStyleMode.liquid);
   }
