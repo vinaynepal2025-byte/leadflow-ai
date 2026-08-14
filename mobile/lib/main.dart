@@ -208,8 +208,13 @@ class _RealApp extends StatelessWidget {
           themeMode: appearance.darkMode ? ThemeMode.dark : ThemeMode.light,
           builder: (context, child) {
             final mq = MediaQuery.of(context);
+            // Batch 4: accessibilityFontScale compounds with the existing
+            // design fontScale rather than replacing it -- they answer
+            // different questions ("what size looks good in my theme" vs
+            // "I need everything bigger to read it") and a user should be
+            // able to want both independently.
             Widget result = MediaQuery(
-              data: mq.copyWith(textScaler: TextScaler.linear(appearance.fontScale)),
+              data: mq.copyWith(textScaler: TextScaler.linear(appearance.fontScale * appearance.accessibilityFontScale)),
               child: child ?? const SizedBox.shrink(),
             );
             if (appearance.textureEnabled) {

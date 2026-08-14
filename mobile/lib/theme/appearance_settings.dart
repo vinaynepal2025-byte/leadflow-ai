@@ -50,7 +50,18 @@ enum FontPairing {
   spaceGroteskInter('Modern (Space Grotesk + Inter)'),
   playfairLato('Editorial (Playfair Display + Lato)'),
   poppinsRoboto('Friendly (Poppins + Roboto)'),
-  montserratOpenSans('Classic (Montserrat + Open Sans)');
+  montserratOpenSans('Classic (Montserrat + Open Sans)'),
+  // Batch 4 additions -- every one of these recombines the same 8
+  // already-bundled local .ttf families above in a fresh pairing. No new
+  // font files, no google_fonts, no network dependency: this is the
+  // exact property the earlier crash-fix relied on, deliberately kept
+  // intact rather than reaching for "real" premium web fonts.
+  interRoboto('Minimal SaaS (Inter + Roboto)'),
+  playfairOpenSans('Warm Editorial (Playfair Display + Open Sans)'),
+  spaceGroteskLato('Tech Warm (Space Grotesk + Lato)'),
+  montserratInter('Bold Corporate (Montserrat + Inter)'),
+  poppinsOpenSans('Soft Friendly (Poppins + Open Sans)'),
+  interLato('Quiet Premium (Inter + Lato)');
 
   final String label;
   const FontPairing(this.label);
@@ -479,6 +490,10 @@ class AppearanceSettings extends ChangeNotifier {
   Future<void> resetTypography() async {
     await setFontPairing(FontPairing.spaceGroteskInter);
     await setFontScale(1.0);
+    // Batch 4 additions.
+    await setLetterSpacing(0.0);
+    await setFontWeightChoice(FontWeightChoice.regular);
+    await setAccessibilityFontScale(1.0);
   }
 
   Future<void> resetShape() async {

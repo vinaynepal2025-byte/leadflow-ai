@@ -399,6 +399,40 @@ class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
                       label: '${(appearance.fontScale * 100).round()}%',
                       onChanged: appearance.setFontScale,
                     ),
+                    // Batch 4 additions.
+                    const SizedBox(height: 4),
+                    const Text('Font weight', style: TextStyle(fontSize: 13)),
+                    Wrap(
+                      spacing: 8,
+                      children: FontWeightChoice.values
+                          .map((w) => ChoiceChip(
+                                label: Text(w.label),
+                                selected: appearance.fontWeightChoice == w,
+                                onSelected: (_) => appearance.setFontWeightChoice(w),
+                              ))
+                          .toList(),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('Letter spacing', style: TextStyle(fontSize: 13)),
+                    Slider(
+                      value: appearance.letterSpacing, min: -0.5, max: 2.0, divisions: 10,
+                      label: appearance.letterSpacing.toStringAsFixed(1),
+                      onChanged: appearance.setLetterSpacing,
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Accessibility text scale',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                    const Text(
+                      'Separate from Text size above — stacks with it, for anyone who needs everything larger to read comfortably.',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                    Slider(
+                      value: appearance.accessibilityFontScale, min: 1.0, max: 1.5, divisions: 10,
+                      label: '${(appearance.accessibilityFontScale * 100).round()}%',
+                      onChanged: appearance.setAccessibilityFontScale,
+                    ),
                   ],
                 ),
 

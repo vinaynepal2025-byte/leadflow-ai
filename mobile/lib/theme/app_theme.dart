@@ -41,6 +41,33 @@ TextTheme _themeWithFamily(String family) => Typography.material2021(platform: T
     .black
     .apply(fontFamily: family);
 
+// Batch 4: applies letterSpacing + a font-weight nudge across every slot
+// in a TextTheme. Deliberately plain .copyWith() calls (TextTheme/
+// TextStyle.copyWith is long-standing, stable API already used elsewhere
+// in this file) rather than TextTheme.apply(), since apply()'s parameter
+// list doesn't include letterSpacing/fontWeight and guessing at an API
+// this sandbox has no compiler to check against isn't worth the risk.
+// letterSpacing:0.0 and FontWeightChoice.regular are Batch 1's defaults,
+// and both are no-ops here, so this is invisible until someone actually
+// touches the new controls.
+TextTheme _tuneTextTheme(TextTheme t, double letterSpacing, FontWeightChoice weightChoice) {
+  TextStyle? tune(TextStyle? s) {
+    if (s == null) return s;
+    return s.copyWith(
+      letterSpacing: letterSpacing,
+      fontWeight: weightChoice == FontWeightChoice.regular ? s.fontWeight : weightChoice.weight,
+    );
+  }
+
+  return t.copyWith(
+    displayLarge: tune(t.displayLarge), displayMedium: tune(t.displayMedium), displaySmall: tune(t.displaySmall),
+    headlineLarge: tune(t.headlineLarge), headlineMedium: tune(t.headlineMedium), headlineSmall: tune(t.headlineSmall),
+    titleLarge: tune(t.titleLarge), titleMedium: tune(t.titleMedium), titleSmall: tune(t.titleSmall),
+    bodyLarge: tune(t.bodyLarge), bodyMedium: tune(t.bodyMedium), bodySmall: tune(t.bodySmall),
+    labelLarge: tune(t.labelLarge), labelMedium: tune(t.labelMedium), labelSmall: tune(t.labelSmall),
+  );
+}
+
 _FontPair _resolveFontPair(FontPairing pairing) {
   switch (pairing) {
     case FontPairing.playfairLato:
@@ -66,6 +93,44 @@ _FontPair _resolveFontPair(FontPairing pairing) {
         () => _themeWithFamily('SpaceGrotesk'),
         () => _themeWithFamily('Inter'),
         ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'SpaceGrotesk', fontSize: fontSize, fontWeight: fontWeight, color: color),
+      );
+    // Batch 4 additions -- same recombination approach as the enum
+    // comment explains: existing bundled families only.
+    case FontPairing.interRoboto:
+      return _FontPair(
+        () => _themeWithFamily('Inter'),
+        () => _themeWithFamily('Roboto'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'Inter', fontSize: fontSize, fontWeight: fontWeight, color: color),
+      );
+    case FontPairing.playfairOpenSans:
+      return _FontPair(
+        () => _themeWithFamily('PlayfairDisplay'),
+        () => _themeWithFamily('OpenSans'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'PlayfairDisplay', fontSize: fontSize, fontWeight: fontWeight, color: color),
+      );
+    case FontPairing.spaceGroteskLato:
+      return _FontPair(
+        () => _themeWithFamily('SpaceGrotesk'),
+        () => _themeWithFamily('Lato'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'SpaceGrotesk', fontSize: fontSize, fontWeight: fontWeight, color: color),
+      );
+    case FontPairing.montserratInter:
+      return _FontPair(
+        () => _themeWithFamily('Montserrat'),
+        () => _themeWithFamily('Inter'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'Montserrat', fontSize: fontSize, fontWeight: fontWeight, color: color),
+      );
+    case FontPairing.poppinsOpenSans:
+      return _FontPair(
+        () => _themeWithFamily('Poppins'),
+        () => _themeWithFamily('OpenSans'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'Poppins', fontSize: fontSize, fontWeight: fontWeight, color: color),
+      );
+    case FontPairing.interLato:
+      return _FontPair(
+        () => _themeWithFamily('Inter'),
+        () => _themeWithFamily('Lato'),
+        ({fontSize, fontWeight, color}) => TextStyle(fontFamily: 'Inter', fontSize: fontSize, fontWeight: fontWeight, color: color),
       );
   }
 }
@@ -190,8 +255,8 @@ class AppTheme {
     );
 
     final radius = BorderRadius.circular(settings.cornerRadius);
-    final displayFont = pair.display();
-    final bodyFont = pair.body();
+    final displayFont = _tuneTextTheme(pair.display(), settings.letterSpacing, settings.fontWeightChoice);
+    final bodyFont = _tuneTextTheme(pair.body(), settings.letterSpacing, settings.fontWeightChoice);
     final textColor = isDark ? Colors.white : settings.primaryColor;
     final onGlassColor = isDark ? Colors.white : settings.primaryColor;
 
