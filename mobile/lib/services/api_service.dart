@@ -1293,6 +1293,17 @@ class ApiService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  // AI Suggestion Layer v1 -- one synthesized daily narrative across the
+  // whole Work Queue, not per-lead. Deliberately a separate call from
+  // getScoringToday() (which loads instantly) so the screen can render
+  // the deterministic lists first and fill in this card once the single
+  // AI round-trip finishes, rather than blocking on it.
+  Future<Map<String, dynamic>> getWorkQueueBriefing() async {
+    final res = await http.get(Uri.parse('$baseUrl/scoring/briefing'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   // ---------- Social Media Links ----------
 
   // ---------- Social Media Links ----------

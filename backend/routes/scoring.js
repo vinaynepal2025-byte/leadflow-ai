@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { scoreLead, scoreAllLeads, loadConfig, DEFAULT_WEIGHTS, DEFAULT_THRESHOLDS } = require('../services/leadScoring');
+const { generateJson } = require('../services/aiProvider');
 
 const router = express.Router();
 
@@ -161,10 +162,19 @@ router.get('/ranked', async (req, res) => {
   res.json(scored.slice(0, limit));
 });
 
-router.get('/today', async (req, res) => {
-  const tid = tenantId(req);
+// AI Suggestion Layer v1 -- shared by /today (fast, deterministic, no AI
+// cost) and /briefing (same data + one synthesized narrative). Extracted
+// so both stay in sync rather than duplicating the query logic.
+//
+// unreachable/unassigned are new: leadScoring.js already tracks
+// has_phone/has_parent_contact as scoring SIGNALS, but a missing contact
+// method only ever showed up as a silently lower score -- nothing
+// actually told a counselor "this lead cannot be reached" or "this lead
+// belongs to no one." Both are real, previously-invisible risks: an
+// active lead nobody can call, or nobody owns, doesn't fail loudly, it
+// just quietly never gets worked.
+async function computeWorkQueue(tid) {
   const scored = await scoreAllLeads(db, tid);
-
   const active = scored.filter((s) => !['Closed', 'Lost'].includes(s.stage));
 
   const priority = active.filter((s) => s.temperature === 'hot').slice(0, 10);
@@ -186,17 +196,84 @@ router.get('/today', async (req, res) => {
     ORDER BY l.created_at ASC LIMIT 10
   `).all(tid);
 
-  res.json({
+  const unreachable = await db.prepare(`
+    SELECT id, full_name, stage FROM leads
+    WHERE tenant_id = ? AND stage NOT IN ('Closed', 'Lost')
+      AND (phone IS NULL OR TRIM(phone) = '')
+      AND (email IS NULL OR TRIM(email) = '')
+      AND (parent_phone IS NULL OR TRIM(parent_phone) = '')
+    ORDER BY created_at DESC LIMIT 10
+  `).all(tid);
+
+  const unassigned = await db.prepare(`
+    SELECT id, full_name, stage FROM leads
+    WHERE tenant_id = ? AND stage NOT IN ('Closed', 'Lost') AND assigned_to IS NULL
+    ORDER BY created_at DESC LIMIT 10
+  `).all(tid);
+
+  return {
     priority_calls: priority,
     at_risk: atRisk,
     never_contacted: untouched,
+    unreachable,
+    unassigned,
     summary: {
       hot: active.filter((s) => s.temperature === 'hot').length,
       warm: active.filter((s) => s.temperature === 'warm').length,
       cold: active.filter((s) => s.temperature === 'cold').length,
       never_contacted: untouched.length,
+      unreachable: unreachable.length,
+      unassigned: unassigned.length,
     },
-  });
+  };
+}
+
+router.get('/today', async (req, res) => {
+  const tid = tenantId(req);
+  res.json(await computeWorkQueue(tid));
+});
+
+// GET /scoring/briefing -- same data as /today plus ONE synthesized
+// narrative from a SINGLE Gemini call across the whole queue. Kept as a
+// separate, slower endpoint rather than folded into /today so the fast
+// deterministic path (already used to render the Work Queue screen
+// immediately) never waits on an LLM round-trip; the app calls /today
+// first, then /briefing to progressively fill in the summary card. One
+// call for the entire queue, not one per lead -- N leads would mean N
+// calls, which doesn't fit Render's free-tier cost/latency budget.
+router.get('/briefing', async (req, res) => {
+  const tid = tenantId(req);
+  const queue = await computeWorkQueue(tid);
+
+  const totalItems = queue.priority_calls.length + queue.at_risk.length + queue.never_contacted.length
+    + queue.unreachable.length + queue.unassigned.length;
+  if (totalItems === 0) {
+    return res.json({ headline: "You're all caught up.", narrative: 'No leads need attention right now.', priorities: [] });
+  }
+
+  const prompt = `You are a senior counselor's assistant at an education admissions consultancy, looking at their ENTIRE active lead queue for today, already sorted into categories by the system.
+
+Queue (JSON):
+- priority_calls (hot leads, call today): ${JSON.stringify(queue.priority_calls.map((p) => ({ name: p.full_name, score: p.score })))}
+- at_risk (warning signs, may be slipping away): ${JSON.stringify(queue.at_risk.map((p) => ({ name: p.full_name, risk_signals: p.risk_signals.map((r) => r.reason) })))}
+- never_contacted (new leads, zero outreach yet): ${JSON.stringify(queue.never_contacted.map((p) => p.full_name))}
+- unreachable (no phone, email, OR parent contact on file -- literally cannot be called): ${JSON.stringify(queue.unreachable.map((p) => p.full_name))}
+- unassigned (active lead, no counselor owns it): ${JSON.stringify(queue.unassigned.map((p) => p.full_name))}
+
+Respond ONLY with valid JSON, no other text, in exactly this shape:
+{
+  "headline": "one sentence, the single most urgent thing across the whole queue today",
+  "narrative": "2-3 sentences giving a prioritized read of the day -- which category to tackle first and why, referencing actual counts",
+  "priorities": ["up to 4 short, specific, ordered action items, most urgent first"]
+}
+Data gaps (unreachable, unassigned) are usually more urgent to fix than they look, since they're often not "low priority," they're leads that literally cannot be worked until fixed -- weigh them accordingly rather than treating them as a footnote.`;
+
+  try {
+    const ai = await generateJson(prompt, { maxTokens: 800 });
+    res.json(ai);
+  } catch (err) {
+    res.status(200).json({ headline: 'Briefing unavailable right now.', narrative: err.message, priorities: [] });
+  }
 });
 
 module.exports = router;
