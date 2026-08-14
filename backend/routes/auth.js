@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { randomUUID, randomBytes } = require('crypto');
 const db = require('../db');
 const { sendEmail } = require('../services/email');
+const { requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -223,7 +224,7 @@ const TEAM_ROLES = ['admin', 'counselor', 'viewer'];
 // first login. Deliberately not an email-invite flow yet: that needs a
 // token table and a public accept-invite page, and this unblocks real
 // multi-user use today. Flagged as a follow-up rather than pretended.
-router.post('/team', async (req, res) => {
+router.post('/team', requireRole('admin'), async (req, res) => {
   const tid = req.header('x-tenant-id') || 'demo-consultancy';
   const { email, full_name, role, temp_password } = req.body;
   if (!email || !full_name || !temp_password) {
@@ -252,7 +253,7 @@ router.post('/team', async (req, res) => {
 });
 
 // PATCH /auth/team/:id — change role, name, or reactivate
-router.patch('/team/:id', async (req, res) => {
+router.patch('/team/:id', requireRole('admin'), async (req, res) => {
   const tid = req.header('x-tenant-id') || 'demo-consultancy';
   const existing = await db.prepare('SELECT * FROM users WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Team member not found' });
@@ -277,7 +278,7 @@ router.patch('/team/:id', async (req, res) => {
 // DELETE /auth/team/:id — deactivate rather than hard-delete, so the
 // counselor's name stays resolvable on every lead, call and note they
 // ever touched. Hard-deleting would orphan that history.
-router.delete('/team/:id', async (req, res) => {
+router.delete('/team/:id', requireRole('admin'), async (req, res) => {
   const tid = req.header('x-tenant-id') || 'demo-consultancy';
 
   // Guard against self-lockout. Discovered the hard way during live

@@ -64,6 +64,15 @@ app.use(express.json());
 // x-tenant-id trustworthy for every route below without touching them.
 app.use(require('./middleware/auth').attachUser);
 
+// P0 SECURITY FIX -- Phase 3 (enforcement). Everything below this line
+// now requires a valid token except the genuine public surfaces listed
+// in middleware/auth.js's PUBLIC_PREFIXES (login, public capture forms,
+// the lead-facing UPI pay page, inbound webhooks, the scheduled-message
+// cron, and short links). This is the breaking half of the fix: a caller
+// who omits the Authorization header no longer falls through to the
+// legacy "trust whatever x-tenant-id you claim" path.
+app.use(require('./middleware/auth').enforceAuth);
+
 app.get('/health', (req, res) => res.json({ status: 'ok', product: 'LeadFlow AI' }));
 app.use('/auth', authRouter);
 app.use('/campaigns', campaignsRouter);
