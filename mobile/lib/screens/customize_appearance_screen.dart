@@ -282,6 +282,49 @@ class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
                         ],
                       ],
                     ),
+                    const SizedBox(height: 10),
+                    // Batch 3: gradient toggles. Kept right under the
+                    // base color rather than a separate section, since a
+                    // gradient is a variant of that color, not a new
+                    // concept -- matches how Glow Color sits under Glow
+                    // Effect below.
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Primary Gradient'),
+                      subtitle: const Text('2-stop gradient from Primary — for glass/liquid templates'),
+                      value: appearance.primaryGradientEnabled,
+                      onChanged: appearance.setPrimaryGradientEnabled,
+                    ),
+                    if (appearance.primaryGradientEnabled) ...[
+                      const SizedBox(height: 8),
+                      _colorTile(
+                        label: 'Gradient End',
+                        color: appearance.primaryGradientEnd ?? appearance.primaryColor,
+                        onTap: () => _pickColor(context,
+                            initial: appearance.primaryGradientEnd ?? appearance.primaryColor,
+                            title: 'Primary Gradient End',
+                            onPicked: appearance.setPrimaryGradientEnd),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Accent Gradient'),
+                      subtitle: const Text('2-stop gradient from Accent'),
+                      value: appearance.accentGradientEnabled,
+                      onChanged: appearance.setAccentGradientEnabled,
+                    ),
+                    if (appearance.accentGradientEnabled) ...[
+                      const SizedBox(height: 8),
+                      _colorTile(
+                        label: 'Gradient End',
+                        color: appearance.accentGradientEnd ?? appearance.accentColor,
+                        onTap: () => _pickColor(context,
+                            initial: appearance.accentGradientEnd ?? appearance.accentColor,
+                            title: 'Accent Gradient End',
+                            onPicked: appearance.setAccentGradientEnd),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     const Text(
                       'STATUS COLOURS',

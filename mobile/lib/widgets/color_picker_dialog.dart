@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/contrast_utils.dart';
 
 /// A curated set of swatches (quick picks) plus a genuinely free RGB
 /// picker for "apni marzi se" (any color the person wants) — not limited
@@ -96,6 +97,12 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
               _slider('G', _g, Colors.green, (v) => setState(() => _g = v)),
               _slider('B', _b, Colors.blue, (v) => setState(() => _b = v)),
             ],
+            // Batch 3: real-time WCAG badge, shown for every color (not
+            // just custom-mode) since a curated swatch can be a poor
+            // choice too -- premium apps don't get an accessibility pass
+            // just because the color came from a preset list.
+            const SizedBox(height: 16),
+            _contrastRow(),
           ],
         ),
       ),
@@ -120,6 +127,46 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
         ),
         SizedBox(width: 32, child: Text('$value')),
       ],
+    );
+  }
+
+  /// Two badges, not one -- a color usually gets used both as text-on-
+  /// white (e.g. an outlined chip) and as a fill with white text on top
+  /// (e.g. a filled button), so both directions matter and neither one
+  /// alone tells the whole story.
+  Widget _contrastRow() {
+    final vsWhite = ContrastUtils.contrastRatio(_current, Colors.white);
+    final vsBlack = ContrastUtils.contrastRatio(_current, Colors.black);
+    return Row(
+      children: [
+        Expanded(child: _contrastBadge('vs White', vsWhite)),
+        const SizedBox(width: 8),
+        Expanded(child: _contrastBadge('vs Black', vsBlack)),
+      ],
+    );
+  }
+
+  Widget _contrastBadge(String label, double ratio) {
+    final level = ContrastUtils.levelFor(ratio);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: level.badgeColor.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: level.badgeColor.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: TextStyle(fontSize: 11, color: level.badgeColor.withValues(alpha: 0.85))),
+          Text(
+            '${ratio.toStringAsFixed(1)}:1 · ${level.label}',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: level.badgeColor),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
     );
   }
 }
