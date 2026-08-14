@@ -526,16 +526,26 @@ class _CallLogTabState extends State<CallLogTab> with WidgetsBindingObserver {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                 child: SizedBox(
                   width: double.infinity,
-                  child: FilledButton.icon(
-                    icon: const Icon(Icons.call, size: 18),
-                    label: const Text('Call now'),
-                    onPressed: _hasPhone
-                        ? () {
+                  // A dead, greyed-out "Call now" told the counselor nothing
+                  // about WHY they couldn't call. When there's no number on
+                  // file, offer the fix directly instead of a disabled button.
+                  child: _hasPhone
+                      ? FilledButton.icon(
+                          icon: const Icon(Icons.call, size: 18),
+                          label: const Text('Call now'),
+                          onPressed: () {
                             Navigator.pop(ctx);
                             _callPhone();
-                          }
-                        : null,
-                  ),
+                          },
+                        )
+                      : FilledButton.icon(
+                          icon: const Icon(Icons.add_ic_call, size: 18),
+                          label: const Text('Add a number to call'),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            _addPhoneInline();
+                          },
+                        ),
                 ),
               ),
             ],
@@ -655,7 +665,9 @@ class _CallLogTabState extends State<CallLogTab> with WidgetsBindingObserver {
                 child: FilledButton.icon(
                   icon: const Icon(Icons.call, size: 18),
                   label: const Text('Phone Call'),
-                  onPressed: _hasPhone ? _callPhone : null,
+                  // Tapping with no number routes to adding one rather than
+                  // being inert — the counselor's actual next step either way.
+                  onPressed: _hasPhone ? _callPhone : _addPhoneInline,
                 ),
               ),
               const SizedBox(width: 10),
@@ -664,7 +676,7 @@ class _CallLogTabState extends State<CallLogTab> with WidgetsBindingObserver {
                   style: FilledButton.styleFrom(backgroundColor: const Color(0xFF25D366)),
                   icon: const Icon(Icons.chat, size: 18),
                   label: const Text('WhatsApp'),
-                  onPressed: _hasPhone ? _callWhatsApp : null,
+                  onPressed: _hasPhone ? _callWhatsApp : _addPhoneInline,
                 ),
               ),
             ],

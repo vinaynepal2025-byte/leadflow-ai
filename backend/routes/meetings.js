@@ -2,6 +2,7 @@ const express = require('express');
 const { randomUUID } = require('crypto');
 const db = require('../db');
 const { createNotification } = require('./notifications');
+const { createReminder } = require('./reminders');
 
 const router = express.Router();
 
@@ -192,7 +193,12 @@ router.patch('/:id/visit-details', async (req, res) => {
   const existing = await db.prepare('SELECT id FROM meetings WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Meeting not found' });
 
-  const allowed = ['virtual_platform', 'areas_visited', 'photo_url', 'visitor_queries', 'caller_city', 'caller_state', 'first_time_visit'];
+  const allowed = ['virtual_platform', 'areas_visited', 'photo_url', 'visitor_queries', 'caller_city', 'caller_state', 'first_time_visit',
+    // These columns existed in the schema but were never wired through —
+    // exactly the intake details a counselor actually needs on a campus
+    // visit: who referred them, which intake they're targeting, how many
+    // prior trips, who came along, and when to follow up.
+    'referred_by', 'admission_session', 'visits_to_nepal_count', 'visitor_relation', 'follow_up_date'];
   const updates = [];
   const values = [];
   for (const field of allowed) {
@@ -207,6 +213,19 @@ router.patch('/:id/visit-details', async (req, res) => {
   await db.prepare(`UPDATE meetings SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
 
   const updated = await db.prepare('SELECT * FROM meetings WHERE id = ?').get(req.params.id);
+
+  // A follow-up date captured on the visit form is only useful if it
+  // actually surfaces later — route it into Reminders (and therefore
+  // Lead 360's alert feed) instead of sitting inert in a column.
+  if (req.body.follow_up_date) {
+    await createReminder(tid, {
+      leadId: updated.lead_id,
+      title: `Follow up after visit: ${updated.title}`,
+      dueAt: req.body.follow_up_date,
+      assignedTo: updated.host_name,
+    });
+  }
+
   res.json({ ...updated, areas_visited: updated.areas_visited ? JSON.parse(updated.areas_visited) : [] });
 });
 

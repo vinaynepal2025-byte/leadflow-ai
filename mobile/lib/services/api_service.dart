@@ -1511,6 +1511,15 @@ class ApiService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  /// Returns a short-lived signed URL to a real, saveable HTML export file
+  /// — the actual deliverable for a right-to-access request, as opposed to
+  /// the on-screen record counts.
+  Future<String> generateLeadExportFile(String leadId) async {
+    final res = await http.get(Uri.parse('$baseUrl/compliance/export/$leadId/file'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body)['download_url'] as String;
+  }
+
   Future<void> eraseLeadData(String leadId) async {
     final res = await http.delete(Uri.parse('$baseUrl/compliance/erase/$leadId'), headers: _headers, body: jsonEncode({'confirm': true}));
     _checkOk(res);

@@ -21,6 +21,11 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
   static const types = ['Counseling', 'Virtual Campus Tour', 'Physical Campus Visit', 'Parent Meeting', 'Demo Class', 'Other'];
   static const statuses = ['scheduled', 'completed', 'no-show', 'cancelled', 'rescheduled'];
   static const virtualPlatforms = ['WhatsApp Video', 'Google Meet', 'Zoom', 'Other'];
+  // Intake sessions are named the way Indian/Nepali admission cycles
+  // actually run, not as generic quarters.
+  static const admissionSessions = ['2026 Spring', '2026 Fall', '2027 Spring', '2027 Fall', 'Undecided'];
+  static const visitorRelations = ['Student alone', 'With parent(s)', 'With guardian', 'With sibling', 'With agent', 'Other'];
+  static const referralSources = ['Walk-in', 'Alumni referral', 'Existing student', 'Agent/Partner', 'Social media', 'Website', 'Newspaper/Ad', 'Friend/Family'];
   static const areaOptions = [
     ('Campus', Icons.apartment_outlined),
     ('Hospital', Icons.local_hospital_outlined),
@@ -42,6 +47,14 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
 
   void _refresh() => setState(() => _future = _api.getMeetings(leadId: widget.leadId));
 
+  /// One consistent section header for the visit form — the old form was a
+  /// flat run of controls with no grouping, which is what made it hard to
+  /// scan on a phone.
+  static Widget _sectionLabel(String text) => Text(
+        text.toUpperCase(),
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF5B6478), letterSpacing: 0.6),
+      );
+
   // -------------------- Rich Add Visit dialog --------------------
 
   Future<void> _addVisitDialog() async {
@@ -53,6 +66,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     final callerCityCtrl = TextEditingController();
     final callerStateCtrl = TextEditingController();
     final queriesCtrl = TextEditingController();
+    final referredByCtrl = TextEditingController();
     String platform = virtualPlatforms.first;
     bool firstTimeVisit = true;
     final Set<String> areasSelected = {};
@@ -60,6 +74,12 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
     XFile? photo;
     bool generatingLink = false;
     bool saving = false;
+    // Intake details the schema already supported but the form never
+    // captured — the things a counselor genuinely needs on a campus visit.
+    String? admissionSession;
+    String? visitorRelation;
+    int visitsToNepal = 0;
+    DateTime? followUpDate;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -127,6 +147,11 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                 if (!isPhysical && callerStateCtrl.text.trim().isNotEmpty) 'caller_state': callerStateCtrl.text.trim(),
                 if (queriesCtrl.text.trim().isNotEmpty) 'visitor_queries': queriesCtrl.text.trim(),
                 'first_time_visit': firstTimeVisit,
+                if (referredByCtrl.text.trim().isNotEmpty) 'referred_by': referredByCtrl.text.trim(),
+                if (admissionSession != null) 'admission_session': admissionSession,
+                if (visitorRelation != null) 'visitor_relation': visitorRelation,
+                if (!firstTimeVisit || visitsToNepal > 0) 'visits_to_nepal_count': visitsToNepal,
+                if (followUpDate != null) 'follow_up_date': followUpDate!.toIso8601String(),
               });
 
               bool photoFailed = false;
@@ -182,7 +207,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  const Text('Visit Mode', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  _sectionLabel('Visit Mode'),
                   const SizedBox(height: 6),
                   Row(
                     children: [
@@ -226,7 +251,7 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                     TextField(controller: campusCtrl, decoration: const InputDecoration(labelText: 'Campus / Location', border: OutlineInputBorder())),
                     const SizedBox(height: 12),
                   ] else ...[
-                    const Text('Virtual Platform', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    _sectionLabel('Virtual Platform'),
                     const SizedBox(height: 6),
                     Wrap(
                       spacing: 8,
@@ -269,7 +294,58 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                     const SizedBox(height: 12),
                   ],
 
-                  const Text('Areas of Interest / Visited (select all that apply)', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 12),
+
+                  _sectionLabel('Who came in'),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: visitorRelations.map((r) => ChoiceChip(
+                      label: Text(r, style: const TextStyle(fontSize: 12)),
+                      selected: visitorRelation == r,
+                      onSelected: (_) => setSheetState(() => visitorRelation = r),
+                    )).toList(),
+                  ),
+                  const SizedBox(height: 12),
+
+                  _sectionLabel('How they found us'),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: referralSources.map((r) => ChoiceChip(
+                      label: Text(r, style: const TextStyle(fontSize: 12)),
+                      selected: referredByCtrl.text == r,
+                      onSelected: (_) => setSheetState(() => referredByCtrl.text = r),
+                    )).toList(),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: referredByCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Referred by (name, if any)',
+                      helperText: 'Tap a source above, or type the exact person who referred them',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setSheetState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+
+                  _sectionLabel('Target intake'),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: admissionSessions.map((s) => ChoiceChip(
+                      label: Text(s, style: const TextStyle(fontSize: 12)),
+                      selected: admissionSession == s,
+                      onSelected: (_) => setSheetState(() => admissionSession = s),
+                    )).toList(),
+                  ),
+                  const SizedBox(height: 12),
+
+                  _sectionLabel('Areas of Interest / Visited (select all that apply)'),
                   const SizedBox(height: 6),
                   Wrap(
                     spacing: 8,
@@ -286,16 +362,68 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                   ),
                   const SizedBox(height: 12),
 
+                  _sectionLabel('Visit history'),
+                  const SizedBox(height: 6),
                   Row(
                     children: [
-                      Expanded(child: FilterChip(label: const Text('First-time visit'), selected: firstTimeVisit, onSelected: (v) => setSheetState(() => firstTimeVisit = v))),
+                      Expanded(child: ChoiceChip(
+                        label: const Text('First-time visit'),
+                        selected: firstTimeVisit,
+                        onSelected: (_) => setSheetState(() {
+                          firstTimeVisit = true;
+                          visitsToNepal = 0;
+                        }),
+                      )),
                       const SizedBox(width: 8),
-                      Expanded(child: FilterChip(label: const Text('Return visit'), selected: !firstTimeVisit, onSelected: (v) => setSheetState(() => firstTimeVisit = !v))),
+                      Expanded(child: ChoiceChip(
+                        label: const Text('Return visit'),
+                        selected: !firstTimeVisit,
+                        onSelected: (_) => setSheetState(() {
+                          firstTimeVisit = false;
+                          if (visitsToNepal < 1) visitsToNepal = 1;
+                        }),
+                      )),
                     ],
+                  ),
+                  if (!firstTimeVisit) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Expanded(child: Text('Previous visits', style: TextStyle(fontSize: 13))),
+                        IconButton(
+                          icon: const Icon(Icons.remove_circle_outline),
+                          onPressed: visitsToNepal > 1 ? () => setSheetState(() => visitsToNepal--) : null,
+                        ),
+                        Text('$visitsToNepal', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        IconButton(
+                          icon: const Icon(Icons.add_circle_outline),
+                          onPressed: () => setSheetState(() => visitsToNepal++),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+
+                  _sectionLabel('Follow-up'),
+                  const SizedBox(height: 6),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.event_repeat_outlined, size: 16),
+                    label: Text(followUpDate == null
+                        ? 'Set a follow-up date (creates a reminder)'
+                        : 'Follow up on ${followUpDate.toString().substring(0, 10)}'),
+                    onPressed: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now().add(const Duration(days: 3)),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (date != null) setSheetState(() => followUpDate = date);
+                    },
                   ),
                   const SizedBox(height: 12),
 
-                  Text('Photo (auto-added to report)', style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                  _sectionLabel('Photo (auto-added to report)'),
                   const SizedBox(height: 6),
                   Row(
                     children: [

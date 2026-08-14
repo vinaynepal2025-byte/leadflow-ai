@@ -1,6 +1,7 @@
 const express = require('express');
 const { randomUUID } = require('crypto');
 const db = require('../db');
+const { uploadFile, getSignedUrl } = require('../services/supabaseStorage');
 
 const router = express.Router();
 
@@ -112,6 +113,94 @@ router.post('/requests', async (req, res) => {
   await db.prepare('INSERT INTO data_requests (id, tenant_id, lead_id, request_type) VALUES (?, ?, ?, ?)')
     .run(id, tid, lead_id, request_type);
   res.status(201).json(await db.prepare('SELECT * FROM data_requests WHERE id = ?').get(id));
+});
+
+// Builds the full data bundle for a lead — shared by the JSON export
+// endpoint and the downloadable-file endpoint below.
+const EXPORT_TABLES = ['communications', 'reminders', 'documents', 'admission_applications', 'fee_payments',
+  'meetings', 'visa_applications', 'travel_plans', 'consent_records', 'tasks', 'lead_notes'];
+
+async function buildExportBundle(tid, leadId) {
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, leadId);
+  if (!lead) return null;
+  const bundle = { lead };
+  for (const table of EXPORT_TABLES) {
+    try {
+      bundle[table] = await db.prepare(`SELECT * FROM ${table} WHERE tenant_id = ? AND lead_id = ?`).all(tid, leadId);
+    } catch {
+      bundle[table] = [];
+    }
+  }
+  return bundle;
+}
+
+function escapeHtml(v) {
+  return String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// GET /compliance/export/:leadId/file — the actual deliverable for a
+// "right to access" request: a real, saveable, human-readable file rather
+// than a count summary on screen. Renders every record as an HTML report,
+// stores it in Supabase Storage (same infra Documents uses) and returns a
+// short-lived signed URL the app can open/download/share.
+router.get('/export/:leadId/file', async (req, res) => {
+  const tid = tenantId(req);
+  const bundle = await buildExportBundle(tid, req.params.leadId);
+  if (!bundle) return res.status(404).json({ error: 'Lead not found' });
+
+  const tenant = await db.prepare('SELECT name FROM tenants WHERE id = ?').get(tid);
+  const generatedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+  const sections = EXPORT_TABLES.map((table) => {
+    const rows = bundle[table] || [];
+    if (rows.length === 0) {
+      return `<h2>${table.replace(/_/g, ' ')}</h2><p class="empty">No records.</p>`;
+    }
+    const cols = Object.keys(rows[0]);
+    const head = cols.map((c) => `<th>${escapeHtml(c.replace(/_/g, ' '))}</th>`).join('');
+    const body = rows.map((r) => `<tr>${cols.map((c) => `<td>${escapeHtml(r[c])}</td>`).join('')}</tr>`).join('');
+    return `<h2>${table.replace(/_/g, ' ')} <span class="count">(${rows.length})</span></h2>
+      <div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }).join('\n');
+
+  const leadRows = Object.entries(bundle.lead)
+    .map(([k, v]) => `<tr><th>${escapeHtml(k.replace(/_/g, ' '))}</th><td>${escapeHtml(v)}</td></tr>`).join('');
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Export — ${escapeHtml(bundle.lead.full_name)}</title>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; margin: 20px; color: #1B2A4A; line-height: 1.5; }
+  h1 { font-size: 20px; border-bottom: 3px solid #1B2A4A; padding-bottom: 8px; }
+  h2 { font-size: 15px; margin-top: 28px; text-transform: capitalize; color: #2E4270; }
+  .count { color: #5B6478; font-weight: normal; font-size: 13px; }
+  .meta { color: #5B6478; font-size: 12px; margin-bottom: 20px; }
+  .empty { color: #5B6478; font-size: 13px; font-style: italic; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border: 1px solid #dde1e8; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #F7F8FA; font-weight: 600; white-space: nowrap; }
+  .profile th { width: 180px; }
+</style></head>
+<body>
+  <h1>Personal Data Export — ${escapeHtml(bundle.lead.full_name)}</h1>
+  <p class="meta">Issued by ${escapeHtml(tenant?.name || 'LeadFlow AI')} on ${generatedAt}.<br>
+  This document contains every record held about this individual, provided in response to a data access request.</p>
+  <h2>Profile</h2>
+  <table class="profile">${leadRows}</table>
+  ${sections}
+</body></html>`;
+
+  const storagePath = `exports/${req.params.leadId}-${Date.now()}.html`;
+  try {
+    await uploadFile(Buffer.from(html, 'utf-8'), storagePath, 'text/html');
+    const url = await getSignedUrl(storagePath, 900); // 15 min — long enough to open and save
+    await db.prepare("UPDATE data_requests SET status = 'completed', completed_at = datetime('now') WHERE tenant_id = ? AND lead_id = ? AND request_type = 'export' AND status = 'pending'")
+      .run(tid, req.params.leadId);
+    res.json({ download_url: url, expires_in_seconds: 900 });
+  } catch (err) {
+    res.status(502).json({ error: `Could not generate the export file: ${err.message}` });
+  }
 });
 
 // GET /compliance/export/:leadId — every piece of data held on this lead,

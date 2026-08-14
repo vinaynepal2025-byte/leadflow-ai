@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 
 class ComplianceScreen extends StatefulWidget {
@@ -100,17 +101,44 @@ class _ComplianceScreenState extends State<ComplianceScreen> {
   }
 
   Future<void> _exportData() async {
-    final data = await _api.exportLeadData(widget.leadId);
-    if (!mounted) return;
-    final tableCounts = data.entries.where((e) => e.key != 'lead').map((e) => '${e.key}: ${(e.value as List).length}').join('\n');
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Data Export Ready'),
-        content: SingleChildScrollView(child: Text('Everything held on ${widget.leadName}:\n\n$tableCounts')),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Row(
+          children: [
+            SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 16),
+            Expanded(child: Text('Building the export file…')),
+          ],
+        ),
       ),
     );
+    try {
+      final url = await _api.generateLeadExportFile(widget.leadId);
+      if (!mounted) return;
+      Navigator.pop(context); // close the progress dialog
+      final opened = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      if (!mounted) return;
+      if (!opened) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the file — no app available to handle it')),
+        );
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Export opened in your browser — use its menu to download or share the file'),
+          duration: Duration(seconds: 5),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
   }
 
   Future<void> _requestErasure() async {

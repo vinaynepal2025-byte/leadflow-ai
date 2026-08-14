@@ -180,6 +180,17 @@ router.patch('/:id', async (req, res) => {
     return res.status(400).json({ error: 'No valid fields to update' });
   }
 
+  // Adding a phone to a lead that never had a country code (e.g. imported
+  // rows, or one created before this field existed) would otherwise leave
+  // phone_country_code null and produce an unroutable wa.me link — the
+  // exact class of bug fixed app-wide via services/phone.js. Apply the
+  // same tenant-default fallback POST already uses.
+  if (req.body.phone !== undefined && req.body.phone_country_code === undefined && !existing.phone_country_code) {
+    const tenant = await db.prepare('SELECT default_country_code FROM tenants WHERE id = ?').get(tid);
+    updates.push('phone_country_code = ?');
+    values.push(tenant?.default_country_code || '+91');
+  }
+
   if (req.body.custom_fields !== undefined) {
     const currentFields = existing.custom_fields ? JSON.parse(existing.custom_fields) : {};
     const merged = { ...currentFields, ...req.body.custom_fields };
