@@ -81,6 +81,44 @@ enum SpacingDensity {
   const SpacingDensity(this.label, this.value);
 }
 
+/// Batch 1 (Customize Studio upgrade) additions below.
+
+/// How screen-to-screen navigation animates. Purely visual; does not
+/// affect app_theme.dart's page-route wiring on its own -- screens that
+/// want to honor this read it from AppearanceSettings when building
+/// their PageRouteBuilder, same as every other token here.
+enum PageTransitionStyle {
+  slide('Slide'),
+  fade('Fade'),
+  scale('Scale');
+
+  final String label;
+  const PageTransitionStyle(this.label);
+}
+
+/// List rows vs a grid vs denser compact rows -- primarily for the Leads
+/// list and similar record lists, not a global layout override.
+enum CardLayoutStyle {
+  list('List'),
+  grid('Grid'),
+  compactRows('Compact Rows');
+
+  final String label;
+  const CardLayoutStyle(this.label);
+}
+
+/// Independent of the FontPairing bundle's built-in weight -- lets a user
+/// nudge boldness without switching the whole font pairing.
+enum FontWeightChoice {
+  regular('Regular', FontWeight.w400),
+  medium('Medium', FontWeight.w500),
+  bold('Bold', FontWeight.w700);
+
+  final String label;
+  final FontWeight weight;
+  const FontWeightChoice(this.label, this.weight);
+}
+
 /// A one-tap bundle of color + font + radius + mode choices — the "quick
 /// pick" alternative to manually tuning every control one at a time.
 class ThemePreset {
@@ -146,6 +184,26 @@ class AppearanceSettings extends ChangeNotifier {
   static const _touchFeedbackKey = 'appearance_touch_feedback';
   static const _swipeActionsKey = 'appearance_swipe_actions';
   static const _navPositionKey = 'appearance_nav_position';
+
+  // Batch 1 (Customize Studio upgrade) — new token fields. Each follows
+  // the exact same field/getter/setter/load/reset pattern as everything
+  // above; grouped here by the Part-2 section they belong to so a later
+  // batch wiring up UI for one section can find all its keys together.
+  static const _primaryGradientEnabledKey = 'appearance_primary_gradient_enabled';
+  static const _primaryGradientEndKey = 'appearance_primary_gradient_end';
+  static const _accentGradientEnabledKey = 'appearance_accent_gradient_enabled';
+  static const _accentGradientEndKey = 'appearance_accent_gradient_end';
+  static const _shadowElevationKey = 'appearance_shadow_elevation';
+  static const _cardDensityScaleKey = 'appearance_card_density_scale';
+  static const _pageTransitionKey = 'appearance_page_transition';
+  static const _reduceMotionKey = 'appearance_reduce_motion';
+  static const _backdropBlurIntensityKey = 'appearance_backdrop_blur_intensity';
+  static const _cardLayoutStyleKey = 'appearance_card_layout_style';
+  static const _autoDarkModeKey = 'appearance_auto_dark_mode';
+  static const _accessibilityFontScaleKey = 'appearance_accessibility_font_scale';
+  static const _highContrastModeKey = 'appearance_high_contrast_mode';
+  static const _letterSpacingKey = 'appearance_letter_spacing';
+  static const _fontWeightChoiceKey = 'appearance_font_weight_choice';
   // Semantic colours. These were previously hardcoded in AppColors and read
   // directly by badges, alerts and status chips, which meant a tenant could
   // restyle the whole app and still be stuck with our green/amber/red.
@@ -183,6 +241,26 @@ class AppearanceSettings extends ChangeNotifier {
   Color _warningColor = const Color(0xFFE8A33D);
   Color _dangerColor = const Color(0xFFE85D4E);
   Color _mutedColor = const Color(0xFF5B6478);
+
+  // Batch 1 additions. Defaults are all "off / neutral" so an existing
+  // user's app looks identical the instant this ships -- nothing here
+  // changes what renders until a later batch's UI lets someone touch it.
+  bool _primaryGradientEnabled = false;
+  Color? _primaryGradientEnd;
+  bool _accentGradientEnabled = false;
+  Color? _accentGradientEnd;
+  double _shadowElevation = 0.0;
+  double _cardDensityScale = 1.0;
+  PageTransitionStyle _pageTransitionStyle = PageTransitionStyle.slide;
+  bool _reduceMotion = false;
+  double _backdropBlurIntensity = 0.0;
+  CardLayoutStyle _cardLayoutStyle = CardLayoutStyle.list;
+  bool _autoDarkMode = false;
+  double _accessibilityFontScale = 1.0;
+  bool _highContrastMode = false;
+  double _letterSpacing = 0.0;
+  FontWeightChoice _fontWeightChoice = FontWeightChoice.regular;
+
   bool _loaded = false;
 
   Color get primaryColor => _primaryColor;
@@ -224,6 +302,23 @@ class AppearanceSettings extends ChangeNotifier {
   /// hero widgets (GlassContainer/GlassButton) use this to decide whether
   /// to render their true-blur variant.
   bool get isGlassy => _styleMode == UIStyleMode.glass || _styleMode == UIStyleMode.liquid;
+
+  // Batch 1 getters.
+  bool get primaryGradientEnabled => _primaryGradientEnabled;
+  Color? get primaryGradientEnd => _primaryGradientEnd;
+  bool get accentGradientEnabled => _accentGradientEnabled;
+  Color? get accentGradientEnd => _accentGradientEnd;
+  double get shadowElevation => _shadowElevation;
+  double get cardDensityScale => _cardDensityScale;
+  PageTransitionStyle get pageTransitionStyle => _pageTransitionStyle;
+  bool get reduceMotion => _reduceMotion;
+  double get backdropBlurIntensity => _backdropBlurIntensity;
+  CardLayoutStyle get cardLayoutStyle => _cardLayoutStyle;
+  bool get autoDarkMode => _autoDarkMode;
+  double get accessibilityFontScale => _accessibilityFontScale;
+  bool get highContrastMode => _highContrastMode;
+  double get letterSpacing => _letterSpacing;
+  FontWeightChoice get fontWeightChoice => _fontWeightChoice;
 
   // ---------- Custom presets ("Save current as preset") ----------
   // Encoded as '~~'-delimited strings (not JSON, to avoid adding a
@@ -391,6 +486,35 @@ class AppearanceSettings extends ChangeNotifier {
     if (navIndex != null && navIndex < NavPosition.values.length) {
       _navPosition = NavPosition.values[navIndex];
     }
+
+    // Batch 1 additions.
+    _primaryGradientEnabled = prefs.getBool(_primaryGradientEnabledKey) ?? false;
+    final primaryGradEndValue = prefs.getInt(_primaryGradientEndKey);
+    if (primaryGradEndValue != null) _primaryGradientEnd = Color(primaryGradEndValue);
+    _accentGradientEnabled = prefs.getBool(_accentGradientEnabledKey) ?? false;
+    final accentGradEndValue = prefs.getInt(_accentGradientEndKey);
+    if (accentGradEndValue != null) _accentGradientEnd = Color(accentGradEndValue);
+    _shadowElevation = prefs.getDouble(_shadowElevationKey) ?? 0.0;
+    _cardDensityScale = prefs.getDouble(_cardDensityScaleKey) ?? 1.0;
+    final transitionIndex = prefs.getInt(_pageTransitionKey);
+    if (transitionIndex != null && transitionIndex < PageTransitionStyle.values.length) {
+      _pageTransitionStyle = PageTransitionStyle.values[transitionIndex];
+    }
+    _reduceMotion = prefs.getBool(_reduceMotionKey) ?? false;
+    _backdropBlurIntensity = prefs.getDouble(_backdropBlurIntensityKey) ?? 0.0;
+    final layoutIndex = prefs.getInt(_cardLayoutStyleKey);
+    if (layoutIndex != null && layoutIndex < CardLayoutStyle.values.length) {
+      _cardLayoutStyle = CardLayoutStyle.values[layoutIndex];
+    }
+    _autoDarkMode = prefs.getBool(_autoDarkModeKey) ?? false;
+    _accessibilityFontScale = prefs.getDouble(_accessibilityFontScaleKey) ?? 1.0;
+    _highContrastMode = prefs.getBool(_highContrastModeKey) ?? false;
+    _letterSpacing = prefs.getDouble(_letterSpacingKey) ?? 0.0;
+    final weightIndex = prefs.getInt(_fontWeightChoiceKey);
+    if (weightIndex != null && weightIndex < FontWeightChoice.values.length) {
+      _fontWeightChoice = FontWeightChoice.values[weightIndex];
+    }
+
     _loaded = true;
     notifyListeners();
   }
@@ -573,6 +697,108 @@ class AppearanceSettings extends ChangeNotifier {
     (await SharedPreferences.getInstance()).setInt(_navPositionKey, v.index);
   }
 
+  // Batch 1 setters -- same pattern as every setter above: update the
+  // in-memory value and notify first (so UI feels instant), persist after.
+  Future<void> setPrimaryGradientEnabled(bool v) async {
+    _primaryGradientEnabled = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setBool(_primaryGradientEnabledKey, v);
+  }
+
+  Future<void> setPrimaryGradientEnd(Color? v) async {
+    _primaryGradientEnd = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (v == null) {
+      await prefs.remove(_primaryGradientEndKey);
+    } else {
+      await prefs.setInt(_primaryGradientEndKey, v.value);
+    }
+  }
+
+  Future<void> setAccentGradientEnabled(bool v) async {
+    _accentGradientEnabled = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setBool(_accentGradientEnabledKey, v);
+  }
+
+  Future<void> setAccentGradientEnd(Color? v) async {
+    _accentGradientEnd = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (v == null) {
+      await prefs.remove(_accentGradientEndKey);
+    } else {
+      await prefs.setInt(_accentGradientEndKey, v.value);
+    }
+  }
+
+  Future<void> setShadowElevation(double v) async {
+    _shadowElevation = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setDouble(_shadowElevationKey, v);
+  }
+
+  Future<void> setCardDensityScale(double v) async {
+    _cardDensityScale = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setDouble(_cardDensityScaleKey, v);
+  }
+
+  Future<void> setPageTransitionStyle(PageTransitionStyle v) async {
+    _pageTransitionStyle = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setInt(_pageTransitionKey, v.index);
+  }
+
+  Future<void> setReduceMotion(bool v) async {
+    _reduceMotion = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setBool(_reduceMotionKey, v);
+  }
+
+  Future<void> setBackdropBlurIntensity(double v) async {
+    _backdropBlurIntensity = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setDouble(_backdropBlurIntensityKey, v);
+  }
+
+  Future<void> setCardLayoutStyle(CardLayoutStyle v) async {
+    _cardLayoutStyle = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setInt(_cardLayoutStyleKey, v.index);
+  }
+
+  Future<void> setAutoDarkMode(bool v) async {
+    _autoDarkMode = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setBool(_autoDarkModeKey, v);
+  }
+
+  Future<void> setAccessibilityFontScale(double v) async {
+    _accessibilityFontScale = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setDouble(_accessibilityFontScaleKey, v);
+  }
+
+  Future<void> setHighContrastMode(bool v) async {
+    _highContrastMode = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setBool(_highContrastModeKey, v);
+  }
+
+  Future<void> setLetterSpacing(double v) async {
+    _letterSpacing = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setDouble(_letterSpacingKey, v);
+  }
+
+  Future<void> setFontWeightChoice(FontWeightChoice v) async {
+    _fontWeightChoice = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setInt(_fontWeightChoiceKey, v.index);
+  }
+
   /// Applies every value from a curated preset at once — the "quick pick"
   /// path, still fully overridable afterward via the individual controls.
   Future<void> applyPreset(ThemePreset preset, GlassSetter setGlassEnabled) async {
@@ -693,6 +919,22 @@ class AppearanceSettings extends ChangeNotifier {
     _touchFeedback = TouchFeedback.fade;
     _swipeActionsEnabled = false;
     _navPosition = NavPosition.bottom;
+    // Batch 1 additions.
+    _primaryGradientEnabled = false;
+    _primaryGradientEnd = null;
+    _accentGradientEnabled = false;
+    _accentGradientEnd = null;
+    _shadowElevation = 0.0;
+    _cardDensityScale = 1.0;
+    _pageTransitionStyle = PageTransitionStyle.slide;
+    _reduceMotion = false;
+    _backdropBlurIntensity = 0.0;
+    _cardLayoutStyle = CardLayoutStyle.list;
+    _autoDarkMode = false;
+    _accessibilityFontScale = 1.0;
+    _highContrastMode = false;
+    _letterSpacing = 0.0;
+    _fontWeightChoice = FontWeightChoice.regular;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await Future.wait([
@@ -724,6 +966,22 @@ class AppearanceSettings extends ChangeNotifier {
       prefs.remove(_warningKey),
       prefs.remove(_dangerKey),
       prefs.remove(_mutedKey),
+      // Batch 1 additions.
+      prefs.remove(_primaryGradientEnabledKey),
+      prefs.remove(_primaryGradientEndKey),
+      prefs.remove(_accentGradientEnabledKey),
+      prefs.remove(_accentGradientEndKey),
+      prefs.remove(_shadowElevationKey),
+      prefs.remove(_cardDensityScaleKey),
+      prefs.remove(_pageTransitionKey),
+      prefs.remove(_reduceMotionKey),
+      prefs.remove(_backdropBlurIntensityKey),
+      prefs.remove(_cardLayoutStyleKey),
+      prefs.remove(_autoDarkModeKey),
+      prefs.remove(_accessibilityFontScaleKey),
+      prefs.remove(_highContrastModeKey),
+      prefs.remove(_letterSpacingKey),
+      prefs.remove(_fontWeightChoiceKey),
     ]);
   }
 }
