@@ -58,6 +58,12 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
+// P0 SECURITY FIX -- Phase 1 (foundation, non-breaking). See
+// middleware/auth.js for the full rationale. Additive only: requests
+// with no/invalid token behave exactly as before; a valid token makes
+// x-tenant-id trustworthy for every route below without touching them.
+app.use(require('./middleware/auth').attachUser);
+
 app.get('/health', (req, res) => res.json({ status: 'ok', product: 'LeadFlow AI' }));
 app.use('/auth', authRouter);
 app.use('/campaigns', campaignsRouter);
