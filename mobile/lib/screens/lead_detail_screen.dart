@@ -20,6 +20,7 @@ import 'lead_notes_screen.dart';
 import 'customize_lead_detail_screen.dart';
 import 'flyer_studio/flyer_history_screen.dart';
 import 'lead_timeline_screen.dart';
+import '../widgets/glass_widgets.dart';
 
 // Must stay in sync with backend/routes/leadDetailSections.js DEFAULTS
 // and screens/customize_lead_detail_screen.dart -- three places carry
@@ -230,9 +231,14 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
   }
 
   bool _isEnabled(String key) => (_configFor(key)?['enabled'] as bool?) ?? true;
-  String _labelFor(String key) => _configFor(key)?['custom_label'] ?? _kDefaultLabels[key] ?? key;
-  IconData _iconFor(String key) =>
-      _kIconOptions[_configFor(key)?['icon_override'] ?? _kDefaultIcons[key]] ?? Icons.star;
+  // '__email' is a pseudo-section: it lives in the same launcher grid but
+  // isn't part of the customizable section set, so it has no DB config and
+  // needs its own label/icon fallback.
+  String _labelFor(String key) =>
+      key == '__email' ? 'Email' : (_configFor(key)?['custom_label'] ?? _kDefaultLabels[key] ?? key);
+  IconData _iconFor(String key) => key == '__email'
+      ? Icons.email_outlined
+      : (_kIconOptions[_configFor(key)?['icon_override'] ?? _kDefaultIcons[key]] ?? Icons.star);
 
   Color _colorFor(String key, Color fallback) {
     final hex = _configFor(key)?['color_override'] as String?;
@@ -245,33 +251,136 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
   String _sizeFor(String key) => _configFor(key)?['size_override'] ?? 'standard';
   String _shapeFor(String key) => _configFor(key)?['shape_override'] ?? 'rounded';
 
-  Widget _styledButton({
-    required String sectionKey,
-    required Color defaultColor,
-    required VoidCallback onPressed,
-  }) {
-    final size = _sizeFor(sectionKey);
-    final shape = _shapeFor(sectionKey);
+  /// The destination + identity colour for every navigation-type section,
+  /// in one place. Both the grid tiles and the (still supported) full-width
+  /// button style read from this, so a section's behaviour is defined once
+  /// regardless of how the user has chosen to render it.
+  /// Returns null for sections that aren't simple navigation (ai_insight
+  /// renders as a rich panel) or that don't apply to this lead.
+  ({Color color, VoidCallback onTap})? _navActionFor(String key, Lead lead) {
+    switch (key) {
+      case 'calling_cockpit':
+        return (
+          color: Theme.of(context).colorScheme.primary,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CockpitScreen(leadId: lead.id))),
+        );
+      case 'whatsapp':
+        if (lead.phone == null) return null;
+        return (
+          color: Colors.green,
+          onTap: () async {
+            final link = await _api.getWhatsAppChatLink(lead.id, 'Hi ${lead.fullName}, following up on your enquiry.');
+            await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
+            await _api.confirmWhatsAppSent(lead.id, 'Hi ${lead.fullName}, following up on your enquiry.', 'Counselor');
+            _load();
+          },
+        );
+      case 'documents':
+        return (
+          color: Colors.blueGrey,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DocumentsScreen(leadId: lead.id))),
+        );
+      case 'admissions_fees':
+        return (
+          color: Colors.indigo,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdmissionsFeesScreen(leadId: lead.id))),
+        );
+      case 'calls_voice_notes':
+        return (
+          color: Colors.teal,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CallsVoiceNotesScreen(leadId: lead.id))),
+        );
+      case 'meetings':
+        return (
+          color: Colors.orange,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MeetingsScreen(leadId: lead.id))),
+        );
+      case 'visa_travel_student':
+        return (
+          color: Colors.cyan,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => JourneyScreen(leadId: lead.id))),
+        );
+      case 'alumni':
+        return (
+          color: Colors.purple,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AlumniMatchScreen(leadId: lead.id))),
+        );
+      case 'consent_compliance':
+        return (
+          color: Colors.brown,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => ComplianceScreen(leadId: lead.id, leadName: lead.fullName)),
+          ),
+        );
+      case 'lead_notes':
+        return (
+          color: Colors.amber.shade800,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LeadNotesScreen(leadId: lead.id, leadName: lead.fullName))),
+        );
+      case 'flyer_studio':
+        return (
+          color: Colors.deepPurple,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FlyerHistoryScreen(leadId: lead.id))),
+        );
+      case 'activity_timeline':
+        return (
+          color: Colors.blueGrey,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LeadTimelineScreen(leadId: lead.id, leadName: lead.fullName))),
+        );
+      default:
+        final config = _configFor(key);
+        if (config == null || config['is_custom'] != true) return null;
+        final actionType = config['custom_action_type'] as String?;
+        final actionValue = config['custom_action_value'] as String?;
+        if (actionType == null || actionValue == null) return null;
+        return (color: Colors.blueGrey, onTap: () => _launchCustomAction(actionType, actionValue));
+    }
+  }
+
+  /// Compact grid tile. The old screen stacked eleven identical full-width
+  /// buttons, which meant a long scroll just to reach a module — the tile
+  /// grid fits the same modules in roughly a third of the height and makes
+  /// them scannable by icon and colour rather than by reading each label.
+  /// Still honours the user's per-section colour and shape overrides.
+  Widget _navTile(String sectionKey, Color defaultColor, VoidCallback onTap) {
     final color = _colorFor(sectionKey, defaultColor);
-    final vPad = size == 'compact' ? 8.0 : (size == 'large' ? 18.0 : 13.0);
-    final iconSize = size == 'compact' ? 16.0 : (size == 'large' ? 24.0 : 20.0);
-    final fontSize = size == 'compact' ? 12.0 : (size == 'large' ? 16.0 : 14.0);
+    final shape = _shapeFor(sectionKey);
+    final size = _sizeFor(sectionKey);
+    // The old full-width buttons used size_override to change height. In a
+    // fixed grid that would break alignment, so it now scales the icon and
+    // label instead — the setting still has a visible effect rather than
+    // silently doing nothing after the redesign.
+    final iconSize = size == 'compact' ? 20.0 : (size == 'large' ? 28.0 : 24.0);
+    final fontSize = size == 'compact' ? 10.0 : (size == 'large' ? 12.0 : 11.0);
     final radius = shape == 'square'
         ? BorderRadius.zero
-        : (shape == 'pill' ? BorderRadius.circular(999) : BorderRadius.circular(12));
+        : (shape == 'pill' ? BorderRadius.circular(24) : BorderRadius.circular(14));
 
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        icon: Icon(_iconFor(sectionKey), size: iconSize, color: color),
-        label: Text(_labelFor(sectionKey), style: TextStyle(fontSize: fontSize)),
-        style: OutlinedButton.styleFrom(
-          padding: EdgeInsets.symmetric(vertical: vPad, horizontal: 16),
-          shape: RoundedRectangleBorder(borderRadius: radius),
-          side: BorderSide(color: color.withValues(alpha: 0.5)),
-          alignment: Alignment.centerLeft,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: radius,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.07),
+          borderRadius: radius,
+          border: Border.all(color: color.withValues(alpha: 0.28)),
         ),
-        onPressed: onPressed,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_iconFor(sectionKey), size: iconSize, color: color),
+            const SizedBox(height: 6),
+            Text(
+              _labelFor(sectionKey),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600, height: 1.2),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -284,6 +393,15 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
     final lead = _lead!;
     final orderedSections = List<Map<String, dynamic>>.from(_sections)
       ..sort((a, b) => (a['sort_order'] as int? ?? 0).compareTo(b['sort_order'] as int? ?? 0));
+
+    // Navigation-type sections that are enabled AND actually applicable to
+    // this lead (e.g. WhatsApp drops out when there's no phone number).
+    // ai_insight is excluded — it renders as a full-width panel below.
+    final navSections = orderedSections.where((s) {
+      final key = s['section_key'] as String;
+      if (key == 'ai_insight' || !_isEnabled(key)) return false;
+      return _navActionFor(key, lead) != null;
+    }).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -339,13 +457,25 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
               onAlertTap: _navigateToModule,
             ),
             const SizedBox(height: 16),
-            if (lead.phone != null) _infoRow(Icons.phone, lead.phone!),
-            if (lead.email != null) _infoRow(Icons.email, lead.email!),
-            if (lead.source != null) _infoRow(Icons.source, lead.source!),
-            if (lead.notes != null && lead.notes!.isNotEmpty) _infoRow(Icons.notes, lead.notes!),
-            if (lead.parentName != null)
-              _infoRow(Icons.family_restroom,
-                  'Guardian: ${lead.parentName}${lead.parentPhone != null ? " (${lead.parentPhone})" : ""}'),
+
+            // Contact details grouped into one card instead of a loose run
+            // of rows, so the eye can skip past it to the modules below.
+            if (lead.phone != null || lead.email != null || lead.source != null ||
+                (lead.notes?.isNotEmpty ?? false) || lead.parentName != null)
+              GlassContainer(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                child: Column(
+                  children: [
+                    if (lead.phone != null) _infoRow(Icons.phone, lead.phone!),
+                    if (lead.email != null) _infoRow(Icons.email, lead.email!),
+                    if (lead.source != null) _infoRow(Icons.source, lead.source!),
+                    if (lead.notes != null && lead.notes!.isNotEmpty) _infoRow(Icons.notes, lead.notes!),
+                    if (lead.parentName != null)
+                      _infoRow(Icons.family_restroom,
+                          'Guardian: ${lead.parentName}${lead.parentPhone != null ? " (${lead.parentPhone})" : ""}'),
+                  ],
+                ),
+              ),
             if (_customFieldDefs.isNotEmpty) ...[
               const SizedBox(height: 12),
               const Text('Custom Fields', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
@@ -353,28 +483,43 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
               ..._customFieldDefs.map((def) => _customFieldTile(lead, def)),
             ],
             const SizedBox(height: 20),
-            // Email is not (yet) part of the customizable section set --
-            // always shown when the lead has an email, same as before.
-            if (lead.email != null) ...[
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.email_outlined),
-                  label: const Text('Email'),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => EmailComposeScreen(lead: lead)),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
+
+            // AI Insight stays a full-width rich panel — it shows content,
+            // not just a destination, so it can't collapse into a tile.
+            if (_isEnabled('ai_insight')) ...[
+              _aiSection(),
+              const SizedBox(height: 16),
             ],
-            for (final section in orderedSections)
-              if (_isEnabled(section['section_key'] as String)) ...[
-                _buildSection(section['section_key'] as String, lead),
-                const SizedBox(height: 10),
-              ],
-            const SizedBox(height: 10),
+
+            if (navSections.isNotEmpty || lead.email != null) ...[
+              const Text('Modules', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
+              const SizedBox(height: 10),
+              GridView.count(
+                crossAxisCount: 3,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 1.05,
+                children: [
+                  // Email isn't part of the customizable section set, but
+                  // belongs in the same launcher grid rather than floating
+                  // above it as a lone full-width button.
+                  if (lead.email != null)
+                    _navTile('__email', Colors.blue, () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => EmailComposeScreen(lead: lead)),
+                        )),
+                  ...navSections.map((s) {
+                    final key = s['section_key'] as String;
+                    final action = _navActionFor(key, lead)!;
+                    return _navTile(key, action.color, action.onTap);
+                  }),
+                ],
+              ),
+              const SizedBox(height: 20),
+            ],
+
             const Text('Communication History', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 8),
             if (_comms.isEmpty)
@@ -388,105 +533,6 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
         ),
       ),
     );
-  }
-
-  Widget _buildSection(String key, Lead lead) {
-    switch (key) {
-      case 'ai_insight':
-        return _aiSection();
-      case 'calling_cockpit':
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Theme.of(context).colorScheme.primary,
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CockpitScreen(leadId: lead.id))),
-        );
-      case 'whatsapp':
-        if (lead.phone == null) return const SizedBox.shrink();
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.green,
-          onPressed: () async {
-            final link = await _api.getWhatsAppChatLink(lead.id, 'Hi ${lead.fullName}, following up on your enquiry.');
-            await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
-            await _api.confirmWhatsAppSent(lead.id, 'Hi ${lead.fullName}, following up on your enquiry.', 'Counselor');
-            _load();
-          },
-        );
-      case 'documents':
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.blueGrey,
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DocumentsScreen(leadId: lead.id))),
-        );
-      case 'admissions_fees':
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.indigo,
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdmissionsFeesScreen(leadId: lead.id))),
-        );
-      case 'calls_voice_notes':
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.teal,
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CallsVoiceNotesScreen(leadId: lead.id))),
-        );
-      case 'meetings':
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.orange,
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MeetingsScreen(leadId: lead.id))),
-        );
-      case 'visa_travel_student':
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.cyan,
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => JourneyScreen(leadId: lead.id))),
-        );
-      case 'alumni':
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.purple,
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AlumniMatchScreen(leadId: lead.id))),
-        );
-      case 'consent_compliance':
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.brown,
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => ComplianceScreen(leadId: lead.id, leadName: lead.fullName)),
-          ),
-        );
-      case 'lead_notes':
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.amber.shade800,
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LeadNotesScreen(leadId: lead.id, leadName: lead.fullName))),
-        );
-      case 'flyer_studio':
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.deepPurple,
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FlyerHistoryScreen(leadId: lead.id))),
-        );
-      case 'activity_timeline':
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.blueGrey,
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LeadTimelineScreen(leadId: lead.id, leadName: lead.fullName))),
-        );
-      default:
-        final config = _configFor(key);
-        if (config == null || config['is_custom'] != true) return const SizedBox.shrink();
-        final actionType = config['custom_action_type'] as String?;
-        final actionValue = config['custom_action_value'] as String?;
-        if (actionType == null || actionValue == null) return const SizedBox.shrink();
-        return _styledButton(
-          sectionKey: key,
-          defaultColor: Colors.blueGrey,
-          onPressed: () => _launchCustomAction(actionType, actionValue),
-        );
-    }
   }
 
   Future<void> _launchCustomAction(String actionType, String value) async {
