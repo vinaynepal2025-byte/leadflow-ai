@@ -171,10 +171,24 @@ router.delete('/scheduled/:id', async (req, res) => {
 
 // POST /whatsapp/process-scheduled — called by an external cron (GitHub
 // Actions scheduled workflow, since Render's free tier has no reliable
-// background worker). Processes ALL tenants' due messages in one pass;
-// no auth beyond what's already in front of the API, intentionally
-// simple since it only ever sends what a human already scheduled.
+// background worker). Processes ALL tenants' due messages in one pass.
+//
+// Hardening follow-up from the P0 auth work: this route sits in the
+// public allowlist (a cron has no user token to send), which means
+// until now it had genuinely zero protection -- anyone who found the
+// URL could trigger it. Fixed the same way Phase 1 of the auth work
+// was: ADDITIVE first, so nothing breaks before Vinay finishes the
+// rollout. If CRON_SECRET is unset on the server (true today), the
+// check is skipped entirely -- current behavior, zero risk. Once
+// CRON_SECRET is set in Render's env AND the GitHub Actions workflow is
+// updated to send it as x-cron-secret, this becomes enforced
+// automatically with no further code change needed.
 router.post('/process-scheduled', async (req, res) => {
+  const expectedSecret = process.env.CRON_SECRET;
+  if (expectedSecret && req.header('x-cron-secret') !== expectedSecret) {
+    return res.status(401).json({ error: 'Invalid or missing cron secret' });
+  }
+
   const due = await db.prepare(
     "SELECT * FROM scheduled_messages WHERE status = 'pending' AND send_at <= datetime('now')"
   ).all();

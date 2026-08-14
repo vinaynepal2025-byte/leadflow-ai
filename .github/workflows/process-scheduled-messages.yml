@@ -15,8 +15,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Call process-scheduled endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           curl -sf -X POST "https://leadflow-ai-backend-e50r.onrender.com/whatsapp/process-scheduled" \
             -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
             --max-time 60 \
             || echo "Backend may be cold-starting (Render free tier) — will retry next scheduled run"
