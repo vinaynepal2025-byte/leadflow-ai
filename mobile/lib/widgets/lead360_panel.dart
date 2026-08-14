@@ -26,14 +26,14 @@ class Lead360Panel extends StatelessWidget {
     required this.onAlertTap,
   });
 
-  Color _severityColor(AppearanceSettings a, String severity) {
+  Color _severityColor(AppearanceSettings appearance, String severity) {
     switch (severity) {
       case 'critical':
-        return a.dangerColor;
+        return appearance.dangerColor;
       case 'warning':
-        return a.warningColor;
+        return appearance.warningColor;
       default:
-        return a.mutedColor;
+        return appearance.mutedColor;
     }
   }
 
@@ -48,20 +48,20 @@ class Lead360Panel extends StatelessWidget {
     }
   }
 
-  Color _riskColor(AppearanceSettings a, String? risk) {
+  Color _riskColor(AppearanceSettings appearance, String? risk) {
     switch (risk) {
       case 'high':
-        return a.dangerColor;
+        return appearance.dangerColor;
       case 'medium':
-        return a.warningColor;
+        return appearance.warningColor;
       default:
-        return a.successColor;
+        return appearance.successColor;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final a = context.watch<AppearanceSettings>();
+    final theme = context.watch<AppearanceSettings>();
     if (loading && data == null) {
       return GlassContainer(
         padding: const EdgeInsets.all(20),
@@ -80,7 +80,7 @@ class Lead360Panel extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            Icon(Icons.cloud_off, color: a.mutedColor),
+            Icon(Icons.cloud_off, color: theme.mutedColor),
             const SizedBox(width: 10),
             const Expanded(child: Text('Lead 360 unavailable right now.')),
             TextButton(onPressed: onRefresh, child: const Text('Retry')),
@@ -105,7 +105,7 @@ class Lead360Panel extends StatelessWidget {
         children: [
             Row(
               children: [
-                Icon(Icons.hub_outlined, color: a.primaryColor, size: 20),
+                Icon(Icons.hub_outlined, color: theme.primaryColor, size: 20),
                 const SizedBox(width: 8),
                 const Text('Lead 360', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 const Spacer(),
@@ -113,13 +113,13 @@ class Lead360Panel extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: _riskColor(a, ai!['risk_level'] as String?).withValues(alpha: 0.12),
+                      color: _riskColor(theme, ai!['risk_level'] as String?).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
                       '${(ai!['risk_level'] as String? ?? 'low').toUpperCase()} RISK',
                       style: TextStyle(
-                        color: _riskColor(a, ai!['risk_level'] as String?),
+                        color: _riskColor(theme, ai!['risk_level'] as String?),
                         fontWeight: FontWeight.w700,
                         fontSize: 10,
                       ),
@@ -143,12 +143,12 @@ class Lead360Panel extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: a.successColor.withValues(alpha: 0.12),
+                      color: theme.successColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: a.successColor.withValues(alpha: 0.4)),
+                      border: Border.all(color: theme.successColor.withValues(alpha: 0.4)),
                     ),
                     child: Text('${activeOffers.length} active offer${activeOffers.length > 1 ? 's' : ''}',
-                        style: TextStyle(color: a.successColor, fontWeight: FontWeight.w600, fontSize: 12)),
+                        style: TextStyle(color: theme.successColor, fontWeight: FontWeight.w600, fontSize: 12)),
                   ),
                 ],
               ],
@@ -157,19 +157,19 @@ class Lead360Panel extends StatelessWidget {
               const SizedBox(height: 12),
               Text(ai!['headline'] as String? ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
               const SizedBox(height: 6),
-              Text(ai!['narrative'] as String? ?? '', style: TextStyle(color: a.mutedColor, fontSize: 13, height: 1.4)),
+              Text(ai!['narrative'] as String? ?? '', style: TextStyle(color: theme.mutedColor, fontSize: 13, height: 1.4)),
               const SizedBox(height: 10),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: a.warningColor.withValues(alpha: 0.1),
+                  color: theme.warningColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.bolt, size: 16, color: a.warningColor),
+                    Icon(Icons.bolt, size: 16, color: theme.warningColor),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(ai!['top_action'] as String? ?? '',
@@ -180,20 +180,20 @@ class Lead360Panel extends StatelessWidget {
               ),
             ] else if (loading) ...[
               const SizedBox(height: 10),
-              Text('Synthesizing cross-module insight…', style: TextStyle(color: a.mutedColor, fontSize: 12)),
+              Text('Synthesizing cross-module insight…', style: TextStyle(color: theme.mutedColor, fontSize: 12)),
             ],
             if (alerts.isNotEmpty) ...[
               const SizedBox(height: 14),
               const Divider(height: 1),
               const SizedBox(height: 10),
               Text('Needs attention (${alerts.length})',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: a.mutedColor)),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: theme.mutedColor)),
               const SizedBox(height: 6),
-              ...alerts.map((a) {
-                final severity = a['severity'] as String? ?? 'info';
-                final color = _severityColor(a, severity);
+              ...alerts.map((alert) {
+                final severity = alert['severity'] as String? ?? 'info';
+                final color = _severityColor(theme, severity);
                 return InkWell(
-                  onTap: () => onAlertTap(a['module'] as String? ?? ''),
+                  onTap: () => onAlertTap(alert['module'] as String? ?? ''),
                   borderRadius: BorderRadius.circular(8),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 5),
@@ -202,8 +202,8 @@ class Lead360Panel extends StatelessWidget {
                       children: [
                         Icon(_severityIcon(severity), size: 16, color: color),
                         const SizedBox(width: 8),
-                        Expanded(child: Text(a['message'] as String? ?? '', style: const TextStyle(fontSize: 13))),
-                        Icon(Icons.chevron_right, size: 16, color: a.mutedColor),
+                        Expanded(child: Text(alert['message'] as String? ?? '', style: const TextStyle(fontSize: 13))),
+                        Icon(Icons.chevron_right, size: 16, color: theme.mutedColor),
                       ],
                     ),
                   ),
@@ -213,10 +213,10 @@ class Lead360Panel extends StatelessWidget {
               const SizedBox(height: 10),
               Row(
                 children: [
-                  Icon(Icons.check_circle_outline, size: 16, color: a.successColor),
+                  Icon(Icons.check_circle_outline, size: 16, color: theme.successColor),
                   const SizedBox(width: 6),
                   Text('Nothing needs attention across any module right now',
-                      style: TextStyle(color: a.successColor, fontSize: 12)),
+                      style: TextStyle(color: theme.successColor, fontSize: 12)),
                 ],
               ),
           ],

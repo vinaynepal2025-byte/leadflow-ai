@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/appearance_settings.dart';
 
-Color colorForSentiment(AppearanceSettings a, String sentiment) {
+Color colorForSentiment(AppearanceSettings appearance, String sentiment) {
   switch (sentiment) {
     case 'positive':
-      return a.successColor;
+      return appearance.successColor;
     case 'negative':
-      return a.dangerColor;
+      return appearance.dangerColor;
     default:
-      return a.mutedColor;
+      return appearance.mutedColor;
   }
 }
 
@@ -27,9 +27,9 @@ class SentimentTrendSparkline extends StatelessWidget {
   Widget build(BuildContext context) {
     if (points.length < 2) return const SizedBox.shrink();
 
-    final a = context.watch<AppearanceSettings>();
+    final theme = context.watch<AppearanceSettings>();
     final latest = points.last['sentiment'] as String;
-    final latestColor = colorForSentiment(a, latest);
+    final latestColor = colorForSentiment(theme, latest);
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -43,7 +43,7 @@ class SentimentTrendSparkline extends StatelessWidget {
           SizedBox(
             width: 90,
             height: 36,
-            child: CustomPaint(painter: _SparklinePainter(points, a.successColor, a.dangerColor, a.mutedColor)),
+            child: CustomPaint(painter: _SparklinePainter(points, theme.successColor, theme.dangerColor, theme.mutedColor)),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -51,7 +51,7 @@ class SentimentTrendSparkline extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Sentiment trend', style: TextStyle(fontSize: 11, color: a.mutedColor, fontWeight: FontWeight.w600)),
+                Text('Sentiment trend', style: TextStyle(fontSize: 11, color: theme.mutedColor, fontWeight: FontWeight.w600)),
                 Text(
                   'Currently ${latest} across ${points.length} tracked note${points.length > 1 ? 's' : ''}',
                   style: TextStyle(fontSize: 12, color: latestColor, fontWeight: FontWeight.w600),

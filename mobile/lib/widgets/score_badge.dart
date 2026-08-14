@@ -5,15 +5,14 @@ import '../theme/appearance_settings.dart';
 /// Temperature -> colour, read from the user's own semantic palette rather
 /// than hardcoded values, so restyling the app in Settings restyles these
 /// badges too.
-Color scoreTemperatureColor(BuildContext context, String temperature) {
-  final a = context.read<AppearanceSettings>();
+Color scoreTemperatureColor(AppearanceSettings appearance, String temperature) {
   switch (temperature) {
     case 'hot':
-      return a.dangerColor;
+      return appearance.dangerColor;
     case 'warm':
-      return a.warningColor;
+      return appearance.warningColor;
     default:
-      return a.mutedColor;
+      return appearance.mutedColor;
   }
 }
 
@@ -42,11 +41,7 @@ class ScoreBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final appearance = context.watch<AppearanceSettings>();
-    final color = temperature == 'hot'
-        ? appearance.dangerColor
-        : temperature == 'warm'
-            ? appearance.warningColor
-            : appearance.mutedColor;
+    final color = scoreTemperatureColor(appearance, temperature);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
@@ -80,11 +75,7 @@ class ScoreBadgeCompact extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final appearance = context.watch<AppearanceSettings>();
-    final color = temperature == 'hot'
-        ? appearance.dangerColor
-        : temperature == 'warm'
-            ? appearance.warningColor
-            : appearance.mutedColor;
+    final color = scoreTemperatureColor(appearance, temperature);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -102,11 +93,7 @@ class ScoreBadgeCompact extends StatelessWidget {
 void showScoreExplanation(BuildContext context, Map<String, dynamic> scoreData) {
   final appearance = context.read<AppearanceSettings>();
   final temperature = scoreData['temperature'] as String? ?? 'cold';
-  final headerColor = temperature == 'hot'
-      ? appearance.dangerColor
-      : temperature == 'warm'
-          ? appearance.warningColor
-          : appearance.mutedColor;
+  final headerColor = scoreTemperatureColor(appearance, temperature);
   final positives = (scoreData['positive_signals'] as List? ?? []);
   final risks = (scoreData['risk_signals'] as List? ?? []);
   showDialog(
