@@ -1,5 +1,17 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
+import 'package:provider/provider.dart';
+import '../theme/appearance_settings.dart';
+
+Color colorForSentiment(AppearanceSettings a, String sentiment) {
+  switch (sentiment) {
+    case 'positive':
+      return a.successColor;
+    case 'negative':
+      return a.dangerColor;
+    default:
+      return a.mutedColor;
+  }
+}
 
 /// A compact sentiment sparkline for the Notes screen — closes the gap
 /// left in Phase 5 (sentiment/tags were captured but never visualized as
@@ -15,8 +27,9 @@ class SentimentTrendSparkline extends StatelessWidget {
   Widget build(BuildContext context) {
     if (points.length < 2) return const SizedBox.shrink();
 
+    final a = context.watch<AppearanceSettings>();
     final latest = points.last['sentiment'] as String;
-    final latestColor = _colorFor(latest);
+    final latestColor = colorForSentiment(a, latest);
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -30,7 +43,7 @@ class SentimentTrendSparkline extends StatelessWidget {
           SizedBox(
             width: 90,
             height: 36,
-            child: CustomPaint(painter: _SparklinePainter(points)),
+            child: CustomPaint(painter: _SparklinePainter(points, a.successColor, a.dangerColor, a.mutedColor)),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -38,7 +51,7 @@ class SentimentTrendSparkline extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Sentiment trend', style: TextStyle(fontSize: 11, color: AppColors.slate, fontWeight: FontWeight.w600)),
+                Text('Sentiment trend', style: TextStyle(fontSize: 11, color: a.mutedColor, fontWeight: FontWeight.w600)),
                 Text(
                   'Currently ${latest} across ${points.length} tracked note${points.length > 1 ? 's' : ''}',
                   style: TextStyle(fontSize: 12, color: latestColor, fontWeight: FontWeight.w600),
@@ -51,21 +64,14 @@ class SentimentTrendSparkline extends StatelessWidget {
     );
   }
 
-  static Color _colorFor(String sentiment) {
-    switch (sentiment) {
-      case 'positive':
-        return AppColors.successGreen;
-      case 'negative':
-        return AppColors.coralAlert;
-      default:
-        return AppColors.slate;
-    }
-  }
 }
 
 class _SparklinePainter extends CustomPainter {
   final List<Map<String, dynamic>> points;
-  _SparklinePainter(this.points);
+  final Color positiveColor;
+  final Color negativeColor;
+  final Color neutralColor;
+  _SparklinePainter(this.points, this.positiveColor, this.negativeColor, this.neutralColor);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -92,10 +98,10 @@ class _SparklinePainter extends CustomPainter {
     fillPath.close();
 
     final trendColor = scores.last > 0
-        ? AppColors.successGreen
+        ? positiveColor
         : scores.last < 0
-            ? AppColors.coralAlert
-            : AppColors.slate;
+            ? negativeColor
+            : neutralColor;
 
     canvas.drawPath(
       fillPath,
@@ -120,5 +126,9 @@ class _SparklinePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _SparklinePainter oldDelegate) => oldDelegate.points != points;
+  bool shouldRepaint(covariant _SparklinePainter oldDelegate) =>
+      oldDelegate.points != points ||
+      oldDelegate.positiveColor != positiveColor ||
+      oldDelegate.negativeColor != negativeColor ||
+      oldDelegate.neutralColor != neutralColor;
 }

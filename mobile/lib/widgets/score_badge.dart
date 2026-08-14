@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
+import 'package:provider/provider.dart';
+import '../theme/appearance_settings.dart';
 
-/// Temperature -> color, matching the same semantic palette StageChip uses
-/// (AppColors, not raw Material colors) so score badges feel native to
-/// the rest of the app rather than bolted on.
-Color scoreTemperatureColor(String temperature) {
+/// Temperature -> colour, read from the user's own semantic palette rather
+/// than hardcoded values, so restyling the app in Settings restyles these
+/// badges too.
+Color scoreTemperatureColor(BuildContext context, String temperature) {
+  final a = context.read<AppearanceSettings>();
   switch (temperature) {
     case 'hot':
-      return AppColors.coralAlert;
+      return a.dangerColor;
     case 'warm':
-      return AppColors.signalAmber;
+      return a.warningColor;
     default:
-      return AppColors.slate;
+      return a.mutedColor;
   }
 }
 
@@ -39,7 +41,12 @@ class ScoreBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = scoreTemperatureColor(temperature);
+    final appearance = context.watch<AppearanceSettings>();
+    final color = temperature == 'hot'
+        ? appearance.dangerColor
+        : temperature == 'warm'
+            ? appearance.warningColor
+            : appearance.mutedColor;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
@@ -72,7 +79,12 @@ class ScoreBadgeCompact extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = scoreTemperatureColor(temperature);
+    final appearance = context.watch<AppearanceSettings>();
+    final color = temperature == 'hot'
+        ? appearance.dangerColor
+        : temperature == 'warm'
+            ? appearance.warningColor
+            : appearance.mutedColor;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -88,6 +100,13 @@ class ScoreBadgeCompact extends StatelessWidget {
 /// risk_signals) in a dialog — reuses whatever `scoreData` map came back
 /// from getLeadScore/getRankedLeads, no extra API call.
 void showScoreExplanation(BuildContext context, Map<String, dynamic> scoreData) {
+  final appearance = context.read<AppearanceSettings>();
+  final temperature = scoreData['temperature'] as String? ?? 'cold';
+  final headerColor = temperature == 'hot'
+      ? appearance.dangerColor
+      : temperature == 'warm'
+          ? appearance.warningColor
+          : appearance.mutedColor;
   final positives = (scoreData['positive_signals'] as List? ?? []);
   final risks = (scoreData['risk_signals'] as List? ?? []);
   showDialog(
@@ -95,8 +114,7 @@ void showScoreExplanation(BuildContext context, Map<String, dynamic> scoreData) 
     builder: (ctx) => AlertDialog(
       title: Row(
         children: [
-          Icon(scoreTemperatureIcon(scoreData['temperature'] as String? ?? 'cold'),
-              color: scoreTemperatureColor(scoreData['temperature'] as String? ?? 'cold')),
+          Icon(scoreTemperatureIcon(temperature), color: headerColor),
           const SizedBox(width: 8),
           Text('Score: ${scoreData['score']}/100'),
         ],
@@ -113,7 +131,7 @@ void showScoreExplanation(BuildContext context, Map<String, dynamic> scoreData) 
                 const SizedBox(height: 4),
                 ...positives.map((s) => Padding(
                       padding: const EdgeInsets.only(bottom: 4),
-                      child: Text('+ ${s['reason']} (+${s['points']})', style: TextStyle(color: AppColors.successGreen)),
+                      child: Text('+ ${s['reason']} (+${s['points']})', style: TextStyle(color: appearance.successColor)),
                     )),
                 const SizedBox(height: 8),
               ],
@@ -122,7 +140,7 @@ void showScoreExplanation(BuildContext context, Map<String, dynamic> scoreData) 
                 const SizedBox(height: 4),
                 ...risks.map((s) => Padding(
                       padding: const EdgeInsets.only(bottom: 4),
-                      child: Text('- ${s['reason']} (${s['points']})', style: TextStyle(color: AppColors.coralAlert)),
+                      child: Text('- ${s['reason']} (${s['points']})', style: TextStyle(color: appearance.dangerColor)),
                     )),
               ],
               if (positives.isEmpty && risks.isEmpty) const Text('No scoring signals yet for this lead.'),

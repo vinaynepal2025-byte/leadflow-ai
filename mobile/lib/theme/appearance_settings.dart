@@ -146,6 +146,13 @@ class AppearanceSettings extends ChangeNotifier {
   static const _touchFeedbackKey = 'appearance_touch_feedback';
   static const _swipeActionsKey = 'appearance_swipe_actions';
   static const _navPositionKey = 'appearance_nav_position';
+  // Semantic colours. These were previously hardcoded in AppColors and read
+  // directly by badges, alerts and status chips, which meant a tenant could
+  // restyle the whole app and still be stuck with our green/amber/red.
+  static const _successKey = 'appearance_success_color';
+  static const _warningKey = 'appearance_warning_color';
+  static const _dangerKey = 'appearance_danger_color';
+  static const _mutedKey = 'appearance_muted_color';
 
   // Defaults match the original LeadFlow AI identity (Ink Navy / Signal Amber).
   Color _primaryColor = const Color(0xFF1B2A4A);
@@ -172,6 +179,10 @@ class AppearanceSettings extends ChangeNotifier {
   TouchFeedback _touchFeedback = TouchFeedback.fade;
   bool _swipeActionsEnabled = false;
   NavPosition _navPosition = NavPosition.bottom;
+  Color _successColor = const Color(0xFF2E9E6D);
+  Color _warningColor = const Color(0xFFE8A33D);
+  Color _dangerColor = const Color(0xFFE85D4E);
+  Color _mutedColor = const Color(0xFF5B6478);
   bool _loaded = false;
 
   Color get primaryColor => _primaryColor;
@@ -198,6 +209,15 @@ class AppearanceSettings extends ChangeNotifier {
   TouchFeedback get touchFeedback => _touchFeedback;
   bool get swipeActionsEnabled => _swipeActionsEnabled;
   NavPosition get navPosition => _navPosition;
+
+  /// Semantic colours — used by score badges, Lead 360 alert severities,
+  /// sentiment indicators, document/fee status chips and anything else that
+  /// signals "good / needs attention / problem / inactive". Fully
+  /// user-controlled like every other colour in the system.
+  Color get successColor => _successColor;
+  Color get warningColor => _warningColor;
+  Color get dangerColor => _dangerColor;
+  Color get mutedColor => _mutedColor;
   bool get loaded => _loaded;
 
   /// Whether the current mode implies a translucent/blurred treatment —
@@ -275,6 +295,10 @@ class AppearanceSettings extends ChangeNotifier {
     await setPrimaryColor(const Color(0xFF1B2A4A));
     await setAccentColor(const Color(0xFFE8A33D));
     await setOutlineColor(null);
+    await setSuccessColor(const Color(0xFF2E9E6D));
+    await setWarningColor(const Color(0xFFE8A33D));
+    await setDangerColor(const Color(0xFFE85D4E));
+    await setMutedColor(const Color(0xFF5B6478));
   }
 
   Future<void> resetTypography() async {
@@ -317,6 +341,14 @@ class AppearanceSettings extends ChangeNotifier {
     final accentValue = prefs.getInt(_accentKey);
     if (primaryValue != null) _primaryColor = Color(primaryValue);
     if (accentValue != null) _accentColor = Color(accentValue);
+    final successValue = prefs.getInt(_successKey);
+    final warningValue = prefs.getInt(_warningKey);
+    final dangerValue = prefs.getInt(_dangerKey);
+    final mutedValue = prefs.getInt(_mutedKey);
+    if (successValue != null) _successColor = Color(successValue);
+    if (warningValue != null) _warningColor = Color(warningValue);
+    if (dangerValue != null) _dangerColor = Color(dangerValue);
+    if (mutedValue != null) _mutedColor = Color(mutedValue);
     final fontIndex = prefs.getInt(_fontKey);
     if (fontIndex != null && fontIndex < FontPairing.values.length) {
       _fontPairing = FontPairing.values[fontIndex];
@@ -373,6 +405,30 @@ class AppearanceSettings extends ChangeNotifier {
     _accentColor = c;
     notifyListeners();
     (await SharedPreferences.getInstance()).setInt(_accentKey, c.value);
+  }
+
+  Future<void> setSuccessColor(Color c) async {
+    _successColor = c;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setInt(_successKey, c.value);
+  }
+
+  Future<void> setWarningColor(Color c) async {
+    _warningColor = c;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setInt(_warningKey, c.value);
+  }
+
+  Future<void> setDangerColor(Color c) async {
+    _dangerColor = c;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setInt(_dangerKey, c.value);
+  }
+
+  Future<void> setMutedColor(Color c) async {
+    _mutedColor = c;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setInt(_mutedKey, c.value);
   }
 
   Future<void> setFontPairing(FontPairing f) async {
@@ -563,6 +619,13 @@ class AppearanceSettings extends ChangeNotifier {
 
     _primaryColor = parseHex(theme['primary'] as String?, _primaryColor);
     _accentColor = parseHex(theme['accent'] as String?, _accentColor);
+    // Optional in the AI payload — a generated theme that only sets
+    // primary/accent leaves the semantic colours untouched rather than
+    // resetting them to defaults.
+    _successColor = parseHex(theme['success'] as String?, _successColor);
+    _warningColor = parseHex(theme['warning'] as String?, _warningColor);
+    _dangerColor = parseHex(theme['danger'] as String?, _dangerColor);
+    _mutedColor = parseHex(theme['muted'] as String?, _mutedColor);
     _fontPairing = FontPairing.values.firstWhere(
       (f) => f.name == theme['font'],
       orElse: () => FontPairing.spaceGroteskInter,
@@ -593,6 +656,10 @@ class AppearanceSettings extends ChangeNotifier {
       prefs.setBool(_floatingEnabledKey, _floatingEnabled),
       prefs.setBool(_textureKey, _textureEnabled),
       prefs.setInt(_glowColorKey, _glowColor.value),
+      prefs.setInt(_successKey, _successColor.value),
+      prefs.setInt(_warningKey, _warningColor.value),
+      prefs.setInt(_dangerKey, _dangerColor.value),
+      prefs.setInt(_mutedKey, _mutedColor.value),
     ]);
     setGlassEnabled(_styleMode == UIStyleMode.glass || _styleMode == UIStyleMode.liquid);
   }
@@ -600,6 +667,10 @@ class AppearanceSettings extends ChangeNotifier {
   Future<void> resetToDefaults() async {
     _primaryColor = const Color(0xFF1B2A4A);
     _accentColor = const Color(0xFFE8A33D);
+    _successColor = const Color(0xFF2E9E6D);
+    _warningColor = const Color(0xFFE8A33D);
+    _dangerColor = const Color(0xFFE85D4E);
+    _mutedColor = const Color(0xFF5B6478);
     _fontPairing = FontPairing.spaceGroteskInter;
     _fontScale = 1.0;
     _cornerRadius = 16.0;
@@ -649,6 +720,10 @@ class AppearanceSettings extends ChangeNotifier {
       prefs.remove(_touchFeedbackKey),
       prefs.remove(_swipeActionsKey),
       prefs.remove(_navPositionKey),
+      prefs.remove(_successKey),
+      prefs.remove(_warningKey),
+      prefs.remove(_dangerKey),
+      prefs.remove(_mutedKey),
     ]);
   }
 }

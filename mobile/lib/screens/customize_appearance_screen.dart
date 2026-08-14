@@ -282,6 +282,56 @@ class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
                         ],
                       ],
                     ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'STATUS COLOURS',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.6, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Used by lead score badges, Lead 360 alerts, sentiment indicators and status chips across the app.',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _colorTile(
+                            label: 'Success',
+                            color: appearance.successColor,
+                            onTap: () => _pickColor(context, initial: appearance.successColor, title: 'Success Colour', onPicked: appearance.setSuccessColor),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _colorTile(
+                            label: 'Warning',
+                            color: appearance.warningColor,
+                            onTap: () => _pickColor(context, initial: appearance.warningColor, title: 'Warning Colour', onPicked: appearance.setWarningColor),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _colorTile(
+                            label: 'Danger',
+                            color: appearance.dangerColor,
+                            onTap: () => _pickColor(context, initial: appearance.dangerColor, title: 'Danger Colour', onPicked: appearance.setDangerColor),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _colorTile(
+                            label: 'Muted',
+                            color: appearance.mutedColor,
+                            onTap: () => _pickColor(context, initial: appearance.mutedColor, title: 'Muted Colour', onPicked: appearance.setMutedColor),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
 
