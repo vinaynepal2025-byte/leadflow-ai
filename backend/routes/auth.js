@@ -279,14 +279,33 @@ router.patch('/team/:id', async (req, res) => {
 // ever touched. Hard-deleting would orphan that history.
 router.delete('/team/:id', async (req, res) => {
   const tid = req.header('x-tenant-id') || 'demo-consultancy';
+
+  // Guard against self-lockout. Discovered the hard way during live
+  // testing: the last-active check alone didn't stop the account owner
+  // from deactivating themselves while other members existed, which
+  // would leave them unable to log back in and fix it.
+  if (req.user?.id === req.params.id) {
+    return res.status(400).json({ error: 'You cannot deactivate your own account — ask another admin to do it' });
+  }
+
+  const target = await db.prepare('SELECT id, role FROM users WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!target) return res.status(404).json({ error: 'Team member not found' });
+
+  const remainingAdmins = await db.prepare(
+    "SELECT COUNT(*) AS c FROM users WHERE tenant_id = ? AND active = true AND role = 'admin' AND id != ?"
+  ).get(tid, req.params.id);
+  if (target.role === 'admin' && remainingAdmins.c === 0) {
+    return res.status(400).json({ error: 'Cannot deactivate the last admin — promote someone else first' });
+  }
+
   const remaining = await db.prepare(
     "SELECT COUNT(*) AS c FROM users WHERE tenant_id = ? AND active = true AND id != ?"
   ).get(tid, req.params.id);
   if (remaining.c === 0) {
     return res.status(400).json({ error: 'Cannot deactivate the last active member of the team' });
   }
-  const result = await db.prepare('UPDATE users SET active = false WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
-  if (result.changes === 0) return res.status(404).json({ error: 'Team member not found' });
+
+  await db.prepare('UPDATE users SET active = false WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
   res.status(204).send();
 });
 
