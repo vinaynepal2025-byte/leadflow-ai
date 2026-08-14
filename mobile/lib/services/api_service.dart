@@ -705,8 +705,11 @@ class ApiService {
 
   // ---------- Performance ----------
 
-  Future<List<Map<String, dynamic>>> getPerformance() async {
-    final res = await http.get(Uri.parse('$baseUrl/performance'), headers: _headers);
+  Future<List<Map<String, dynamic>>> getPerformance({String? from, String? to}) async {
+    final params = <String, String>{};
+    if (from != null) params['from'] = from;
+    if (to != null) params['to'] = to;
+    final res = await http.get(Uri.parse('$baseUrl/performance').replace(queryParameters: params.isEmpty ? null : params), headers: _headers);
     _checkOk(res);
     final List data = jsonDecode(res.body);
     return data.cast<Map<String, dynamic>>();
@@ -714,9 +717,14 @@ class ApiService {
 
   // ---------- Audit ----------
 
-  Future<List<Map<String, dynamic>>> getAuditTimeline({String? leadId}) async {
+  Future<List<Map<String, dynamic>>> getAuditTimeline({String? leadId, List<String>? types, String? from, String? to}) async {
+    final params = <String, String>{};
+    if (leadId != null) params['lead_id'] = leadId;
+    if (types != null && types.isNotEmpty) params['types'] = types.join(',');
+    if (from != null) params['from'] = from;
+    if (to != null) params['to'] = to;
     final res = await http.get(
-      Uri.parse('$baseUrl/audit').replace(queryParameters: leadId != null ? {'lead_id': leadId} : null),
+      Uri.parse('$baseUrl/audit').replace(queryParameters: params.isEmpty ? null : params),
       headers: _headers,
     );
     _checkOk(res);
