@@ -180,6 +180,16 @@ router.post('/login', async (req, res) => {
   const user = await db.prepare('SELECT * FROM users WHERE tenant_id = ? AND email = ?').get(tenant_id, email);
   if (!user) return res.status(401).json({ error: 'Invalid email or password' });
 
+  // Was missing entirely before this fix -- a deactivated team member
+  // (users.active = false, e.g. via PATCH /auth/team/:id) could still
+  // log in as long as they knew their password. Also covers an invited
+  // member who hasn't accepted their invite yet (see POST /team below):
+  // they're created with active=false and an unguessable password until
+  // they set a real one via /auth/accept-invite.
+  if (user.active === false) {
+    return res.status(403).json({ error: 'This account is inactive. Contact your admin.' });
+  }
+
   const valid = await bcrypt.compare(password, user.password_hash);
   if (!valid) return res.status(401).json({ error: 'Invalid email or password' });
 
@@ -220,20 +230,44 @@ router.get('/team', async (req, res) => {
 
 const TEAM_ROLES = ['admin', 'counselor', 'viewer'];
 
-// POST /auth/team — add a member with a temporary password they change on
-// first login. Deliberately not an email-invite flow yet: that needs a
-// token table and a public accept-invite page, and this unblocks real
-// multi-user use today. Flagged as a follow-up rather than pretended.
+// Same shell wrapper as verify-email's HTML pages -- used by the two
+// invite-acceptance routes below, which render actual pages (a browser
+// link click, not an API call) since there's no separate web frontend
+// this could hand off to.
+function pageShell(body) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LeadFlow AI — Team Invite</title></head>
+    <body style="font-family:-apple-system,Roboto,sans-serif;background:#f7f8fa;color:#1B2A4A;margin:0;padding:24px;display:flex;justify-content:center;">
+      <div style="max-width:420px;width:100%;background:#fff;border-radius:16px;padding:28px;">${body}</div>
+    </body></html>`;
+}
+
+const INVITE_TOKEN_TTL_HOURS = 72;
+
+function inviteEmailText(link, fullName, tenantName) {
+  return `Hi ${fullName},\n\n` +
+    `You've been added to ${tenantName}'s LeadFlow AI team. Click (or paste into your browser) the link below to set your password and get started:\n\n${link}\n\n` +
+    `This link expires in ${INVITE_TOKEN_TTL_HOURS} hours. If it expires, ask your admin to resend the invite.`;
+}
+
+// POST /auth/team -- creates a team member and emails them an invite
+// link to set their own password, rather than an admin picking a
+// temp_password for them (the deliberate scope-cut flagged since the
+// roles feature shipped). temp_password is kept as an OPTIONAL fallback
+// for the rare case email delivery isn't configured for this tenant --
+// if provided, the account is created active immediately with that
+// password, same as before; if omitted, the invite-link flow runs.
 router.post('/team', requireRole('admin'), async (req, res) => {
   const tid = req.header('x-tenant-id') || 'demo-consultancy';
   const { email, full_name, role, temp_password } = req.body;
-  if (!email || !full_name || !temp_password) {
-    return res.status(400).json({ error: 'email, full_name and temp_password are required' });
+  if (!email || !full_name) {
+    return res.status(400).json({ error: 'email and full_name are required' });
   }
   if (role && !TEAM_ROLES.includes(role)) {
     return res.status(400).json({ error: `role must be one of: ${TEAM_ROLES.join(', ')}` });
   }
-  if (String(temp_password).length < 8) {
+  if (temp_password && String(temp_password).length < 8) {
     return res.status(400).json({ error: 'temp_password must be at least 8 characters' });
   }
 
@@ -241,15 +275,128 @@ router.post('/team', requireRole('admin'), async (req, res) => {
   if (existing) return res.status(409).json({ error: 'Someone with that email is already on the team' });
 
   const id = randomUUID();
-  const hash = await bcrypt.hash(temp_password, 10);
-  await db.prepare(`
-    INSERT INTO users (id, tenant_id, email, password_hash, full_name, role)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, tid, email, hash, full_name, role || 'counselor');
 
-  res.status(201).json(
-    await db.prepare('SELECT id, email, full_name, role, active, created_at FROM users WHERE id = ?').get(id)
-  );
+  if (temp_password) {
+    // Fallback path -- unchanged from before, account is usable right away.
+    const hash = await bcrypt.hash(temp_password, 10);
+    await db.prepare(`
+      INSERT INTO users (id, tenant_id, email, password_hash, full_name, role, active)
+      VALUES (?, ?, ?, ?, ?, ?, true)
+    `).run(id, tid, email, hash, full_name, role || 'counselor');
+    return res.status(201).json(
+      await db.prepare('SELECT id, email, full_name, role, active, created_at FROM users WHERE id = ?').get(id)
+    );
+  }
+
+  // Invite-link path -- account exists but can't log in (active=false,
+  // and the password hash is a bcrypt hash of a random value nobody
+  // knows) until the invite link is used.
+  const unusablePassword = await bcrypt.hash(randomBytes(24).toString('hex'), 10);
+  const token = randomBytes(24).toString('hex');
+  const expiresAt = new Date(Date.now() + INVITE_TOKEN_TTL_HOURS * 60 * 60 * 1000).toISOString();
+
+  await db.prepare(`
+    INSERT INTO users (id, tenant_id, email, password_hash, full_name, role, active, invite_token, invite_token_expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, false, ?, ?)
+  `).run(id, tid, email, unusablePassword, full_name, role || 'counselor', token, expiresAt);
+
+  const tenant = await db.prepare('SELECT name FROM tenants WHERE id = ?').get(tid);
+  const inviteLink = `${req.protocol}://${req.get('host')}/auth/accept-invite?token=${token}`;
+
+  try {
+    await sendEmail(email, `You're invited to join ${tenant?.name || tid} on LeadFlow AI`, inviteEmailText(inviteLink, full_name, tenant?.name || tid));
+  } catch (err) {
+    // Same graceful-degradation as /signup: the account exists either
+    // way, so hand the admin the raw link to share manually rather than
+    // losing the invite because email delivery failed.
+    return res.status(201).json({
+      ...(await db.prepare('SELECT id, email, full_name, role, active, created_at FROM users WHERE id = ?').get(id)),
+      message: 'Team member created, but the invite email could not be sent.',
+      invite_link: inviteLink,
+      email_error: err.message,
+    });
+  }
+
+  res.status(201).json({
+    ...(await db.prepare('SELECT id, email, full_name, role, active, created_at FROM users WHERE id = ?').get(id)),
+    message: `Invite sent to ${email}.`,
+  });
+});
+
+// POST /auth/team/:id/resend-invite -- for an expired or lost invite link.
+router.post('/team/:id/resend-invite', requireRole('admin'), async (req, res) => {
+  const tid = req.header('x-tenant-id') || 'demo-consultancy';
+  const user = await db.prepare('SELECT * FROM users WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!user) return res.status(404).json({ error: 'Team member not found' });
+  if (user.active) return res.status(400).json({ error: 'This team member has already accepted their invite.' });
+
+  const token = randomBytes(24).toString('hex');
+  const expiresAt = new Date(Date.now() + INVITE_TOKEN_TTL_HOURS * 60 * 60 * 1000).toISOString();
+  await db.prepare('UPDATE users SET invite_token = ?, invite_token_expires_at = ? WHERE id = ?').run(token, expiresAt, user.id);
+
+  const tenant = await db.prepare('SELECT name FROM tenants WHERE id = ?').get(tid);
+  const inviteLink = `${req.protocol}://${req.get('host')}/auth/accept-invite?token=${token}`;
+
+  try {
+    await sendEmail(user.email, `You're invited to join ${tenant?.name || tid} on LeadFlow AI`, inviteEmailText(inviteLink, user.full_name, tenant?.name || tid));
+    res.json({ message: `Invite resent to ${user.email}.` });
+  } catch (err) {
+    res.json({ message: 'Invite regenerated, but the email could not be sent.', invite_link: inviteLink, email_error: err.message });
+  }
+});
+
+// GET /auth/accept-invite?token=... -- the link clicked from the invite
+// email. Public (a browser link click can't send an Authorization
+// header), so this is added to middleware/auth.js's PUBLIC_PREFIXES.
+router.get('/accept-invite', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).send(pageShell('<h2>⚠️ Missing invite token</h2>'));
+
+  const user = await db.prepare('SELECT full_name, invite_token_expires_at FROM users WHERE invite_token = ?').get(token);
+  if (!user) return res.status(404).send(pageShell('<h2>⚠️ Invalid or already-used invite link</h2>'));
+  if (user.invite_token_expires_at && new Date(user.invite_token_expires_at) < new Date()) {
+    return res.status(410).send(pageShell('<h2>⚠️ This invite link has expired</h2><p>Ask your admin to resend it.</p>'));
+  }
+
+  res.send(pageShell(`
+    <h2>Welcome, ${user.full_name}!</h2>
+    <p style="color:#5B6478;font-size:14px;">Set a password to activate your LeadFlow AI account.</p>
+    <form method="POST" action="/auth/accept-invite" style="margin-top:16px;">
+      <input type="hidden" name="token" value="${token}">
+      <label style="font-size:13px;">Password (min 6 characters)</label>
+      <input type="password" name="password" minlength="6" required style="width:100%;box-sizing:border-box;padding:10px;margin:6px 0 14px;border:1px solid #ddd;border-radius:8px;">
+      <label style="font-size:13px;">Confirm password</label>
+      <input type="password" name="confirm_password" minlength="6" required style="width:100%;box-sizing:border-box;padding:10px;margin:6px 0 18px;border:1px solid #ddd;border-radius:8px;">
+      <button type="submit" style="width:100%;padding:12px;background:#1B2A4A;color:#fff;border:none;border-radius:8px;font-weight:600;">Activate account</button>
+    </form>
+  `));
+});
+
+// POST /auth/accept-invite -- submitted by the form above. Also public,
+// same reason. Parses application/x-www-form-urlencoded since it's a
+// plain HTML form post, not a JSON API call.
+router.post('/accept-invite', express.urlencoded({ extended: false }), async (req, res) => {
+  const { token, password, confirm_password } = req.body;
+  if (!token) return res.status(400).send(pageShell('<h2>⚠️ Missing invite token</h2>'));
+
+  const user = await db.prepare('SELECT id, invite_token_expires_at FROM users WHERE invite_token = ?').get(token);
+  if (!user) return res.status(404).send(pageShell('<h2>⚠️ Invalid or already-used invite link</h2>'));
+  if (user.invite_token_expires_at && new Date(user.invite_token_expires_at) < new Date()) {
+    return res.status(410).send(pageShell('<h2>⚠️ This invite link has expired</h2><p>Ask your admin to resend it.</p>'));
+  }
+  if (!password || password.length < 6) {
+    return res.status(400).send(pageShell('<h2>⚠️ Password must be at least 6 characters</h2><p><a href="?token=' + token + '">Go back</a></p>'));
+  }
+  if (password !== confirm_password) {
+    return res.status(400).send(pageShell('<h2>⚠️ Passwords don\'t match</h2><p><a href="?token=' + token + '">Go back</a></p>'));
+  }
+
+  const hash = await bcrypt.hash(password, 10);
+  await db.prepare(`
+    UPDATE users SET password_hash = ?, active = true, invite_token = NULL, invite_token_expires_at = NULL WHERE id = ?
+  `).run(hash, user.id);
+
+  res.send(pageShell('<div style="font-size:48px;text-align:center;">✅</div><h2 style="text-align:center;">Account activated!</h2><p style="text-align:center;color:#5B6478;">You can now log in to LeadFlow AI from the app.</p>'));
 });
 
 // PATCH /auth/team/:id — change role, name, or reactivate

@@ -71,6 +71,9 @@ function attachUser(req, res, next) {
 //                               make login impossible (chicken-and-egg)
 //  - /auth/verify-email,        clicked from an email in a browser, which
 //    /auth/resend-verification  cannot send an Authorization header
+//  - /auth/accept-invite        team-invite link clicked from an email --
+//    (GET+POST)                 same reasoning as verify-email, the
+//                               invitee has no token yet by definition
 //  - /capture/submit/:key,      PUBLIC LEAD CAPTURE FORMS -- filled in by
 //    /capture/form/:key         prospective students who have no account.
 //                               Note /capture/forms (managing forms) is
@@ -82,13 +85,12 @@ function attachUser(req, res, next) {
 //  - /whatsapp/webhook,         inbound webhooks from Meta / lead ads;
 //    /lead-ads/webhook          third parties cannot send our JWT
 //  - /whatsapp/process-scheduled called by the GitHub Actions cron every
-//                               15 min, which has no token. NOTE: the
-//                               workflow swallows errors with `|| echo`,
-//                               so gating this would have broken
-//                               scheduled WhatsApp sends *silently*.
-//                               Flagged as a real follow-up: this should
-//                               get its own shared-secret header rather
-//                               than staying fully open indefinitely.
+//                               15 min, which has no token. Now checks an
+//                               x-cron-secret header when CRON_SECRET is
+//                               set on the server (opt-in, backward
+//                               compatible) -- staying in this allowlist
+//                               either way since a cron can never send a
+//                               user JWT regardless of the secret check.
 //  - /s/:code                   public short links (Instagram bio etc.)
 //
 // Matched by prefix against req.path. Ordering doesn't matter since this
@@ -100,6 +102,7 @@ const PUBLIC_PREFIXES = [
   '/auth/signup',
   '/auth/verify-email',
   '/auth/resend-verification',
+  '/auth/accept-invite',
   '/capture/submit/',
   '/capture/form/',
   '/peer-reviews/pay/',
