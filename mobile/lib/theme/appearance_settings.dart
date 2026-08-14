@@ -119,6 +119,20 @@ enum FontWeightChoice {
   const FontWeightChoice(this.label, this.weight);
 }
 
+/// Which tab a template appears under in the 20-template gallery
+/// (Batch 5's UI). Kept here, next to ThemePreset, since it's metadata
+/// about presets, not a runtime AppearanceSettings value -- nothing
+/// persists "the current category," it only groups the gallery.
+enum TemplateCategory {
+  glass('Glass'),
+  solidCorporate('Solid & Corporate'),
+  softPlayful('Soft & Playful'),
+  boldDark('Bold & Dark');
+
+  final String label;
+  const TemplateCategory(this.label);
+}
+
 /// A one-tap bundle of color + font + radius + mode choices — the "quick
 /// pick" alternative to manually tuning every control one at a time.
 class ThemePreset {
@@ -134,26 +148,74 @@ class ThemePreset {
   final Color? glowColor;
   final bool floating;
   final bool texture;
+  final TemplateCategory category;
+  // Batch 2 additions -- optional, so every preset above didn't need
+  // touching. When set, applyPreset() also turns on the primary-color
+  // gradient / backdrop blur added in Batch 1's token foundation, so a
+  // handful of templates (the glass/holographic ones) are the first real
+  // consumers of those fields rather than them sitting unused.
+  final Color? gradientEnd;
+  final double backdropBlur;
   const ThemePreset(this.name, this.tagline, this.primary, this.accent, this.font, this.radius, this.dark, this.styleMode,
-      {this.glow = false, this.glowColor, this.floating = false, this.texture = false});
+      {this.glow = false, this.glowColor, this.floating = false, this.texture = false, required this.category, this.gradientEnd, this.backdropBlur = 0.0});
 }
 
-/// 10 fully distinct, ready-to-launch looks — each a genuinely different
-/// combination of color, font, shape, and effects, not just palette swaps.
+/// 19 fully distinct, ready-to-launch looks, matching the Customize
+/// Studio master-prompt's 20-template spec (#20, "Custom AI-Generated,"
+/// is intentionally not a static entry here -- it's the existing AI
+/// Design Engine card, generated live, never a fixed preset).
+///
+/// Ten of the original ten presets are enriched + renamed to match the
+/// spec's official template names rather than replaced, so a user who
+/// already applied one of them keeps the same underlying look; nine are
+/// new. Each carries a `category` for the gallery's tab filter (Glass /
+/// Solid & Corporate / Soft & Playful / Bold & Dark).
 const List<ThemePreset> themePresets = [
-  ThemePreset('Classic Navy', 'Timeless & trustworthy', Color(0xFF1B2A4A), Color(0xFFE8A33D), FontPairing.spaceGroteskInter, 16, false, UIStyleMode.solid),
-  ThemePreset('Midnight Glass', 'Frosted after-dark', Color(0xFF0F172A), Color(0xFF38BDF8), FontPairing.poppinsRoboto, 20, true, UIStyleMode.glass),
-  ThemePreset('Liquid Sky', 'Glossy & weightless', Color(0xFF1D4ED8), Color(0xFF7DD3FC), FontPairing.spaceGroteskInter, 26, false, UIStyleMode.liquid),
-  ThemePreset('Sunrise Minimal', 'Warm & unadorned', Color(0xFFB45309), Color(0xFFEA580C), FontPairing.montserratOpenSans, 8, false, UIStyleMode.basic),
-  ThemePreset('Editorial Ink', 'Print-inspired, serif', Color(0xFF334155), Color(0xFFBE185D), FontPairing.playfairLato, 4, false, UIStyleMode.corporate),
-  ThemePreset('Comic Pop', 'Bold, playful, loud', Color(0xFFDC2626), Color(0xFFFACC15), FontPairing.poppinsRoboto, 18, false, UIStyleMode.cartoon),
-  ThemePreset('Ghost Mode', 'Barely-there, quiet', Color(0xFF334155), Color(0xFF64748B), FontPairing.spaceGroteskInter, 12, false, UIStyleMode.transparent),
-  ThemePreset('Cyber Neon', 'Electric night-drive', Color(0xFF0A0A0F), Color(0xFF00E5FF), FontPairing.spaceGroteskInter, 10, true, UIStyleMode.solid,
-      glow: true, glowColor: Color(0xFF00E5FF), floating: true),
-  ThemePreset('Studio Paper', 'Tactile, hand-crafted', Color(0xFF57534E), Color(0xFFB45309), FontPairing.playfairLato, 6, false, UIStyleMode.corporate,
-      texture: true),
-  ThemePreset('Aurora Float', 'Soft glow, high lift', Color(0xFF6D28D9), Color(0xFFEC4899), FontPairing.montserratOpenSans, 24, true, UIStyleMode.glass,
-      glow: true, glowColor: Color(0xFFEC4899), floating: true),
+  // --- Glass ---
+  ThemePreset('iOS Liquid Glass', 'Apple-style frosted, specular highlight', Color(0xFF0A84FF), Color(0xFF64D2FF), FontPairing.spaceGroteskInter, 28, false, UIStyleMode.liquid,
+      category: TemplateCategory.glass, gradientEnd: Color(0xFF64D2FF), backdropBlur: 0.8),
+  ThemePreset('Midnight Glass Pro', 'Dark glassmorphism, neon accent glow', Color(0xFF0F172A), Color(0xFF38BDF8), FontPairing.poppinsRoboto, 20, true, UIStyleMode.glass,
+      glow: true, glowColor: Color(0xFF38BDF8), category: TemplateCategory.glass, backdropBlur: 0.7),
+  ThemePreset('Liquid Sky', 'Gradient-mesh, glossy, weightless', Color(0xFF1D4ED8), Color(0xFF7DD3FC), FontPairing.spaceGroteskInter, 26, false, UIStyleMode.liquid,
+      category: TemplateCategory.glass, gradientEnd: Color(0xFF7DD3FC), backdropBlur: 0.5),
+  ThemePreset('Holographic Lens', 'Iridescent gradient glass, light-refraction shimmer', Color(0xFF6D28D9), Color(0xFFEC4899), FontPairing.montserratOpenSans, 24, true, UIStyleMode.glass,
+      glow: true, glowColor: Color(0xFFEC4899), floating: true, category: TemplateCategory.glass, gradientEnd: Color(0xFF06B6D4), backdropBlur: 0.6),
+  ThemePreset('Frosted Acrylic', 'Fluent-style acrylic blur + depth layering', Color(0xFF2564CF), Color(0xFF60CDFF), FontPairing.poppinsRoboto, 8, false, UIStyleMode.glass,
+      category: TemplateCategory.glass, backdropBlur: 0.9),
+
+  // --- Solid & Corporate ---
+  ThemePreset('Corporate Trust', 'Navy/slate, banking-grade seriousness', Color(0xFF1B2A4A), Color(0xFFE8A33D), FontPairing.spaceGroteskInter, 12, false, UIStyleMode.solid,
+      category: TemplateCategory.solidCorporate),
+  ThemePreset('Clinical Precision', 'Clean white/teal, high-legibility, zero clutter', Color(0xFF0D9488), Color(0xFF14B8A6), FontPairing.montserratOpenSans, 14, false, UIStyleMode.basic,
+      category: TemplateCategory.solidCorporate),
+  ThemePreset('Editorial Premium', 'Serif display + sans body, magazine feel', Color(0xFF334155), Color(0xFFBE185D), FontPairing.playfairLato, 4, false, UIStyleMode.corporate,
+      category: TemplateCategory.solidCorporate),
+  ThemePreset('Minimal Mono', 'Near-monochrome, single accent, brutalist-clean grid', Color(0xFF18181B), Color(0xFF71717A), FontPairing.spaceGroteskInter, 4, false, UIStyleMode.basic,
+      category: TemplateCategory.solidCorporate),
+  ThemePreset('Pure Transparent', 'Barely-there fill, thin outline, content-first', Color(0xFF334155), Color(0xFF64748B), FontPairing.spaceGroteskInter, 12, false, UIStyleMode.transparent,
+      category: TemplateCategory.solidCorporate),
+  ThemePreset('Executive Slate', 'Muted greys + single jewel accent, boardroom minimalism', Color(0xFF3F3F46), Color(0xFF7C3AED), FontPairing.playfairLato, 8, false, UIStyleMode.corporate,
+      category: TemplateCategory.solidCorporate),
+
+  // --- Soft & Playful ---
+  ThemePreset('Soft UI 2.0', 'Accessible neumorphism, tactile press states', Color(0xFF6366F1), Color(0xFFA5B4FC), FontPairing.montserratOpenSans, 20, false, UIStyleMode.basic,
+      category: TemplateCategory.softPlayful),
+  ThemePreset('Material 3 Expressive', 'Google M3 tonal palettes, dynamic color roles', Color(0xFF6750A4), Color(0xFF7D5260), FontPairing.poppinsRoboto, 20, false, UIStyleMode.solid,
+      category: TemplateCategory.softPlayful),
+  ThemePreset('Warm Consultancy', 'Cream/terracotta warmth, friendly rounded shapes', Color(0xFFB45309), Color(0xFFEA580C), FontPairing.montserratOpenSans, 18, false, UIStyleMode.basic,
+      category: TemplateCategory.softPlayful),
+  ThemePreset('Paper & Ink', 'Subtle paper texture, ink-accent CTAs, notebook feel', Color(0xFF57534E), Color(0xFFB45309), FontPairing.playfairLato, 6, false, UIStyleMode.corporate,
+      texture: true, category: TemplateCategory.softPlayful),
+  ThemePreset('Playful Rounded', 'Soft pastel, big radius, polished (not childish)', Color(0xFFDC2626), Color(0xFFFACC15), FontPairing.poppinsRoboto, 22, false, UIStyleMode.cartoon,
+      category: TemplateCategory.softPlayful),
+
+  // --- Bold & Dark ---
+  ThemePreset('Fintech Dark', 'Deep charcoal, emerald/gold, dashboard-density optimized', Color(0xFF10B981), Color(0xFFEAB308), FontPairing.spaceGroteskInter, 10, true, UIStyleMode.solid,
+      category: TemplateCategory.boldDark),
+  ThemePreset('Neo-Brutalist', 'Bold borders, flat blocks, high-contrast, confident type', Color(0xFF000000), Color(0xFFFFD400), FontPairing.spaceGroteskInter, 0, false, UIStyleMode.basic,
+      category: TemplateCategory.boldDark),
+  ThemePreset('Cyberpunk Neon', 'Electric night-drive, neon edges, gradient borders', Color(0xFF0A0A0F), Color(0xFF00E5FF), FontPairing.spaceGroteskInter, 10, true, UIStyleMode.solid,
+      glow: true, glowColor: Color(0xFF00E5FF), floating: true, category: TemplateCategory.boldDark, gradientEnd: Color(0xFFFF00E5)),
 ];
 
 /// Every visual control the end user can personalize, all in one place,
@@ -332,13 +394,21 @@ class AppearanceSettings extends ChangeNotifier {
       p.primary.value.toString(), p.accent.value.toString(),
       p.font.index.toString(), p.radius.toString(), p.dark.toString(), p.styleMode.index.toString(),
       p.glow.toString(), p.glowColor?.value.toString() ?? '', p.floating.toString(), p.texture.toString(),
+      // Batch 2 additions, appended rather than interleaved so a preset
+      // saved before this change still parses (see _decodePreset below).
+      p.category.index.toString(), p.gradientEnd?.value.toString() ?? '', p.backdropBlur.toString(),
     ].join('~~');
   }
 
   ThemePreset? _decodePreset(String raw) {
     try {
       final parts = raw.split('~~');
-      if (parts.length != 12) return null;
+      // Accept both the original 12-field format (presets saved before
+      // Batch 2) and the new 15-field one -- old saves shouldn't silently
+      // vanish just because the schema grew. Old-format presets default
+      // to Solid & Corporate, no gradient, no backdrop blur, which is
+      // exactly what they rendered as before this change anyway.
+      if (parts.length != 12 && parts.length != 15) return null;
       return ThemePreset(
         parts[0], parts[1],
         Color(int.parse(parts[2])), Color(int.parse(parts[3])),
@@ -349,6 +419,9 @@ class AppearanceSettings extends ChangeNotifier {
         glowColor: parts[9].isEmpty ? null : Color(int.parse(parts[9])),
         floating: parts[10] == 'true',
         texture: parts[11] == 'true',
+        category: parts.length == 15 ? TemplateCategory.values[int.parse(parts[12])] : TemplateCategory.solidCorporate,
+        gradientEnd: parts.length == 15 && parts[13].isNotEmpty ? Color(int.parse(parts[13])) : null,
+        backdropBlur: parts.length == 15 ? double.parse(parts[14]) : 0.0,
       );
     } catch (_) {
       return null;
@@ -367,6 +440,13 @@ class AppearanceSettings extends ChangeNotifier {
     final preset = ThemePreset(
       name, 'Custom', _primaryColor, _accentColor, _fontPairing, _cornerRadius, _darkMode, _styleMode,
       glow: _glowEnabled, glowColor: _glowEnabled ? _glowColor : null, floating: _floatingEnabled, texture: _textureEnabled,
+      // "Custom" doesn't fit a fixed category -- Solid & Corporate is the
+      // neutral default (matches _decodePreset's fallback for the same
+      // reason), and current gradient/blur state carries over so a user's
+      // saved look round-trips exactly, not just its base colors.
+      category: TemplateCategory.solidCorporate,
+      gradientEnd: _primaryGradientEnabled ? _primaryGradientEnd : null,
+      backdropBlur: _backdropBlurIntensity,
     );
     raw.removeWhere((r) => r.split('~~').first == name);
     raw.add(_encodePreset(preset));
@@ -812,6 +892,13 @@ class AppearanceSettings extends ChangeNotifier {
     if (preset.glowColor != null) _glowColor = preset.glowColor!;
     _floatingEnabled = preset.floating;
     _textureEnabled = preset.texture;
+    // Batch 2: the first real consumer of Batch 1's gradient/backdrop-blur
+    // fields. A preset with no gradientEnd explicitly turns gradient OFF
+    // (not left alone) so switching from a gradient template to a flat
+    // one doesn't leave a stale gradient behind.
+    _primaryGradientEnabled = preset.gradientEnd != null;
+    _primaryGradientEnd = preset.gradientEnd;
+    _backdropBlurIntensity = preset.backdropBlur;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await Future.wait([
@@ -825,6 +912,10 @@ class AppearanceSettings extends ChangeNotifier {
       prefs.setBool(_floatingEnabledKey, preset.floating),
       prefs.setBool(_textureKey, preset.texture),
       if (preset.glowColor != null) prefs.setInt(_glowColorKey, preset.glowColor!.value),
+      prefs.setBool(_primaryGradientEnabledKey, preset.gradientEnd != null),
+      if (preset.gradientEnd != null) prefs.setInt(_primaryGradientEndKey, preset.gradientEnd!.value)
+      else prefs.remove(_primaryGradientEndKey),
+      prefs.setDouble(_backdropBlurIntensityKey, preset.backdropBlur),
     ]);
     setGlassEnabled(preset.styleMode == UIStyleMode.glass || preset.styleMode == UIStyleMode.liquid);
   }
