@@ -207,8 +207,87 @@ function requireAuth(req, res, next) {
 // GET /auth/team — list registered users for this tenant (no password hashes)
 router.get('/team', async (req, res) => {
   const tid = req.header('x-tenant-id') || 'demo-consultancy';
-  const users = await db.prepare('SELECT id, email, full_name, role, created_at FROM users WHERE tenant_id = ?').all(tid);
+  const users = await db.prepare(
+    'SELECT id, email, full_name, role, active, created_at FROM users WHERE tenant_id = ? ORDER BY active DESC, full_name'
+  ).all(tid);
   res.json(users);
+});
+
+// A consultancy is a multi-person operation, but Team was read-only —
+// there was no way to add a counselor, change who can do what, or remove
+// someone who left. These three routes close that.
+
+const TEAM_ROLES = ['admin', 'counselor', 'viewer'];
+
+// POST /auth/team — add a member with a temporary password they change on
+// first login. Deliberately not an email-invite flow yet: that needs a
+// token table and a public accept-invite page, and this unblocks real
+// multi-user use today. Flagged as a follow-up rather than pretended.
+router.post('/team', async (req, res) => {
+  const tid = req.header('x-tenant-id') || 'demo-consultancy';
+  const { email, full_name, role, temp_password } = req.body;
+  if (!email || !full_name || !temp_password) {
+    return res.status(400).json({ error: 'email, full_name and temp_password are required' });
+  }
+  if (role && !TEAM_ROLES.includes(role)) {
+    return res.status(400).json({ error: `role must be one of: ${TEAM_ROLES.join(', ')}` });
+  }
+  if (String(temp_password).length < 8) {
+    return res.status(400).json({ error: 'temp_password must be at least 8 characters' });
+  }
+
+  const existing = await db.prepare('SELECT id FROM users WHERE tenant_id = ? AND lower(email) = lower(?)').get(tid, email);
+  if (existing) return res.status(409).json({ error: 'Someone with that email is already on the team' });
+
+  const id = randomUUID();
+  const hash = await bcrypt.hash(temp_password, 10);
+  await db.prepare(`
+    INSERT INTO users (id, tenant_id, email, password_hash, full_name, role)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, tid, email, hash, full_name, role || 'counselor');
+
+  res.status(201).json(
+    await db.prepare('SELECT id, email, full_name, role, active, created_at FROM users WHERE id = ?').get(id)
+  );
+});
+
+// PATCH /auth/team/:id — change role, name, or reactivate
+router.patch('/team/:id', async (req, res) => {
+  const tid = req.header('x-tenant-id') || 'demo-consultancy';
+  const existing = await db.prepare('SELECT * FROM users WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Team member not found' });
+
+  const { full_name, role, active } = req.body;
+  if (role !== undefined && !TEAM_ROLES.includes(role)) {
+    return res.status(400).json({ error: `role must be one of: ${TEAM_ROLES.join(', ')}` });
+  }
+
+  const updates = [];
+  const values = [];
+  if (full_name !== undefined) { updates.push('full_name = ?'); values.push(full_name); }
+  if (role !== undefined) { updates.push('role = ?'); values.push(role); }
+  if (active !== undefined) { updates.push('active = ?'); values.push(active ? true : false); }
+  if (updates.length === 0) return res.status(400).json({ error: 'Nothing to update' });
+
+  values.push(tid, req.params.id);
+  await db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?`).run(...values);
+  res.json(await db.prepare('SELECT id, email, full_name, role, active, created_at FROM users WHERE id = ?').get(req.params.id));
+});
+
+// DELETE /auth/team/:id — deactivate rather than hard-delete, so the
+// counselor's name stays resolvable on every lead, call and note they
+// ever touched. Hard-deleting would orphan that history.
+router.delete('/team/:id', async (req, res) => {
+  const tid = req.header('x-tenant-id') || 'demo-consultancy';
+  const remaining = await db.prepare(
+    "SELECT COUNT(*) AS c FROM users WHERE tenant_id = ? AND active = true AND id != ?"
+  ).get(tid, req.params.id);
+  if (remaining.c === 0) {
+    return res.status(400).json({ error: 'Cannot deactivate the last active member of the team' });
+  }
+  const result = await db.prepare('UPDATE users SET active = false WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Team member not found' });
+  res.status(204).send();
 });
 
 module.exports = { router, requireAuth };

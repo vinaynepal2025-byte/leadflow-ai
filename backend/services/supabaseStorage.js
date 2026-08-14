@@ -25,6 +25,58 @@
 //                           so a leaked key only risks this one bucket,
 //                           not full database access)
 
+// Browsers decide whether to render or download purely from the stored
+// Content-Type. Flutter's http.MultipartFile.fromPath doesn't set a part
+// content type, so multer reports application/octet-stream and every
+// uploaded photo/PDF was being stored as a generic binary blob — which is
+// why images wouldn't display from a signed URL (confirmed live: a .jpg in
+// storage carried mimetype application/octet-stream while backend-generated
+// PNGs, which pass an explicit type, were fine).
+//
+// Deriving from the extension here fixes every upload path at once
+// (documents, voice notes, flyer assets, tenant logos) rather than patching
+// each route, and also protects against any future client that omits it.
+const EXTENSION_MIME_TYPES = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  bmp: 'image/bmp',
+  svg: 'image/svg+xml',
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv: 'text/csv',
+  txt: 'text/plain',
+  html: 'text/html',
+  json: 'application/json',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  opus: 'audio/opus',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+};
+
+function resolveContentType(storagePath, providedType) {
+  // Trust a specific type the caller actually knew (e.g. 'text/html' for a
+  // generated report); only override the generic fallbacks.
+  const isGeneric = !providedType ||
+    providedType === 'application/octet-stream' ||
+    providedType === 'binary/octet-stream';
+  if (!isGeneric) return providedType;
+
+  const ext = storagePath.split('.').pop()?.toLowerCase();
+  return EXTENSION_MIME_TYPES[ext] || 'application/octet-stream';
+}
+
 async function uploadFile(buffer, storagePath, contentType) {
   const baseUrl = process.env.SUPABASE_STORAGE_URL;
   const key = process.env.SUPABASE_STORAGE_KEY;
@@ -32,13 +84,14 @@ async function uploadFile(buffer, storagePath, contentType) {
     throw new Error('Supabase Storage not configured — set SUPABASE_STORAGE_URL and SUPABASE_STORAGE_KEY');
   }
 
+  const resolvedType = resolveContentType(storagePath, contentType);
   const uploadUrl = `${baseUrl}/storage/v1/object/leadflow-uploads/${storagePath}`;
   const res = await fetch(uploadUrl, {
     method: 'POST',
     headers: {
       apikey: key,
       Authorization: `Bearer ${key}`,
-      'Content-Type': contentType || 'application/octet-stream',
+      'Content-Type': resolvedType,
       'x-upsert': 'true',
     },
     body: buffer,
@@ -80,4 +133,4 @@ async function getSignedUrl(storagePath, expirySeconds) {
   return `${baseUrl}/storage/v1${data.signedURL}`;
 }
 
-module.exports = { uploadFile, getSignedUrl };
+module.exports = { uploadFile, getSignedUrl, resolveContentType };

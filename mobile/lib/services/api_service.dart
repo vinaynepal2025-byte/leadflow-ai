@@ -975,6 +975,30 @@ class ApiService {
     return data.cast<Map<String, dynamic>>();
   }
 
+  Future<void> addTeamMember({
+    required String email,
+    required String fullName,
+    required String role,
+    required String tempPassword,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/auth/team'),
+      headers: _headers,
+      body: jsonEncode({'email': email, 'full_name': fullName, 'role': role, 'temp_password': tempPassword}),
+    );
+    _checkOk(res, expected: 201);
+  }
+
+  Future<void> updateTeamMember(String id, Map<String, dynamic> fields) async {
+    final res = await http.patch(Uri.parse('$baseUrl/auth/team/$id'), headers: _headers, body: jsonEncode(fields));
+    _checkOk(res);
+  }
+
+  Future<void> deactivateTeamMember(String id) async {
+    final res = await http.delete(Uri.parse('$baseUrl/auth/team/$id'), headers: _headers);
+    _checkOk(res, expected: 204);
+  }
+
   Future<List<Map<String, dynamic>>> checkDuplicateLead({String? fullName, String? phone}) async {
     final params = <String, String>{};
     if (fullName != null && fullName.isNotEmpty) params['full_name'] = fullName;
