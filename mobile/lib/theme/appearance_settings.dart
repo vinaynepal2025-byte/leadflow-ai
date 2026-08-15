@@ -167,8 +167,16 @@ class ThemePreset {
   // consumers of those fields rather than them sitting unused.
   final Color? gradientEnd;
   final double backdropBlur;
+  // Theme Engine v2 -- lets each template lean its tonal background/
+  // surface tint stronger or weaker without changing its hue. A
+  // restrained corporate template can pass a low value for an
+  // almost-neutral surface; a bold/holographic one can pass a high
+  // value for a much more visibly tinted dark surface. This is the
+  // single biggest lever for making 19 templates' *background feel*
+  // (not just their accent color) genuinely distinct from each other.
+  final double tonalSaturationBoost;
   const ThemePreset(this.name, this.tagline, this.primary, this.accent, this.font, this.radius, this.dark, this.styleMode,
-      {this.glow = false, this.glowColor, this.floating = false, this.texture = false, required this.category, this.gradientEnd, this.backdropBlur = 0.0});
+      {this.glow = false, this.glowColor, this.floating = false, this.texture = false, required this.category, this.gradientEnd, this.backdropBlur = 0.0, this.tonalSaturationBoost = 1.0});
 }
 
 /// 19 fully distinct, ready-to-launch looks, matching the Customize
@@ -183,50 +191,56 @@ class ThemePreset {
 /// Solid & Corporate / Soft & Playful / Bold & Dark).
 const List<ThemePreset> themePresets = [
   // --- Glass ---
+  // Theme Engine v2: tonalSaturationBoost is what actually makes these
+  // 19 templates feel distinct from each other in their background/
+  // surface, not just their accent button color -- each value below is
+  // deliberately tied to the template's own stated personality (a
+  // "banking-grade" template stays near-neutral; a "holographic" one
+  // leans hard into visible tint), not picked arbitrarily.
   ThemePreset('iOS Liquid Glass', 'Apple-style frosted, specular highlight', Color(0xFF0A84FF), Color(0xFF64D2FF), FontPairing.spaceGroteskInter, 28, false, UIStyleMode.liquid,
-      category: TemplateCategory.glass, gradientEnd: Color(0xFF64D2FF), backdropBlur: 0.8),
+      category: TemplateCategory.glass, gradientEnd: Color(0xFF64D2FF), backdropBlur: 0.8, tonalSaturationBoost: 1.0),
   ThemePreset('Midnight Glass Pro', 'Dark glassmorphism, neon accent glow', Color(0xFF0F172A), Color(0xFF38BDF8), FontPairing.poppinsRoboto, 20, true, UIStyleMode.glass,
-      glow: true, glowColor: Color(0xFF38BDF8), category: TemplateCategory.glass, backdropBlur: 0.7),
+      glow: true, glowColor: Color(0xFF38BDF8), category: TemplateCategory.glass, backdropBlur: 0.7, tonalSaturationBoost: 1.3),
   ThemePreset('Liquid Sky', 'Gradient-mesh, glossy, weightless', Color(0xFF1D4ED8), Color(0xFF7DD3FC), FontPairing.spaceGroteskInter, 26, false, UIStyleMode.liquid,
-      category: TemplateCategory.glass, gradientEnd: Color(0xFF7DD3FC), backdropBlur: 0.5),
+      category: TemplateCategory.glass, gradientEnd: Color(0xFF7DD3FC), backdropBlur: 0.5, tonalSaturationBoost: 1.3),
   ThemePreset('Holographic Lens', 'Iridescent gradient glass, light-refraction shimmer', Color(0xFF6D28D9), Color(0xFFEC4899), FontPairing.montserratOpenSans, 24, true, UIStyleMode.glass,
-      glow: true, glowColor: Color(0xFFEC4899), floating: true, category: TemplateCategory.glass, gradientEnd: Color(0xFF06B6D4), backdropBlur: 0.6),
+      glow: true, glowColor: Color(0xFFEC4899), floating: true, category: TemplateCategory.glass, gradientEnd: Color(0xFF06B6D4), backdropBlur: 0.6, tonalSaturationBoost: 1.8),
   ThemePreset('Frosted Acrylic', 'Fluent-style acrylic blur + depth layering', Color(0xFF2564CF), Color(0xFF60CDFF), FontPairing.poppinsRoboto, 8, false, UIStyleMode.glass,
-      category: TemplateCategory.glass, backdropBlur: 0.9),
+      category: TemplateCategory.glass, backdropBlur: 0.9, tonalSaturationBoost: 1.1),
 
   // --- Solid & Corporate ---
   ThemePreset('Corporate Trust', 'Navy/slate, banking-grade seriousness', Color(0xFF1B2A4A), Color(0xFFE8A33D), FontPairing.spaceGroteskInter, 12, false, UIStyleMode.solid,
-      category: TemplateCategory.solidCorporate),
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.4),
   ThemePreset('Clinical Precision', 'Clean white/teal, high-legibility, zero clutter', Color(0xFF0D9488), Color(0xFF14B8A6), FontPairing.montserratOpenSans, 14, false, UIStyleMode.basic,
-      category: TemplateCategory.solidCorporate),
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.2),
   ThemePreset('Editorial Premium', 'Serif display + sans body, magazine feel', Color(0xFF334155), Color(0xFFBE185D), FontPairing.playfairLato, 4, false, UIStyleMode.corporate,
-      category: TemplateCategory.solidCorporate),
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.3),
   ThemePreset('Minimal Mono', 'Near-monochrome, single accent, brutalist-clean grid', Color(0xFF18181B), Color(0xFF71717A), FontPairing.spaceGroteskInter, 4, false, UIStyleMode.basic,
-      category: TemplateCategory.solidCorporate),
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.15),
   ThemePreset('Pure Transparent', 'Barely-there fill, thin outline, content-first', Color(0xFF334155), Color(0xFF64748B), FontPairing.spaceGroteskInter, 12, false, UIStyleMode.transparent,
-      category: TemplateCategory.solidCorporate),
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.25),
   ThemePreset('Executive Slate', 'Muted greys + single jewel accent, boardroom minimalism', Color(0xFF3F3F46), Color(0xFF7C3AED), FontPairing.playfairLato, 8, false, UIStyleMode.corporate,
-      category: TemplateCategory.solidCorporate),
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.3),
 
   // --- Soft & Playful ---
   ThemePreset('Soft UI 2.0', 'Accessible neumorphism, tactile press states', Color(0xFF6366F1), Color(0xFFA5B4FC), FontPairing.montserratOpenSans, 20, false, UIStyleMode.basic,
-      category: TemplateCategory.softPlayful),
+      category: TemplateCategory.softPlayful, tonalSaturationBoost: 0.9),
   ThemePreset('Material 3 Expressive', 'Google M3 tonal palettes, dynamic color roles', Color(0xFF6750A4), Color(0xFF7D5260), FontPairing.poppinsRoboto, 20, false, UIStyleMode.solid,
-      category: TemplateCategory.softPlayful),
+      category: TemplateCategory.softPlayful, tonalSaturationBoost: 1.2),
   ThemePreset('Warm Consultancy', 'Cream/terracotta warmth, friendly rounded shapes', Color(0xFFB45309), Color(0xFFEA580C), FontPairing.montserratOpenSans, 18, false, UIStyleMode.basic,
-      category: TemplateCategory.softPlayful),
+      category: TemplateCategory.softPlayful, tonalSaturationBoost: 0.9),
   ThemePreset('Paper & Ink', 'Subtle paper texture, ink-accent CTAs, notebook feel', Color(0xFF57534E), Color(0xFFB45309), FontPairing.playfairLato, 6, false, UIStyleMode.corporate,
-      texture: true, category: TemplateCategory.softPlayful),
+      texture: true, category: TemplateCategory.softPlayful, tonalSaturationBoost: 0.3),
   ThemePreset('Playful Rounded', 'Soft pastel, big radius, polished (not childish)', Color(0xFFDC2626), Color(0xFFFACC15), FontPairing.poppinsRoboto, 22, false, UIStyleMode.cartoon,
-      category: TemplateCategory.softPlayful),
+      category: TemplateCategory.softPlayful, tonalSaturationBoost: 1.1),
 
   // --- Bold & Dark ---
   ThemePreset('Fintech Dark', 'Deep charcoal, emerald/gold, dashboard-density optimized', Color(0xFF10B981), Color(0xFFEAB308), FontPairing.spaceGroteskInter, 10, true, UIStyleMode.solid,
-      category: TemplateCategory.boldDark),
+      category: TemplateCategory.boldDark, tonalSaturationBoost: 1.1),
   ThemePreset('Neo-Brutalist', 'Bold borders, flat blocks, high-contrast, confident type', Color(0xFF000000), Color(0xFFFFD400), FontPairing.spaceGroteskInter, 0, false, UIStyleMode.basic,
-      category: TemplateCategory.boldDark),
+      category: TemplateCategory.boldDark, tonalSaturationBoost: 0.0),
   ThemePreset('Cyberpunk Neon', 'Electric night-drive, neon edges, gradient borders', Color(0xFF0A0A0F), Color(0xFF00E5FF), FontPairing.spaceGroteskInter, 10, true, UIStyleMode.solid,
-      glow: true, glowColor: Color(0xFF00E5FF), floating: true, category: TemplateCategory.boldDark, gradientEnd: Color(0xFFFF00E5)),
+      glow: true, glowColor: Color(0xFF00E5FF), floating: true, category: TemplateCategory.boldDark, gradientEnd: Color(0xFFFF00E5), tonalSaturationBoost: 2.0),
 ];
 
 /// Every visual control the end user can personalize, all in one place,
@@ -277,6 +291,16 @@ class AppearanceSettings extends ChangeNotifier {
   static const _highContrastModeKey = 'appearance_high_contrast_mode';
   static const _letterSpacingKey = 'appearance_letter_spacing';
   static const _fontWeightChoiceKey = 'appearance_font_weight_choice';
+
+  // Theme Engine v2 -- independent overrides for the three surfaces that
+  // used to be one flat hardcoded color for the entire app regardless of
+  // theme. null = auto-derive from primaryColor via tonal_palette.dart
+  // (the good default); set = the person deliberately chose their own,
+  // e.g. wants a pure-black background but the auto-tinted surface cards.
+  static const _backgroundOverrideKey = 'appearance_background_override';
+  static const _surfaceOverrideKey = 'appearance_surface_override';
+  static const _appBarOverrideKey = 'appearance_appbar_override';
+  static const _saturationBoostKey = 'appearance_tonal_saturation_boost';
   // Semantic colours. These were previously hardcoded in AppColors and read
   // directly by badges, alerts and status chips, which meant a tenant could
   // restyle the whole app and still be stuck with our green/amber/red.
@@ -333,6 +357,13 @@ class AppearanceSettings extends ChangeNotifier {
   bool _highContrastMode = false;
   double _letterSpacing = 0.0;
   FontWeightChoice _fontWeightChoice = FontWeightChoice.regular;
+
+  // Theme Engine v2 fields. All null/1.0 defaults = auto-derive, zero
+  // visual change until someone actually opens the new advanced controls.
+  Color? _backgroundOverride;
+  Color? _surfaceOverride;
+  Color? _appBarOverride;
+  double _tonalSaturationBoost = 1.0;
 
   bool _loaded = false;
 
@@ -393,6 +424,12 @@ class AppearanceSettings extends ChangeNotifier {
   double get letterSpacing => _letterSpacing;
   FontWeightChoice get fontWeightChoice => _fontWeightChoice;
 
+  // Theme Engine v2 getters.
+  Color? get backgroundOverride => _backgroundOverride;
+  Color? get surfaceOverride => _surfaceOverride;
+  Color? get appBarOverride => _appBarOverride;
+  double get tonalSaturationBoost => _tonalSaturationBoost;
+
   // ---------- Custom presets ("Save current as preset") ----------
   // Encoded as '~~'-delimited strings (not JSON, to avoid adding a
   // dart:convert import for one small feature) in a SharedPreferences
@@ -408,18 +445,18 @@ class AppearanceSettings extends ChangeNotifier {
       // Batch 2 additions, appended rather than interleaved so a preset
       // saved before this change still parses (see _decodePreset below).
       p.category.index.toString(), p.gradientEnd?.value.toString() ?? '', p.backdropBlur.toString(),
+      // Theme Engine v2 addition, same append-only approach.
+      p.tonalSaturationBoost.toString(),
     ].join('~~');
   }
 
   ThemePreset? _decodePreset(String raw) {
     try {
       final parts = raw.split('~~');
-      // Accept both the original 12-field format (presets saved before
-      // Batch 2) and the new 15-field one -- old saves shouldn't silently
-      // vanish just because the schema grew. Old-format presets default
-      // to Solid & Corporate, no gradient, no backdrop blur, which is
-      // exactly what they rendered as before this change anyway.
-      if (parts.length != 12 && parts.length != 15) return null;
+      // Accept the original 12-field format, the Batch-2 15-field one,
+      // and the new 16-field one -- old saves shouldn't silently vanish
+      // just because the schema grew again.
+      if (parts.length != 12 && parts.length != 15 && parts.length != 16) return null;
       return ThemePreset(
         parts[0], parts[1],
         Color(int.parse(parts[2])), Color(int.parse(parts[3])),
@@ -430,9 +467,10 @@ class AppearanceSettings extends ChangeNotifier {
         glowColor: parts[9].isEmpty ? null : Color(int.parse(parts[9])),
         floating: parts[10] == 'true',
         texture: parts[11] == 'true',
-        category: parts.length == 15 ? TemplateCategory.values[int.parse(parts[12])] : TemplateCategory.solidCorporate,
-        gradientEnd: parts.length == 15 && parts[13].isNotEmpty ? Color(int.parse(parts[13])) : null,
-        backdropBlur: parts.length == 15 ? double.parse(parts[14]) : 0.0,
+        category: parts.length >= 15 ? TemplateCategory.values[int.parse(parts[12])] : TemplateCategory.solidCorporate,
+        gradientEnd: parts.length >= 15 && parts[13].isNotEmpty ? Color(int.parse(parts[13])) : null,
+        backdropBlur: parts.length >= 15 ? double.parse(parts[14]) : 0.0,
+        tonalSaturationBoost: parts.length == 16 ? double.parse(parts[15]) : 1.0,
       );
     } catch (_) {
       return null;
@@ -453,11 +491,12 @@ class AppearanceSettings extends ChangeNotifier {
       glow: _glowEnabled, glowColor: _glowEnabled ? _glowColor : null, floating: _floatingEnabled, texture: _textureEnabled,
       // "Custom" doesn't fit a fixed category -- Solid & Corporate is the
       // neutral default (matches _decodePreset's fallback for the same
-      // reason), and current gradient/blur state carries over so a user's
-      // saved look round-trips exactly, not just its base colors.
+      // reason), and current gradient/blur/tonal state carries over so a
+      // user's saved look round-trips exactly, not just its base colors.
       category: TemplateCategory.solidCorporate,
       gradientEnd: _primaryGradientEnabled ? _primaryGradientEnd : null,
       backdropBlur: _backdropBlurIntensity,
+      tonalSaturationBoost: _tonalSaturationBoost,
     );
     raw.removeWhere((r) => r.split('~~').first == name);
     raw.add(_encodePreset(preset));
@@ -609,6 +648,15 @@ class AppearanceSettings extends ChangeNotifier {
     if (weightIndex != null && weightIndex < FontWeightChoice.values.length) {
       _fontWeightChoice = FontWeightChoice.values[weightIndex];
     }
+
+    // Theme Engine v2.
+    final bgOverride = prefs.getInt(_backgroundOverrideKey);
+    if (bgOverride != null) _backgroundOverride = Color(bgOverride);
+    final surfOverride = prefs.getInt(_surfaceOverrideKey);
+    if (surfOverride != null) _surfaceOverride = Color(surfOverride);
+    final appBarOverride = prefs.getInt(_appBarOverrideKey);
+    if (appBarOverride != null) _appBarOverride = Color(appBarOverride);
+    _tonalSaturationBoost = prefs.getDouble(_saturationBoostKey) ?? 1.0;
 
     _loaded = true;
     notifyListeners();
@@ -894,6 +942,48 @@ class AppearanceSettings extends ChangeNotifier {
     (await SharedPreferences.getInstance()).setInt(_fontWeightChoiceKey, v.index);
   }
 
+  // Theme Engine v2 setters. All three overrides accept null to clear
+  // back to "auto-derive from primaryColor" -- clearing is a real,
+  // supported action, not just an unreachable default.
+  Future<void> setBackgroundOverride(Color? v) async {
+    _backgroundOverride = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (v == null) {
+      await prefs.remove(_backgroundOverrideKey);
+    } else {
+      await prefs.setInt(_backgroundOverrideKey, v.value);
+    }
+  }
+
+  Future<void> setSurfaceOverride(Color? v) async {
+    _surfaceOverride = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (v == null) {
+      await prefs.remove(_surfaceOverrideKey);
+    } else {
+      await prefs.setInt(_surfaceOverrideKey, v.value);
+    }
+  }
+
+  Future<void> setAppBarOverride(Color? v) async {
+    _appBarOverride = v;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (v == null) {
+      await prefs.remove(_appBarOverrideKey);
+    } else {
+      await prefs.setInt(_appBarOverrideKey, v.value);
+    }
+  }
+
+  Future<void> setTonalSaturationBoost(double v) async {
+    _tonalSaturationBoost = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setDouble(_saturationBoostKey, v);
+  }
+
   /// Applies every value from a curated preset at once — the "quick pick"
   /// path, still fully overridable afterward via the individual controls.
   Future<void> applyPreset(ThemePreset preset, GlassSetter setGlassEnabled) async {
@@ -914,6 +1004,14 @@ class AppearanceSettings extends ChangeNotifier {
     _primaryGradientEnabled = preset.gradientEnd != null;
     _primaryGradientEnd = preset.gradientEnd;
     _backdropBlurIntensity = preset.backdropBlur;
+    _tonalSaturationBoost = preset.tonalSaturationBoost;
+    // Applying a curated template is a "start fresh" action -- any
+    // manual background/surface/appbar override from a previous custom
+    // tweak session would otherwise silently fight the new template's
+    // own tonal design, which defeats the point of picking a template.
+    _backgroundOverride = null;
+    _surfaceOverride = null;
+    _appBarOverride = null;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await Future.wait([
@@ -931,6 +1029,10 @@ class AppearanceSettings extends ChangeNotifier {
       if (preset.gradientEnd != null) prefs.setInt(_primaryGradientEndKey, preset.gradientEnd!.value)
       else prefs.remove(_primaryGradientEndKey),
       prefs.setDouble(_backdropBlurIntensityKey, preset.backdropBlur),
+      prefs.setDouble(_saturationBoostKey, preset.tonalSaturationBoost),
+      prefs.remove(_backgroundOverrideKey),
+      prefs.remove(_surfaceOverrideKey),
+      prefs.remove(_appBarOverrideKey),
     ]);
     setGlassEnabled(preset.styleMode == UIStyleMode.glass || preset.styleMode == UIStyleMode.liquid);
   }
@@ -1051,6 +1153,11 @@ class AppearanceSettings extends ChangeNotifier {
     _highContrastMode = false;
     _letterSpacing = 0.0;
     _fontWeightChoice = FontWeightChoice.regular;
+    // Theme Engine v2.
+    _backgroundOverride = null;
+    _surfaceOverride = null;
+    _appBarOverride = null;
+    _tonalSaturationBoost = 1.0;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await Future.wait([
@@ -1098,6 +1205,11 @@ class AppearanceSettings extends ChangeNotifier {
       prefs.remove(_highContrastModeKey),
       prefs.remove(_letterSpacingKey),
       prefs.remove(_fontWeightChoiceKey),
+      // Theme Engine v2.
+      prefs.remove(_backgroundOverrideKey),
+      prefs.remove(_surfaceOverrideKey),
+      prefs.remove(_appBarOverrideKey),
+      prefs.remove(_saturationBoostKey),
     ]);
   }
 }

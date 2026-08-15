@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'appearance_settings.dart';
+import 'tonal_palette.dart';
 
 /// Original LeadFlow AI identity colors — used as sensible defaults and
 /// wherever a fixed semantic color (success/alert) still makes sense
@@ -169,9 +170,9 @@ _ModeRecipe _recipeFor(UIStyleMode mode) {
 }
 
 class AppTheme {
-  static CardThemeData _cardThemeFrom(AppearanceSettings settings, BorderRadius radius, bool isDark) {
+  static CardThemeData _cardThemeFrom(AppearanceSettings settings, BorderRadius radius, bool isDark, Color surfaceLowColor) {
     final recipe = _recipeFor(settings.styleMode);
-    final baseCardColor = isDark ? const Color(0xFF1E2230) : AppColors.cardWhite;
+    final baseCardColor = surfaceLowColor;
     final fillAlpha = (recipe.fillAlpha * settings.componentOpacity).clamp(0.0, 1.0);
 
     final fillColor = recipe.whiteTint
@@ -241,6 +242,21 @@ class AppTheme {
     final pair = _resolveFontPair(settings.fontPairing);
     final isGlassy = settings.isGlassy;
 
+    // Theme Engine v2 -- the actual fix for "every dark theme looks the
+    // same flat grey app." tonal.background/surfaceLow/surfaceHigh are
+    // derived FROM this theme's own primaryColor via HSL (see
+    // tonal_palette.dart) instead of being the same hardcoded constant
+    // for every theme regardless of its hue. Each of the three can still
+    // be manually overridden independently (Vinay's "section-wise, not
+    // one background flooding everything" ask) via
+    // settings.backgroundOverride/surfaceOverride/appBarOverride; when
+    // null (the default), it auto-derives.
+    final tonal = deriveTonalPalette(settings.primaryColor, isDark, saturationBoost: settings.tonalSaturationBoost);
+    final bgColor = settings.backgroundOverride ?? tonal.background;
+    final surfaceLowColor = settings.surfaceOverride ?? tonal.surfaceLow;
+    final surfaceHighColor = tonal.surfaceHigh;
+    final appBarColor = settings.appBarOverride ?? bgColor;
+
     final base = ThemeData(
       useMaterial3: true,
       brightness: brightness,
@@ -251,7 +267,7 @@ class AppTheme {
         secondary: settings.accentColor,
         brightness: brightness,
       ),
-      scaffoldBackgroundColor: isGlassy ? Colors.transparent : (isDark ? const Color(0xFF14171F) : AppColors.paper),
+      scaffoldBackgroundColor: isGlassy ? Colors.transparent : bgColor,
     );
 
     final radius = BorderRadius.circular(settings.cornerRadius);
@@ -270,11 +286,11 @@ class AppTheme {
       appBarTheme: AppBarTheme(
         centerTitle: false,
         elevation: 0,
-        backgroundColor: isGlassy ? Colors.transparent : (isDark ? const Color(0xFF14171F) : AppColors.paper),
+        backgroundColor: isGlassy ? Colors.transparent : appBarColor,
         foregroundColor: isGlassy ? onGlassColor : textColor,
         titleTextStyle: pair.headingStyle(fontSize: 20, fontWeight: FontWeight.w700, color: isGlassy ? onGlassColor : textColor),
       ),
-      cardTheme: _cardThemeFrom(settings, radius, isDark),
+      cardTheme: _cardThemeFrom(settings, radius, isDark, surfaceLowColor),
       filledButtonTheme: FilledButtonThemeData(style: _filledButtonStyleFrom(settings, pair, bodyFont, isDark)),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
@@ -286,7 +302,7 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isGlassy ? Colors.white.withValues(alpha: isDark ? 0.06 : 0.4) : (isDark ? const Color(0xFF1E2230) : AppColors.cardWhite),
+        fillColor: isGlassy ? Colors.white.withValues(alpha: isDark ? 0.06 : 0.4) : surfaceLowColor,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(settings.cornerRadius * 0.75),
           borderSide: BorderSide(color: isGlassy ? Colors.white.withValues(alpha: 0.4) : settings.primaryColor.withValues(alpha: 0.12)),
@@ -301,20 +317,20 @@ class AppTheme {
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: isGlassy ? Colors.transparent : (isDark ? const Color(0xFF1E2230) : AppColors.cardWhite),
+        backgroundColor: isGlassy ? Colors.transparent : surfaceLowColor,
         indicatorColor: settings.accentColor.withValues(alpha: 0.25),
         labelTextStyle: WidgetStateProperty.all(
           TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isGlassy ? onGlassColor : textColor, fontFamily: bodyFont.bodyLarge?.fontFamily),
         ),
       ),
       chipTheme: base.chipTheme.copyWith(
-        backgroundColor: isGlassy ? Colors.white.withValues(alpha: isDark ? 0.08 : 0.4) : (isDark ? const Color(0xFF1E2230) : AppColors.paper),
+        backgroundColor: isGlassy ? Colors.white.withValues(alpha: isDark ? 0.08 : 0.4) : surfaceLowColor,
         side: BorderSide(color: isGlassy ? Colors.white.withValues(alpha: 0.4) : settings.primaryColor.withValues(alpha: 0.1)),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: isGlassy
-            ? (isDark ? const Color(0xFF1E2230).withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.92))
-            : (isDark ? const Color(0xFF1E2230) : AppColors.cardWhite),
+            ? surfaceLowColor.withValues(alpha: isDark ? 0.9 : 0.92)
+            : surfaceLowColor,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(settings.cornerRadius)),
         titleTextStyle: pair.headingStyle(fontSize: 18, fontWeight: FontWeight.w700, color: textColor),
@@ -327,7 +343,7 @@ class AppTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(settings.cornerRadius * 0.85)),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: isDark ? const Color(0xFF2E3546) : settings.primaryColor,
+        backgroundColor: isDark ? surfaceHighColor : settings.primaryColor,
         contentTextStyle: bodyFont.bodyMedium?.copyWith(color: Colors.white),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(settings.cornerRadius * 0.6)),
         behavior: SnackBarBehavior.floating,

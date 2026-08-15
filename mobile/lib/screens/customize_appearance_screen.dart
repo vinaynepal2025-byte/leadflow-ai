@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/appearance_settings.dart';
+import '../theme/tonal_palette.dart';
 import '../theme/glass_settings.dart';
 import '../theme/locale_settings.dart';
 import '../widgets/color_picker_dialog.dart';
@@ -446,6 +447,71 @@ class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
                   ],
                 ),
 
+                // Theme Engine v2 -- this is the direct answer to
+                // "background poori screen pe apply hota hai, section-
+                // wise hona chahiye": Background, Surface (cards), and
+                // AppBar are now three independently overridable zones
+                // instead of one flat color flooding everything. Default
+                // (all three "Auto") derives them from Primary via the
+                // tonal engine, which is what actually fixes flat/cheap
+                // dark themes -- these overrides are for when someone
+                // wants to deliberately diverge from that.
+                _category(
+                  icon: Icons.layers_outlined,
+                  title: 'Surfaces (Advanced)',
+                  onReset: () async {
+                    await appearance.setBackgroundOverride(null);
+                    await appearance.setSurfaceOverride(null);
+                    await appearance.setAppBarOverride(null);
+                    await appearance.setTonalSaturationBoost(1.0);
+                  },
+                  children: [
+                    const Text(
+                      'By default these auto-derive from your Primary colour so every theme has its own tint instead of generic grey/white. Override any of the three below to take manual control of that zone.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 12),
+                    Builder(builder: (context) {
+                      final tonal = deriveTonalPalette(appearance.primaryColor, appearance.darkMode, saturationBoost: appearance.tonalSaturationBoost);
+                      return Column(
+                        children: [
+                          _surfaceOverrideTile(
+                            label: 'Background',
+                            autoColor: tonal.background,
+                            override: appearance.backgroundOverride,
+                            onPick: appearance.setBackgroundOverride,
+                          ),
+                          const SizedBox(height: 10),
+                          _surfaceOverrideTile(
+                            label: 'Surface (cards, nav bar)',
+                            autoColor: tonal.surfaceLow,
+                            override: appearance.surfaceOverride,
+                            onPick: appearance.setSurfaceOverride,
+                          ),
+                          const SizedBox(height: 10),
+                          _surfaceOverrideTile(
+                            label: 'App Bar',
+                            autoColor: tonal.background,
+                            override: appearance.appBarOverride,
+                            onPick: appearance.setAppBarOverride,
+                          ),
+                        ],
+                      );
+                    }),
+                    const SizedBox(height: 14),
+                    const Text('Tint strength', style: TextStyle(fontSize: 13)),
+                    const Text(
+                      'How strongly Background/Surface lean toward your Primary colour\'s hue, rather than reading as plain grey/white.',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                    Slider(
+                      value: appearance.tonalSaturationBoost, min: 0.0, max: 2.0, divisions: 20,
+                      label: '${(appearance.tonalSaturationBoost * 100).round()}%',
+                      onChanged: appearance.setTonalSaturationBoost,
+                    ),
+                  ],
+                ),
+
                 _category(
                   icon: Icons.text_fields_outlined,
                   title: 'Typography',
@@ -734,6 +800,52 @@ class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
             Container(width: 28, height: 28, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
             const SizedBox(width: 10),
             Text(label),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A row for one of the three Theme Engine v2 surface zones. Shows the
+  /// live-derived "Auto" color when no override is set (so the swatch is
+  /// always accurate, never a placeholder), and a small "Auto" pill to
+  /// clear back to it once a manual override has been chosen.
+  Widget _surfaceOverrideTile({
+    required String label,
+    required Color autoColor,
+    required Color? override,
+    required Future<void> Function(Color?) onPick,
+  }) {
+    final displayColor = override ?? autoColor;
+    return InkWell(
+      onTap: () => _pickColor(context, initial: displayColor, title: label, onPicked: onPick),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 28, height: 28,
+              decoration: BoxDecoration(
+                color: displayColor,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.grey.withValues(alpha: 0.4)),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Text(label)),
+            if (override != null)
+              TextButton(
+                onPressed: () => onPick(null),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact, minimumSize: const Size(0, 0)),
+                child: const Text('Auto', style: TextStyle(fontSize: 12)),
+              )
+            else
+              const Text('Auto', style: TextStyle(fontSize: 11, color: Colors.grey)),
           ],
         ),
       ),
