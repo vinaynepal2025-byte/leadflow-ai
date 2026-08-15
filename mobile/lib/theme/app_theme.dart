@@ -317,7 +317,12 @@ class AppTheme {
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: isGlassy ? Colors.transparent : surfaceLowColor,
+        // Genuinely distinct from cards now (surfaceHigh, not
+        // surfaceLow) -- fixes review feedback that nav/tabs read as
+        // generically identical to every other surface instead of their
+        // own layered zone, the way premium apps (Instagram, X) keep
+        // their bottom bar visually separated from card content.
+        backgroundColor: isGlassy ? Colors.transparent : surfaceHighColor,
         indicatorColor: settings.accentColor.withValues(alpha: 0.25),
         labelTextStyle: WidgetStateProperty.all(
           TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isGlassy ? onGlassColor : textColor, fontFamily: bodyFont.bodyLarge?.fontFamily),

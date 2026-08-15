@@ -37,7 +37,7 @@ class _AiThemeGeneratorCardState extends State<AiThemeGeneratorCard> {
       final theme = await _api.generateAiTheme(prompt);
       final appearance = context.read<AppearanceSettings>();
       final glass = context.read<GlassSettings>();
-      await appearance.applyGeneratedTheme(theme, glass.setEnabled);
+      await appearance.applyGeneratedTheme(theme, glass.setEnabled, glass.setBlur);
       if (mounted) {
         setState(() {
           final fontMatch = FontPairing.values.where((f) => f.name == theme['font']);

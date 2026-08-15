@@ -175,8 +175,16 @@ class ThemePreset {
   // single biggest lever for making 19 templates' *background feel*
   // (not just their accent color) genuinely distinct from each other.
   final double tonalSaturationBoost;
+  // Fix for a real gap found in review: Neo-Brutalist's tagline promises
+  // "bold borders" but nothing in the preset actually set border
+  // thickness -- applying it left whatever the global default was,
+  // meaning the template's own stated personality was unfulfilled
+  // unless the person separately, manually cranked Border Thickness
+  // themselves. Defaults to 1.0, the existing app-wide default, so
+  // templates that don't have a specific border opinion are unaffected.
+  final double borderThickness;
   const ThemePreset(this.name, this.tagline, this.primary, this.accent, this.font, this.radius, this.dark, this.styleMode,
-      {this.glow = false, this.glowColor, this.floating = false, this.texture = false, required this.category, this.gradientEnd, this.backdropBlur = 0.0, this.tonalSaturationBoost = 1.0});
+      {this.glow = false, this.glowColor, this.floating = false, this.texture = false, required this.category, this.gradientEnd, this.backdropBlur = 0.0, this.tonalSaturationBoost = 1.0, this.borderThickness = 1.0});
 }
 
 /// 19 fully distinct, ready-to-launch looks, matching the Customize
@@ -212,15 +220,15 @@ const List<ThemePreset> themePresets = [
   ThemePreset('Corporate Trust', 'Navy/slate, banking-grade seriousness', Color(0xFF1B2A4A), Color(0xFFE8A33D), FontPairing.spaceGroteskInter, 12, false, UIStyleMode.solid,
       category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.4),
   ThemePreset('Clinical Precision', 'Clean white/teal, high-legibility, zero clutter', Color(0xFF0D9488), Color(0xFF14B8A6), FontPairing.montserratOpenSans, 14, false, UIStyleMode.basic,
-      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.2),
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.2, borderThickness: 0.6),
   ThemePreset('Editorial Premium', 'Serif display + sans body, magazine feel', Color(0xFF334155), Color(0xFFBE185D), FontPairing.playfairLato, 4, false, UIStyleMode.corporate,
-      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.3),
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.3, borderThickness: 0.5),
   ThemePreset('Minimal Mono', 'Near-monochrome, single accent, brutalist-clean grid', Color(0xFF18181B), Color(0xFF71717A), FontPairing.spaceGroteskInter, 4, false, UIStyleMode.basic,
-      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.15),
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.15, borderThickness: 0.5),
   ThemePreset('Pure Transparent', 'Barely-there fill, thin outline, content-first', Color(0xFF334155), Color(0xFF64748B), FontPairing.spaceGroteskInter, 12, false, UIStyleMode.transparent,
-      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.25),
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.25, borderThickness: 0.5),
   ThemePreset('Executive Slate', 'Muted greys + single jewel accent, boardroom minimalism', Color(0xFF3F3F46), Color(0xFF7C3AED), FontPairing.playfairLato, 8, false, UIStyleMode.corporate,
-      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.3),
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.3, borderThickness: 0.75),
 
   // --- Soft & Playful ---
   ThemePreset('Soft UI 2.0', 'Accessible neumorphism, tactile press states', Color(0xFF6366F1), Color(0xFFA5B4FC), FontPairing.montserratOpenSans, 20, false, UIStyleMode.basic,
@@ -238,9 +246,9 @@ const List<ThemePreset> themePresets = [
   ThemePreset('Fintech Dark', 'Deep charcoal, emerald/gold, dashboard-density optimized', Color(0xFF10B981), Color(0xFFEAB308), FontPairing.spaceGroteskInter, 10, true, UIStyleMode.solid,
       category: TemplateCategory.boldDark, tonalSaturationBoost: 1.1),
   ThemePreset('Neo-Brutalist', 'Bold borders, flat blocks, high-contrast, confident type', Color(0xFF000000), Color(0xFFFFD400), FontPairing.spaceGroteskInter, 0, false, UIStyleMode.basic,
-      category: TemplateCategory.boldDark, tonalSaturationBoost: 0.0),
+      category: TemplateCategory.boldDark, tonalSaturationBoost: 0.0, borderThickness: 3.0),
   ThemePreset('Cyberpunk Neon', 'Electric night-drive, neon edges, gradient borders', Color(0xFF0A0A0F), Color(0xFF00E5FF), FontPairing.spaceGroteskInter, 10, true, UIStyleMode.solid,
-      glow: true, glowColor: Color(0xFF00E5FF), floating: true, category: TemplateCategory.boldDark, gradientEnd: Color(0xFFFF00E5), tonalSaturationBoost: 2.0),
+      glow: true, glowColor: Color(0xFF00E5FF), floating: true, category: TemplateCategory.boldDark, gradientEnd: Color(0xFFFF00E5), tonalSaturationBoost: 2.0, borderThickness: 1.5),
 ];
 
 /// Every visual control the end user can personalize, all in one place,
@@ -445,8 +453,8 @@ class AppearanceSettings extends ChangeNotifier {
       // Batch 2 additions, appended rather than interleaved so a preset
       // saved before this change still parses (see _decodePreset below).
       p.category.index.toString(), p.gradientEnd?.value.toString() ?? '', p.backdropBlur.toString(),
-      // Theme Engine v2 addition, same append-only approach.
-      p.tonalSaturationBoost.toString(),
+      // Theme Engine v2 additions, same append-only approach.
+      p.tonalSaturationBoost.toString(), p.borderThickness.toString(),
     ].join('~~');
   }
 
@@ -454,9 +462,9 @@ class AppearanceSettings extends ChangeNotifier {
     try {
       final parts = raw.split('~~');
       // Accept the original 12-field format, the Batch-2 15-field one,
-      // and the new 16-field one -- old saves shouldn't silently vanish
-      // just because the schema grew again.
-      if (parts.length != 12 && parts.length != 15 && parts.length != 16) return null;
+      // the 16-field one, and the new 17-field one -- old saves
+      // shouldn't silently vanish just because the schema grew again.
+      if (parts.length != 12 && parts.length != 15 && parts.length != 16 && parts.length != 17) return null;
       return ThemePreset(
         parts[0], parts[1],
         Color(int.parse(parts[2])), Color(int.parse(parts[3])),
@@ -470,7 +478,8 @@ class AppearanceSettings extends ChangeNotifier {
         category: parts.length >= 15 ? TemplateCategory.values[int.parse(parts[12])] : TemplateCategory.solidCorporate,
         gradientEnd: parts.length >= 15 && parts[13].isNotEmpty ? Color(int.parse(parts[13])) : null,
         backdropBlur: parts.length >= 15 ? double.parse(parts[14]) : 0.0,
-        tonalSaturationBoost: parts.length == 16 ? double.parse(parts[15]) : 1.0,
+        tonalSaturationBoost: parts.length >= 16 ? double.parse(parts[15]) : 1.0,
+        borderThickness: parts.length == 17 ? double.parse(parts[16]) : 1.0,
       );
     } catch (_) {
       return null;
@@ -491,12 +500,14 @@ class AppearanceSettings extends ChangeNotifier {
       glow: _glowEnabled, glowColor: _glowEnabled ? _glowColor : null, floating: _floatingEnabled, texture: _textureEnabled,
       // "Custom" doesn't fit a fixed category -- Solid & Corporate is the
       // neutral default (matches _decodePreset's fallback for the same
-      // reason), and current gradient/blur/tonal state carries over so a
-      // user's saved look round-trips exactly, not just its base colors.
+      // reason), and current gradient/blur/tonal/border state carries
+      // over so a user's saved look round-trips exactly, not just its
+      // base colors.
       category: TemplateCategory.solidCorporate,
       gradientEnd: _primaryGradientEnabled ? _primaryGradientEnd : null,
       backdropBlur: _backdropBlurIntensity,
       tonalSaturationBoost: _tonalSaturationBoost,
+      borderThickness: _borderThickness,
     );
     raw.removeWhere((r) => r.split('~~').first == name);
     raw.add(_encodePreset(preset));
@@ -986,7 +997,16 @@ class AppearanceSettings extends ChangeNotifier {
 
   /// Applies every value from a curated preset at once — the "quick pick"
   /// path, still fully overridable afterward via the individual controls.
-  Future<void> applyPreset(ThemePreset preset, GlassSetter setGlassEnabled) async {
+  // setGlassBlur is optional (nullable) so existing call sites don't
+  // break; when provided, this is the fix for a real bug found in
+  // review: backdropBlur was being stored on a preset and persisted,
+  // but nothing in the actual render tree (GlassContainer/GlassButton)
+  // ever read it -- they only read GlassSettings.blur, a separate,
+  // pre-existing field. A template claiming "backdropBlur: 0.8" rendered
+  // ZERO visible blur. This wires the preset's stated intent to the
+  // mechanism that actually paints pixels, instead of leaving it as a
+  // persisted number nothing consumes.
+  Future<void> applyPreset(ThemePreset preset, GlassSetter setGlassEnabled, [Future<void> Function(double)? setGlassBlur]) async {
     _primaryColor = preset.primary;
     _accentColor = preset.accent;
     _fontPairing = preset.font;
@@ -1005,6 +1025,7 @@ class AppearanceSettings extends ChangeNotifier {
     _primaryGradientEnd = preset.gradientEnd;
     _backdropBlurIntensity = preset.backdropBlur;
     _tonalSaturationBoost = preset.tonalSaturationBoost;
+    _borderThickness = preset.borderThickness;
     // Applying a curated template is a "start fresh" action -- any
     // manual background/surface/appbar override from a previous custom
     // tweak session would otherwise silently fight the new template's
@@ -1030,17 +1051,24 @@ class AppearanceSettings extends ChangeNotifier {
       else prefs.remove(_primaryGradientEndKey),
       prefs.setDouble(_backdropBlurIntensityKey, preset.backdropBlur),
       prefs.setDouble(_saturationBoostKey, preset.tonalSaturationBoost),
+      prefs.setDouble(_borderThicknessKey, preset.borderThickness),
       prefs.remove(_backgroundOverrideKey),
       prefs.remove(_surfaceOverrideKey),
       prefs.remove(_appBarOverrideKey),
     ]);
     setGlassEnabled(preset.styleMode == UIStyleMode.glass || preset.styleMode == UIStyleMode.liquid);
+    // The actual fix: map backdropBlur's 0.0-1.0 scale onto
+    // GlassSettings' real 4-30 pixel blur range (matching the existing
+    // "Blur Intensity" slider's own range) and apply it for real.
+    if (setGlassBlur != null && preset.backdropBlur > 0) {
+      await setGlassBlur(4.0 + preset.backdropBlur * 26.0);
+    }
   }
 
   /// Applies a theme generated by the AI Design Engine (backend
   /// POST /ai/generate-theme) -- same effect as applyPreset, but built
   /// from a runtime JSON map instead of a compile-time ThemePreset.
-  Future<void> applyGeneratedTheme(Map<String, dynamic> theme, GlassSetter setGlassEnabled) async {
+  Future<void> applyGeneratedTheme(Map<String, dynamic> theme, GlassSetter setGlassEnabled, [Future<void> Function(double)? setGlassBlur]) async {
     Color parseHex(String? hex, Color fallback) {
       if (hex == null) return fallback;
       try {
@@ -1106,6 +1134,9 @@ class AppearanceSettings extends ChangeNotifier {
       prefs.setDouble(_backdropBlurIntensityKey, _backdropBlurIntensity),
     ]);
     setGlassEnabled(_styleMode == UIStyleMode.glass || _styleMode == UIStyleMode.liquid);
+    if (setGlassBlur != null && _backdropBlurIntensity > 0) {
+      await setGlassBlur(4.0 + _backdropBlurIntensity * 26.0);
+    }
   }
 
   Future<void> resetToDefaults() async {

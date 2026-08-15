@@ -257,7 +257,7 @@ class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
                             final isCustom = i >= staticList.length;
                             final p = isCustom ? customList[i - staticList.length] : staticList[i];
                             return GestureDetector(
-                              onTap: () => appearance.applyPreset(p, glass.setEnabled),
+                              onTap: () => appearance.applyPreset(p, glass.setEnabled, glass.setBlur),
                               onLongPress: isCustom ? () => _confirmDeletePreset(appearance, p.name) : null,
                               child: Container(
                                 width: 108,
