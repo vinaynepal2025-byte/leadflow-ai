@@ -181,6 +181,127 @@ class FlyerRulerPainter extends CustomPainter {
       old.canvasHeight != canvasHeight;
 }
 
+/// Draws the shape kinds that don't fit a plain BoxDecoration (triangle,
+/// line, arrow, star). 'rect'/'circle' stay on BoxDecoration in
+/// _buildContent -- cheaper, and the only kinds cornerRadius means
+/// anything for.
+class FlyerShapePainter extends CustomPainter {
+  final String kind;
+  final Color fillColor;
+  final Color? fillColorEnd;
+  final Color? strokeColor;
+  final double strokeWidth;
+
+  const FlyerShapePainter({
+    required this.kind,
+    required this.fillColor,
+    this.fillColorEnd,
+    this.strokeColor,
+    this.strokeWidth = 0,
+  });
+
+  Path _pathFor(Size size) {
+    final w = size.width;
+    final h = size.height;
+    switch (kind) {
+      case 'line':
+        return Path()
+          ..moveTo(0, h / 2)
+          ..lineTo(w, h / 2);
+      case 'triangle':
+        return Path()
+          ..moveTo(w / 2, 0)
+          ..lineTo(w, h)
+          ..lineTo(0, h)
+          ..close();
+      case 'arrow':
+        final shaftH = h * 0.35;
+        final headW = w * 0.35;
+        return Path()
+          ..moveTo(0, h / 2 - shaftH / 2)
+          ..lineTo(w - headW, h / 2 - shaftH / 2)
+          ..lineTo(w - headW, 0)
+          ..lineTo(w, h / 2)
+          ..lineTo(w - headW, h)
+          ..lineTo(w - headW, h / 2 + shaftH / 2)
+          ..lineTo(0, h / 2 + shaftH / 2)
+          ..close();
+      case 'star':
+        return _starPath(w, h);
+      default:
+        return Path()..addRect(Rect.fromLTWH(0, 0, w, h));
+    }
+  }
+
+  Path _starPath(double w, double h) {
+    const points = 5;
+    final cx = w / 2;
+    final cy = h / 2;
+    final outerR = math.min(w, h) / 2;
+    final innerR = outerR * 0.42;
+    final path = Path();
+    for (var i = 0; i < points * 2; i++) {
+      final r = i.isEven ? outerR : innerR;
+      final angle = (math.pi / points) * i - math.pi / 2;
+      final x = cx + r * math.cos(angle);
+      final y = cy + r * math.sin(angle);
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    path.close();
+    return path;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = _pathFor(size);
+
+    if (kind != 'line') {
+      final fillPaint = Paint()..style = PaintingStyle.fill;
+      if (fillColorEnd != null) {
+        fillPaint.shader = LinearGradient(colors: [fillColor, fillColorEnd!])
+            .createShader(Offset.zero & size);
+      } else {
+        fillPaint.color = fillColor;
+      }
+      canvas.drawPath(path, fillPaint);
+    }
+
+    if (strokeColor != null && strokeWidth > 0) {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = strokeColor!
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strokeWidth
+          ..strokeCap = StrokeCap.round,
+      );
+    } else if (kind == 'line') {
+      // A line has no fill to fall back on, so it always needs a visible
+      // stroke -- use the shape colour itself when no explicit stroke was set.
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = fillColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strokeWidth > 0 ? strokeWidth : 6
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant FlyerShapePainter old) =>
+      old.kind != kind ||
+      old.fillColor != fillColor ||
+      old.fillColorEnd != fillColorEnd ||
+      old.strokeColor != strokeColor ||
+      old.strokeWidth != strokeWidth;
+}
+
 class FlyerCanvasElementWidget extends StatelessWidget {
   final FlyerElement element;
   final double scale;
@@ -672,6 +793,24 @@ class FlyerCanvasElementWidget extends StatelessWidget {
           ),
         );
       case FlyerElementType.shape:
+        if (const {'triangle', 'line', 'arrow', 'star'}.contains(element.shapeKind)) {
+          return Opacity(
+            opacity: element.opacity,
+            child: CustomPaint(
+              size: Size(w, h),
+              painter: FlyerShapePainter(
+                kind: element.shapeKind,
+                fillColor: flyerHexToColor(element.shapeColor),
+                fillColorEnd: element.shapeGradientEnd != null
+                    ? flyerHexToColor(element.shapeGradientEnd!)
+                    : null,
+                strokeColor:
+                    element.strokeColor != null ? flyerHexToColor(element.strokeColor!) : null,
+                strokeWidth: element.strokeWidth * scale,
+              ),
+            ),
+          );
+        }
         return Opacity(
           opacity: element.opacity,
           child: Container(

@@ -2134,13 +2134,26 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               }
             },
           ),
-          TextButton(
-            onPressed: () {
-              setState(
-                  () => el.shapeKind = el.shapeKind == 'circle' ? 'rect' : 'circle');
+          PopupMenuButton<String>(
+            tooltip: 'Shape kind',
+            initialValue: el.shapeKind,
+            onSelected: (kind) {
+              setState(() => el.shapeKind = kind);
               _markDirty();
             },
-            child: Text(el.shapeKind == 'circle' ? 'Circle' : 'Rectangle'),
+            itemBuilder: (ctx) => kFlyerShapeKindLabels.entries
+                .map((e) => PopupMenuItem(value: e.key, child: Text(e.value)))
+                .toList(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(kFlyerShapeKindLabels[el.shapeKind] ?? 'Rectangle'),
+                  const Icon(Icons.arrow_drop_down, size: 18),
+                ],
+              ),
+            ),
           ),
           IconButton(
             icon: Icon(Icons.gradient,
@@ -2218,7 +2231,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           _markDirty();
         },
       ),
-      if (el.shapeKind != 'circle')
+      if (el.shapeKind == 'rect')
         _sliderRow(
           icon: Icons.rounded_corner,
           value: el.cornerRadius.clamp(0, 200),

@@ -53,6 +53,19 @@ const List<String> kFlyerFontFamilies = [
   'OpenSans',
 ];
 
+/// Shape kinds available on the Shape tool. 'rect' and 'circle' render via
+/// a plain BoxDecoration (cheap, and cornerRadius applies); everything
+/// else is a hand-drawn Path in FlyerShapePainter, where cornerRadius has
+/// no meaning.
+const Map<String, String> kFlyerShapeKindLabels = {
+  'rect': 'Rectangle',
+  'circle': 'Circle',
+  'triangle': 'Triangle',
+  'line': 'Line',
+  'arrow': 'Arrow',
+  'star': 'Star',
+};
+
 /// Canvas size presets. A flyer that's going to Instagram Stories has very
 /// different proportions from one going to WhatsApp or a printed A4 poster,
 /// and getting that wrong means the design is cropped or letterboxed at the
