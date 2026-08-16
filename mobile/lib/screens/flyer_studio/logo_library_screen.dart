@@ -12,6 +12,11 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/api_service.dart';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import '../../widgets/share_targets_sheet.dart';
 import 'generate_logo_screen.dart';
 
 class LogoLibraryScreen extends StatefulWidget {
@@ -113,6 +118,26 @@ class _LogoLibraryScreenState extends State<LogoLibraryScreen> {
       _showSnack('Upload failed: $e');
     } finally {
       if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _shareLogo(Map<String, dynamic> logo) async {
+    final url = logo['image_url']?.toString();
+    if (url == null) {
+      _showSnack('This logo has no downloadable image yet');
+      return;
+    }
+    try {
+      final res = await http.get(Uri.parse(url));
+      if (res.statusCode != 200) throw Exception('Download failed (${res.statusCode})');
+      final dir = await getTemporaryDirectory();
+      final label = (logo['label']?.toString() ?? 'logo').replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_');
+      final tempPath = '${dir.path}/${label}_${DateTime.now().millisecondsSinceEpoch}.png';
+      await File(tempPath).writeAsBytes(res.bodyBytes);
+      if (!mounted) return;
+      await showShareTargetsSheet(context, files: [XFile(tempPath)]);
+    } catch (e) {
+      _showSnack('Share failed: $e');
     }
   }
 
@@ -311,11 +336,13 @@ class _LogoLibraryScreenState extends State<LogoLibraryScreen> {
                       if (action == 'default') _setDefault(id);
                       if (action == 'rename') _rename(id, label);
                       if (action == 'delete') _delete(id, isDefault);
+                    if (action == 'share') _shareLogo(logo);
                     },
                     itemBuilder: (ctx) => [
                       if (!isDefault)
                         const PopupMenuItem(value: 'default', child: Text('Set as Default')),
                       const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                      const PopupMenuItem(value: 'share', child: Text('Share')),
                       const PopupMenuItem(value: 'delete', child: Text('Delete')),
                     ],
                   ),
