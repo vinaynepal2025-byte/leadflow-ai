@@ -315,6 +315,32 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     _markDirty();
   }
 
+  /// Scales the whole group together from its top-left corner, the same
+  /// proportional-rescale math _changeCanvasSize already uses for the
+  /// whole canvas, just anchored on the group's own bounds instead of the
+  /// page. Bounds are recomputed fresh each tick so the scale factor is
+  /// always relative to the group's current (not original) size, matching
+  /// how a single element's own resize handle accumulates incrementally.
+  void _groupResize(Offset rawDelta) {
+    final bounds = _groupBoundsRect();
+    if (bounds == null || bounds.width <= 0 || bounds.height <= 0) return;
+    final newWidth = (bounds.width + rawDelta.dx).clamp(40.0, 8000.0);
+    final newHeight = (bounds.height + rawDelta.dy).clamp(40.0, 8000.0);
+    final scaleX = newWidth / bounds.width;
+    final scaleY = newHeight / bounds.height;
+    setState(() {
+      for (final el in _elements) {
+        if (!_groupSelectedIds.contains(el.id) || el.locked) continue;
+        el.x = bounds.left + (el.x - bounds.left) * scaleX;
+        el.y = bounds.top + (el.y - bounds.top) * scaleY;
+        el.width *= scaleX;
+        el.height *= scaleY;
+        if (el.type == FlyerElementType.text) el.fontSize *= scaleX;
+      }
+    });
+    _markDirty();
+  }
+
   /// Spins the whole group as one rigid body around its own bounding-box
   /// centre: every element's own rotation advances by the same delta, and
   /// each element's position revolves around the shared pivot so the
@@ -1538,6 +1564,30 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                       boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)],
                     ),
                     child: const Icon(Icons.rotate_right, size: 14, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: GestureDetector(
+                onPanStart: (_) => _pushUndo(),
+                onPanUpdate: (details) => _groupResize(details.delta / scale),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: context.watch<AppearanceSettings>().primaryColor,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)],
+                    ),
+                    child: const Icon(Icons.open_in_full, size: 14, color: Colors.white),
                   ),
                 ),
               ),
