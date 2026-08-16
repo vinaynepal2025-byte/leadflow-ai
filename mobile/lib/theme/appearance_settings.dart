@@ -183,8 +183,12 @@ class ThemePreset {
   // themselves. Defaults to 1.0, the existing app-wide default, so
   // templates that don't have a specific border opinion are unaffected.
   final double borderThickness;
+  // Theme Engine v3 -- whether this template turns on the ambient
+  // Aurora glow backdrop by default when applied. Only meaningful for
+  // Glass/Liquid style-mode presets; left false elsewhere.
+  final bool aurora;
   const ThemePreset(this.name, this.tagline, this.primary, this.accent, this.font, this.radius, this.dark, this.styleMode,
-      {this.glow = false, this.glowColor, this.floating = false, this.texture = false, required this.category, this.gradientEnd, this.backdropBlur = 0.0, this.tonalSaturationBoost = 1.0, this.borderThickness = 1.0});
+      {this.glow = false, this.glowColor, this.floating = false, this.texture = false, required this.category, this.gradientEnd, this.backdropBlur = 0.0, this.tonalSaturationBoost = 1.0, this.borderThickness = 1.0, this.aurora = false});
 }
 
 /// 19 fully distinct, ready-to-launch looks, matching the Customize
@@ -206,15 +210,15 @@ const List<ThemePreset> themePresets = [
   // "banking-grade" template stays near-neutral; a "holographic" one
   // leans hard into visible tint), not picked arbitrarily.
   ThemePreset('iOS Liquid Glass', 'Apple-style frosted, specular highlight', Color(0xFF0A84FF), Color(0xFF64D2FF), FontPairing.spaceGroteskInter, 28, false, UIStyleMode.liquid,
-      category: TemplateCategory.glass, gradientEnd: Color(0xFF64D2FF), backdropBlur: 0.8, tonalSaturationBoost: 1.0),
+      category: TemplateCategory.glass, gradientEnd: Color(0xFF64D2FF), backdropBlur: 0.8, tonalSaturationBoost: 1.0, aurora: true),
   ThemePreset('Midnight Glass Pro', 'Dark glassmorphism, neon accent glow', Color(0xFF0F172A), Color(0xFF38BDF8), FontPairing.poppinsRoboto, 20, true, UIStyleMode.glass,
-      glow: true, glowColor: Color(0xFF38BDF8), category: TemplateCategory.glass, backdropBlur: 0.7, tonalSaturationBoost: 1.3),
+      glow: true, glowColor: Color(0xFF38BDF8), category: TemplateCategory.glass, backdropBlur: 0.7, tonalSaturationBoost: 1.3, aurora: true),
   ThemePreset('Liquid Sky', 'Gradient-mesh, glossy, weightless', Color(0xFF1D4ED8), Color(0xFF7DD3FC), FontPairing.spaceGroteskInter, 26, false, UIStyleMode.liquid,
-      category: TemplateCategory.glass, gradientEnd: Color(0xFF7DD3FC), backdropBlur: 0.5, tonalSaturationBoost: 1.3),
+      category: TemplateCategory.glass, gradientEnd: Color(0xFF7DD3FC), backdropBlur: 0.5, tonalSaturationBoost: 1.3, aurora: true),
   ThemePreset('Holographic Lens', 'Iridescent gradient glass, light-refraction shimmer', Color(0xFF6D28D9), Color(0xFFEC4899), FontPairing.montserratOpenSans, 24, true, UIStyleMode.glass,
-      glow: true, glowColor: Color(0xFFEC4899), floating: true, category: TemplateCategory.glass, gradientEnd: Color(0xFF06B6D4), backdropBlur: 0.6, tonalSaturationBoost: 1.8),
+      glow: true, glowColor: Color(0xFFEC4899), floating: true, category: TemplateCategory.glass, gradientEnd: Color(0xFF06B6D4), backdropBlur: 0.6, tonalSaturationBoost: 1.8, aurora: true),
   ThemePreset('Frosted Acrylic', 'Fluent-style acrylic blur + depth layering', Color(0xFF2564CF), Color(0xFF60CDFF), FontPairing.poppinsRoboto, 8, false, UIStyleMode.glass,
-      category: TemplateCategory.glass, backdropBlur: 0.9, tonalSaturationBoost: 1.1),
+      category: TemplateCategory.glass, backdropBlur: 0.9, tonalSaturationBoost: 1.1, aurora: true),
 
   // --- Solid & Corporate ---
   ThemePreset('Corporate Trust', 'Navy/slate, banking-grade seriousness', Color(0xFF1B2A4A), Color(0xFFE8A33D), FontPairing.spaceGroteskInter, 12, false, UIStyleMode.solid,
@@ -248,7 +252,7 @@ const List<ThemePreset> themePresets = [
   ThemePreset('Neo-Brutalist', 'Bold borders, flat blocks, high-contrast, confident type', Color(0xFF000000), Color(0xFFFFD400), FontPairing.spaceGroteskInter, 0, false, UIStyleMode.basic,
       category: TemplateCategory.boldDark, tonalSaturationBoost: 0.0, borderThickness: 3.0),
   ThemePreset('Cyberpunk Neon', 'Electric night-drive, neon edges, gradient borders', Color(0xFF0A0A0F), Color(0xFF00E5FF), FontPairing.spaceGroteskInter, 10, true, UIStyleMode.solid,
-      glow: true, glowColor: Color(0xFF00E5FF), floating: true, category: TemplateCategory.boldDark, gradientEnd: Color(0xFFFF00E5), tonalSaturationBoost: 2.0, borderThickness: 1.5),
+      glow: true, glowColor: Color(0xFF00E5FF), floating: true, category: TemplateCategory.boldDark, gradientEnd: Color(0xFFFF00E5), tonalSaturationBoost: 2.0, borderThickness: 1.5, aurora: true),
 ];
 
 /// Every visual control the end user can personalize, all in one place,
@@ -492,7 +496,7 @@ class AppearanceSettings extends ChangeNotifier {
       // saved before this change still parses (see _decodePreset below).
       p.category.index.toString(), p.gradientEnd?.value.toString() ?? '', p.backdropBlur.toString(),
       // Theme Engine v2 additions, same append-only approach.
-      p.tonalSaturationBoost.toString(), p.borderThickness.toString(),
+      p.tonalSaturationBoost.toString(), p.borderThickness.toString(), p.aurora.toString(),
     ].join('~~');
   }
 
@@ -502,7 +506,7 @@ class AppearanceSettings extends ChangeNotifier {
       // Accept the original 12-field format, the Batch-2 15-field one,
       // the 16-field one, and the new 17-field one -- old saves
       // shouldn't silently vanish just because the schema grew again.
-      if (parts.length != 12 && parts.length != 15 && parts.length != 16 && parts.length != 17) return null;
+      if (parts.length != 12 && parts.length != 15 && parts.length != 16 && parts.length != 17 && parts.length != 18) return null;
       return ThemePreset(
         parts[0], parts[1],
         Color(int.parse(parts[2])), Color(int.parse(parts[3])),
@@ -517,7 +521,8 @@ class AppearanceSettings extends ChangeNotifier {
         gradientEnd: parts.length >= 15 && parts[13].isNotEmpty ? Color(int.parse(parts[13])) : null,
         backdropBlur: parts.length >= 15 ? double.parse(parts[14]) : 0.0,
         tonalSaturationBoost: parts.length >= 16 ? double.parse(parts[15]) : 1.0,
-        borderThickness: parts.length == 17 ? double.parse(parts[16]) : 1.0,
+        borderThickness: parts.length >= 17 ? double.parse(parts[16]) : 1.0,
+        aurora: parts.length == 18 ? parts[17] == 'true' : false,
       );
     } catch (_) {
       return null;
@@ -1126,6 +1131,8 @@ class AppearanceSettings extends ChangeNotifier {
     _backdropBlurIntensity = preset.backdropBlur;
     _tonalSaturationBoost = preset.tonalSaturationBoost;
     _borderThickness = preset.borderThickness;
+    _auroraBackdropEnabled = preset.aurora;
+    _auroraIntensity = 0.85;
     // Applying a curated template is a "start fresh" action -- any
     // manual background/surface/appbar override from a previous custom
     // tweak session would otherwise silently fight the new template's
@@ -1152,6 +1159,8 @@ class AppearanceSettings extends ChangeNotifier {
       prefs.setDouble(_backdropBlurIntensityKey, preset.backdropBlur),
       prefs.setDouble(_saturationBoostKey, preset.tonalSaturationBoost),
       prefs.setDouble(_borderThicknessKey, preset.borderThickness),
+      prefs.setBool(_auroraEnabledKey, preset.aurora),
+      prefs.setDouble(_auroraIntensityKey, 0.85),
       prefs.remove(_backgroundOverrideKey),
       prefs.remove(_surfaceOverrideKey),
       prefs.remove(_appBarOverrideKey),
