@@ -20,13 +20,18 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/api_service.dart';
+import '../../theme/appearance_settings.dart';
+import '../../theme/glass_settings.dart';
 import '../../widgets/color_picker_dialog.dart';
+import '../../widgets/glass_widgets.dart';
 import 'flyer_element.dart';
 import 'flyer_canvas_element_widget.dart';
 
@@ -228,7 +233,12 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   // Element operations
   // ------------------------------------------------------------------
 
-  void _selectElement(String? id) => setState(() => _selectedId = id);
+  void _selectElement(String? id) {
+    if (id != _selectedId && context.read<AppearanceSettings>().haptics) {
+      HapticFeedback.selectionClick();
+    }
+    setState(() => _selectedId = id);
+  }
 
   void _onElementChanged(FlyerElement el) {
     setState(() {});
@@ -487,6 +497,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   }
 
   Future<void> _changeCanvasSize() async {
+    final primaryColor = context.read<AppearanceSettings>().primaryColor;
     final preset = await showModalBottomSheet<FlyerCanvasPreset>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -503,7 +514,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               return ListTile(
                 leading: Icon(
                   isCurrent ? Icons.check_circle : Icons.crop_original,
-                  color: isCurrent ? const Color(0xFF4C6FFF) : null,
+                  color: isCurrent ? primaryColor : null,
                 ),
                 title: Text(p.name),
                 subtitle: Text('${p.note}  ·  ${p.width.toInt()}×${p.height.toInt()}'),
@@ -947,7 +958,14 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 : Column(
                     children: [
                       Expanded(child: _buildCanvasArea()),
-                      if (selected != null) _buildStylePanel(selected),
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOut,
+                        alignment: Alignment.bottomCenter,
+                        child: selected != null
+                            ? _buildStylePanel(selected)
+                            : const SizedBox(width: double.infinity, height: 0),
+                      ),
                       _buildToolbar(),
                     ],
                   ),
@@ -956,6 +974,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   }
 
   Widget _buildCanvasArea() {
+    final appearance = context.watch<AppearanceSettings>();
     return LayoutBuilder(
       builder: (context, constraints) {
         final availableW = constraints.maxWidth - 24;
@@ -976,14 +995,34 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               key: _canvasRepaintKey,
               child: GestureDetector(
                 onTap: () => _selectElement(null),
-                child: Container(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
                   width: displayW,
                   height: displayH,
                   decoration: BoxDecoration(
                     color: flyerHexToColor(_backgroundColor),
                     boxShadow: _exporting
                         ? null
-                        : const [BoxShadow(color: Colors.black26, blurRadius: 8)],
+                        : [
+                            BoxShadow(
+                              color: appearance.glowEnabled
+                                  ? appearance.glowColor
+                                      .withValues(alpha: 0.4 * appearance.glowIntensity)
+                                  : Colors.black.withValues(alpha: 0.18),
+                              blurRadius: appearance.glowEnabled
+                                  ? 22 + 22 * appearance.glowIntensity
+                                  : 10,
+                              spreadRadius: appearance.glowEnabled ? 1 : 0,
+                            ),
+                            if (appearance.glowEnabled)
+                              BoxShadow(
+                                color: appearance.glowColor
+                                    .withValues(alpha: 0.2 * appearance.glowIntensity),
+                                blurRadius: 44 + 30 * appearance.glowIntensity,
+                                spreadRadius: 2,
+                              ),
+                          ],
                   ),
                   child: ClipRect(
                     child: Stack(
@@ -1005,6 +1044,9 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               exporting: _exporting,
                               canvasWidth: _canvasWidth,
                               canvasHeight: _canvasHeight,
+                              siblings: _exporting
+                                  ? const []
+                                  : _elements.where((e) => e.id != el.id).toList(),
                               onTap: () => _selectElement(el.id),
                               onDoubleTap: () {
                                 if (el.type == FlyerElementType.text) {
@@ -1028,6 +1070,11 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               },
                               onSnapGuides: (guides) {
                                 if (guides.length != _snapGuides.length) {
+                                  if (guides.isNotEmpty &&
+                                      _snapGuides.isEmpty &&
+                                      context.read<AppearanceSettings>().haptics) {
+                                    HapticFeedback.selectionClick();
+                                  }
                                   setState(() => _snapGuides = guides);
                                 }
                               },
@@ -1054,106 +1101,190 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   }
 
   Widget _buildToolbar() {
+    final appearance = context.watch<AppearanceSettings>();
+    final glass = context.watch<GlassSettings>();
     final hasSelection = _selectedId != null;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+    final radius = BorderRadius.only(
+      topLeft: Radius.circular(appearance.cornerRadius.clamp(0, 24)),
+      topRight: Radius.circular(appearance.cornerRadius.clamp(0, 24)),
+    );
+    final glowShadow = navBarGlowShadow(appearance);
+
+    Widget bar = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
       decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.grey.shade300)),
-      ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            _toolbarButton(Icons.text_fields, 'Text', _addTextElement),
-            _toolbarButton(Icons.add_photo_alternate, 'Photo', _addImageElement),
-            _toolbarButton(Icons.workspace_premium, 'Logo', _addLogoElement),
-            _toolbarButton(Icons.rectangle, 'Shape', _addShapeElement),
-            _toolbarButton(Icons.wallpaper, 'Background', _showBackgroundSheet),
-            _toolbarButton(Icons.layers, 'Layers', _showLayersSheet),
-            _toolbarButton(
-                Icons.copy, 'Duplicate', hasSelection ? _duplicateSelected : null),
-            _toolbarButton(
-                Icons.delete_outline, 'Delete', hasSelection ? _deleteSelected : null),
-          ],
+        color: glass.enabled
+            ? Colors.white.withValues(alpha: appearance.darkMode ? 0.06 : 0.55)
+            : Theme.of(context).navigationBarTheme.backgroundColor ??
+                Theme.of(context).colorScheme.surface,
+        borderRadius: radius,
+        border: Border(
+          top: BorderSide(color: appearance.primaryColor.withValues(alpha: 0.1)),
         ),
+        boxShadow: [
+          glowShadow ??
+              const BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -2)),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _toolbarButton(Icons.text_fields, 'Text', _addTextElement, appearance),
+              _toolbarButton(
+                  Icons.add_photo_alternate, 'Photo', _addImageElement, appearance),
+              _toolbarButton(Icons.workspace_premium, 'Logo', _addLogoElement, appearance),
+              _toolbarButton(Icons.rectangle, 'Shape', _addShapeElement, appearance),
+              _toolbarButton(
+                  Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
+              _toolbarButton(Icons.layers, 'Layers', _showLayersSheet, appearance),
+              _toolbarButton(Icons.copy, 'Duplicate',
+                  hasSelection ? _duplicateSelected : null, appearance),
+              _toolbarButton(Icons.delete_outline, 'Delete',
+                  hasSelection ? _deleteSelected : null, appearance),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (!glass.enabled) return bar;
+    return ClipRRect(
+      borderRadius: radius,
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: glass.blur * 0.5, sigmaY: glass.blur * 0.5),
+        child: bar,
       ),
     );
   }
 
-  Widget _toolbarButton(IconData icon, String label, VoidCallback? onTap) {
+  Widget _toolbarButton(
+      IconData icon, String label, VoidCallback? onTap, AppearanceSettings appearance) {
     final disabled = onTap == null;
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        width: 72,
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 22, color: disabled ? Colors.grey.shade400 : null),
-            const SizedBox(height: 2),
-            Text(label,
-                style: TextStyle(
-                    fontSize: 10, color: disabled ? Colors.grey.shade400 : null)),
-          ],
+    final color = disabled ? Colors.grey.shade400 : appearance.primaryColor;
+    return TouchFeedbackWrapper(
+      appearance: appearance,
+      radius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap == null
+            ? null
+            : () {
+                if (appearance.haptics) HapticFeedback.selectionClick();
+                onTap();
+              },
+        child: Container(
+          width: 72,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 22, color: color),
+              const SizedBox(height: 2),
+              Text(label,
+                  style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildStylePanel(FlyerElement el) {
+    final appearance = context.watch<AppearanceSettings>();
     return Container(
-      constraints: const BoxConstraints(maxHeight: 190),
-      decoration:
-          BoxDecoration(border: Border(top: BorderSide(color: Colors.grey.shade200))),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildNudgeRow(el),
-            if (el.type == FlyerElementType.text) ..._textControls(el),
-            if (el.type == FlyerElementType.image || el.type == FlyerElementType.logo)
-              ..._imageControls(el),
-            if (el.type == FlyerElementType.shape) ..._shapeControls(el),
-          ],
+      constraints: const BoxConstraints(maxHeight: 200),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: appearance.primaryColor.withValues(alpha: 0.12)),
         ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 6),
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: appearance.primaryColor.withValues(alpha: 0.25),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          Expanded(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 160),
+              child: SingleChildScrollView(
+                key: ValueKey('${el.id}-${el.type}'),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildNudgeRow(el),
+                    if (el.type == FlyerElementType.text) ..._textControls(el),
+                    if (el.type == FlyerElementType.image ||
+                        el.type == FlyerElementType.logo)
+                      ..._imageControls(el),
+                    if (el.type == FlyerElementType.shape) ..._shapeControls(el),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildNudgeRow(FlyerElement el) {
     final step = _canvasWidth * 0.01;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Text('Nudge', style: TextStyle(fontSize: 11, color: Colors.grey)),
-        IconButton(
-            icon: const Icon(Icons.keyboard_arrow_left, size: 20),
-            onPressed: () => _nudge(-step, 0)),
-        IconButton(
-            icon: const Icon(Icons.keyboard_arrow_up, size: 20),
-            onPressed: () => _nudge(0, -step)),
-        IconButton(
-            icon: const Icon(Icons.keyboard_arrow_down, size: 20),
-            onPressed: () => _nudge(0, step)),
-        IconButton(
-            icon: const Icon(Icons.keyboard_arrow_right, size: 20),
-            onPressed: () => _nudge(step, 0)),
-        const SizedBox(width: 8),
-        IconButton(
-          icon: const Icon(Icons.center_focus_strong, size: 20),
-          tooltip: 'Centre horizontally',
-          onPressed: () {
-            setState(() => el.x = _canvasWidth / 2 - el.width / 2);
-            _markDirty();
-          },
-        ),
-      ],
+    final appearance = context.watch<AppearanceSettings>();
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text('Nudge', style: TextStyle(fontSize: 11, color: Colors.grey)),
+          IconButton(
+              icon: const Icon(Icons.keyboard_arrow_left, size: 20),
+              onPressed: () => _nudge(-step, 0)),
+          IconButton(
+              icon: const Icon(Icons.keyboard_arrow_up, size: 20),
+              onPressed: () => _nudge(0, -step)),
+          IconButton(
+              icon: const Icon(Icons.keyboard_arrow_down, size: 20),
+              onPressed: () => _nudge(0, step)),
+          IconButton(
+              icon: const Icon(Icons.keyboard_arrow_right, size: 20),
+              onPressed: () => _nudge(step, 0)),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.center_focus_strong, size: 20),
+            tooltip: 'Centre horizontally',
+            onPressed: () {
+              setState(() => el.x = _canvasWidth / 2 - el.width / 2);
+              _markDirty();
+            },
+          ),
+          IconButton(
+            icon: Icon(el.aspectLocked ? Icons.link : Icons.link_off,
+                size: 20, color: el.aspectLocked ? appearance.primaryColor : null),
+            tooltip: el.aspectLocked ? 'Aspect ratio locked' : 'Lock aspect ratio',
+            onPressed: () {
+              setState(() => el.aspectLocked = !el.aspectLocked);
+              _markDirty();
+            },
+          ),
+        ],
+      ),
     );
   }
 
   List<Widget> _textControls(FlyerElement el) {
+    final activeColor = context.watch<AppearanceSettings>().primaryColor;
     return [
       Row(
         children: [
@@ -1185,7 +1316,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         children: [
           IconButton(
             icon: Icon(Icons.format_bold,
-                color: el.fontWeight == 'bold' ? const Color(0xFF4C6FFF) : null),
+                color: el.fontWeight == 'bold' ? activeColor : null),
             onPressed: () {
               setState(() =>
                   el.fontWeight = el.fontWeight == 'bold' ? 'normal' : 'bold');
@@ -1193,16 +1324,14 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             },
           ),
           IconButton(
-            icon: Icon(Icons.format_italic,
-                color: el.italic ? const Color(0xFF4C6FFF) : null),
+            icon: Icon(Icons.format_italic, color: el.italic ? activeColor : null),
             onPressed: () {
               setState(() => el.italic = !el.italic);
               _markDirty();
             },
           ),
           IconButton(
-            icon: Icon(Icons.format_underlined,
-                color: el.underline ? const Color(0xFF4C6FFF) : null),
+            icon: Icon(Icons.format_underlined, color: el.underline ? activeColor : null),
             onPressed: () {
               setState(() => el.underline = !el.underline);
               _markDirty();
@@ -1216,7 +1345,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                     : a == 'center'
                         ? Icons.format_align_center
                         : Icons.format_align_right,
-                color: el.textAlign == a ? const Color(0xFF4C6FFF) : null,
+                color: el.textAlign == a ? activeColor : null,
               ),
               onPressed: () {
                 setState(() => el.textAlign = a);

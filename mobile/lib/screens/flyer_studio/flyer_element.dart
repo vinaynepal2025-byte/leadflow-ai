@@ -117,6 +117,7 @@ class FlyerElement {
   int zIndex;
   bool locked;
   double opacity;
+  bool aspectLocked;
 
   // Text-specific
   String? text;
@@ -151,6 +152,7 @@ class FlyerElement {
     this.zIndex = 0,
     this.locked = false,
     this.opacity = 1.0,
+    this.aspectLocked = false,
     this.text,
     this.fontSize = 24,
     this.fontFamily = 'Roboto',
@@ -182,6 +184,7 @@ class FlyerElement {
       zIndex: (json['zIndex'] as num?)?.toInt() ?? 0,
       locked: json['locked'] == true,
       opacity: (json['opacity'] as num?)?.toDouble() ?? 1.0,
+      aspectLocked: json['aspectLocked'] == true,
       text: json['text']?.toString(),
       fontSize: (json['fontSize'] as num?)?.toDouble() ?? 24,
       fontFamily: json['fontFamily']?.toString() ?? 'Roboto',
@@ -213,6 +216,7 @@ class FlyerElement {
       'zIndex': zIndex,
       'locked': locked,
       'opacity': opacity,
+      'aspectLocked': aspectLocked,
     };
     if (type == FlyerElementType.text) {
       map['text'] = text ?? '';
