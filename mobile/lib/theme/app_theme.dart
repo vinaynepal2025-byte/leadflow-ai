@@ -283,6 +283,7 @@ class AppTheme {
         titleLarge: displayFont.titleLarge?.copyWith(fontWeight: FontWeight.w600, color: textColor),
         titleMedium: displayFont.titleMedium?.copyWith(fontWeight: FontWeight.w600, color: textColor),
       ),
+      iconTheme: IconThemeData(color: textColor.withValues(alpha: 0.82)),
       appBarTheme: AppBarTheme(
         centerTitle: false,
         elevation: 0,

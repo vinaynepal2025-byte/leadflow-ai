@@ -758,6 +758,7 @@ class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
                 icon: Icons.auto_awesome,
                 title: 'Backdrop & Branding',
                 onReset: () => appearance.resetBranding(),
+                initiallyExpanded: true,
                 children: [
                     _sectionTitle('Ambient Glow (Glass/Liquid modes)'),
                     const SizedBox(height: 8),
