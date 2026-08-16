@@ -202,7 +202,16 @@ ${messageText.slice(0, 2000)}
 \`\`\``;
 
   try {
-    const emojis = await generateJson(prompt, { maxTokens: 150 });
+    let emojis;
+    try {
+      emojis = await generateJson(prompt, { maxTokens: 500 });
+    } catch (firstErr) {
+      // One retry for transient upstream issues (provider overload,
+      // truncated response) -- these are usually momentary, and a
+      // single retry costs little compared to surfacing an error for
+      // something that would have worked a few seconds later.
+      emojis = await generateJson(prompt, { maxTokens: 500 });
+    }
     if (!Array.isArray(emojis)) throw new Error('AI response was not a JSON array');
     res.json({ emojis: emojis.slice(0, 6) });
   } catch (err) {
