@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -343,10 +344,48 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
   /// grid fits the same modules in roughly a third of the height and makes
   /// them scannable by icon and colour rather than by reading each label.
   /// Still honours the user's per-section colour and shape overrides.
+  BoxDecoration _tileDecoration(String styleVariant, Color color, Color? gradientEnd, BorderRadius radius) {
+    switch (styleVariant) {
+      case 'gradient_badge':
+        return BoxDecoration(
+          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [color, gradientEnd ?? color.withValues(alpha: 0.6)]),
+          borderRadius: radius,
+          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4))],
+        );
+      case 'glow':
+        return BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: radius,
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.45), blurRadius: 14, spreadRadius: 1)],
+        );
+      case 'glass':
+        return BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.18),
+          borderRadius: radius,
+          border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+        );
+      default:
+        return BoxDecoration(
+          color: color.withValues(alpha: 0.07),
+          borderRadius: radius,
+          border: Border.all(color: color.withValues(alpha: 0.28)),
+        );
+    }
+  }
+
   Widget _navTile(String sectionKey, Color defaultColor, VoidCallback onTap) {
     final color = _colorFor(sectionKey, defaultColor);
     final shape = _shapeFor(sectionKey);
     final size = _sizeFor(sectionKey);
+    final styleVariant = _configFor(sectionKey)?['style_variant'] as String? ?? 'flat';
+    final gradHex = _configFor(sectionKey)?['gradient_override'] as String?;
+    Color? gradientEnd;
+    if (gradHex != null) {
+      var gh = gradHex.replaceAll('#', '');
+      if (gh.length == 6) gh = 'FF' + gh;
+      gradientEnd = Color(int.parse(gh, radix: 16));
+    }
     // The old full-width buttons used size_override to change height. In a
     // fixed grid that would break alignment, so it now scales the icon and
     // label instead — the setting still has a visible effect rather than
@@ -362,22 +401,18 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
       borderRadius: radius,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.07),
-          borderRadius: radius,
-          border: Border.all(color: color.withValues(alpha: 0.28)),
-        ),
+        decoration: _tileDecoration(styleVariant, color, gradientEnd, radius),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(_iconFor(sectionKey), size: iconSize, color: color),
+            Icon(_iconFor(sectionKey), size: iconSize, color: styleVariant == 'gradient_badge' ? Colors.white : color),
             const SizedBox(height: 6),
             Text(
               _labelFor(sectionKey),
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600, height: 1.2),
+              style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600, height: 1.2, color: styleVariant == 'gradient_badge' ? Colors.white : null),
             ),
           ],
         ),

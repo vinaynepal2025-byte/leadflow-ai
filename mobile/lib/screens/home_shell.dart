@@ -104,13 +104,35 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
         break;
     }
 
+    // Theme Engine v3.2 -- logo backing card. Earlier version floated
+    // the raw logo image directly over the screen with nothing behind
+    // it, so each individual screen's own AppBar title bled through
+    // around the logo instead of being occluded by it. A frosted,
+    // shadowed backing card gives the logo an actual surface to sit
+    // on, reading as an intentional badge rather than a sticker.
     return SafeArea(
       child: Align(
         alignment: align,
         child: Padding(
           padding: const EdgeInsets.all(10),
           child: IgnorePointer(
-            child: Image.file(file, height: 32, fit: BoxFit.contain),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: (appearance.darkMode ? Colors.black : Colors.white).withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8, offset: const Offset(0, 3)),
+                    ],
+                  ),
+                  child: Image.file(file, height: 28, fit: BoxFit.contain),
+                ),
+              ),
+            ),
           ),
         ),
       ),

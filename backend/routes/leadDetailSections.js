@@ -100,7 +100,7 @@ router.patch('/:section_key', async (req, res) => {
   const existing = await db.prepare('SELECT id FROM lead_detail_sections WHERE tenant_id = ? AND section_key = ?').get(tid, section_key);
   if (!existing) return res.status(404).json({ error: 'Section not found for this tenant' });
 
-  const allowed = ['enabled', 'sort_order', 'custom_label', 'icon_override', 'color_override', 'size_override', 'shape_override'];
+  const allowed = ['enabled', 'sort_order', 'custom_label', 'icon_override', 'color_override', 'size_override', 'shape_override', 'gradient_override', 'style_variant'];
   const updates = [];
   const values = [];
   for (const field of allowed) {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../widgets/color_picker_dialog.dart';
+import '../widgets/styled_icon_badge.dart';
 
 // Curated icon set for icon_override. Storing IconData directly isn't
 // reliably serializable, so we store a string KEY in the DB and look up
@@ -336,6 +337,8 @@ class _SectionEditorSheetState extends State<_SectionEditorSheet> {
   late Color _color;
   late String _size;
   late String _shape;
+  late String _styleVariant;
+  Color? _gradientEnd;
 
   @override
   void initState() {
@@ -347,6 +350,9 @@ class _SectionEditorSheetState extends State<_SectionEditorSheet> {
     _color = colorHex != null ? _hexToColor(colorHex) : Colors.deepPurple;
     _size = widget.section['size_override'] ?? 'standard';
     _shape = widget.section['shape_override'] ?? 'rounded';
+    _styleVariant = widget.section['style_variant'] as String? ?? 'flat';
+    final gradHex = widget.section['gradient_override'] as String?;
+    _gradientEnd = gradHex != null ? _hexToColor(gradHex) : null;
   }
 
   Color _hexToColor(String hex) {
@@ -375,6 +381,8 @@ class _SectionEditorSheetState extends State<_SectionEditorSheet> {
       'color_override': _colorToHex(_color),
       'size_override': _size,
       'shape_override': _shape,
+      'style_variant': _styleVariant,
+      'gradient_override': _styleVariant == 'gradient_badge' ? _colorToHex(_gradientEnd ?? _color) : null,
     });
   }
 
@@ -455,6 +463,52 @@ class _SectionEditorSheetState extends State<_SectionEditorSheet> {
               selected: {_shape},
               onSelectionChanged: (s) => setState(() => _shape = s.first),
             ),
+            const SizedBox(height: 24),
+            const Text('Style', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8, runSpacing: 8,
+              children: kStyleVariantLabels.entries.map((e) {
+                final selected = e.key == _styleVariant;
+                return ChoiceChip(
+                  label: Text(e.value),
+                  selected: selected,
+                  onSelected: (_) => setState(() => _styleVariant = e.key),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
+            Center(
+              child: styledIconBadge(
+                icon: kLeadDetailIconOptions[_iconKey] ?? Icons.star,
+                color: _color,
+                gradientEnd: _gradientEnd,
+                styleVariant: _styleVariant,
+                size: 56,
+              ),
+            ),
+            if (_styleVariant == 'gradient_badge') ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const Text('Gradient End', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () async {
+                      final picked = await showDialog<Color>(
+                        context: context,
+                        builder: (_) => ColorPickerDialog(initial: _gradientEnd ?? _color, title: 'Gradient end colour'),
+                      );
+                      if (picked != null) setState(() => _gradientEnd = picked);
+                    },
+                    child: Container(
+                      width: 32, height: 32,
+                      decoration: BoxDecoration(color: _gradientEnd ?? _color, shape: BoxShape.circle, border: Border.all(color: Colors.grey.shade300)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 24),
             Row(
               children: [
