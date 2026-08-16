@@ -8,6 +8,7 @@ import '../widgets/color_picker_dialog.dart';
 import '../widgets/live_preview_panel.dart';
 import 'dart:io';
 import '../theme/label_overrides.dart';
+import '../l10n/app_strings.dart';
 import '../services/local_branding_assets.dart';
 import '../widgets/ai_theme_generator_card.dart';
 
