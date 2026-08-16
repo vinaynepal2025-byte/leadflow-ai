@@ -49,6 +49,44 @@ class Lead {
       updatedAt: json['updated_at'] as String,
     );
   }
+
+  // Added for the Pipeline Board's optimistic drag-and-drop stage moves:
+  // updating local state needs a way to produce "this lead, but in a
+  // different stage" without a round-trip refetch, so the card can jump
+  // to its new column the instant the drag completes.
+  Lead copyWith({
+    String? id,
+    String? tenantId,
+    String? fullName,
+    String? phone,
+    String? email,
+    String? source,
+    String? stage,
+    String? assignedTo,
+    String? notes,
+    String? parentName,
+    String? parentPhone,
+    Map<String, dynamic>? customFields,
+    String? createdAt,
+    String? updatedAt,
+  }) {
+    return Lead(
+      id: id ?? this.id,
+      tenantId: tenantId ?? this.tenantId,
+      fullName: fullName ?? this.fullName,
+      phone: phone ?? this.phone,
+      email: email ?? this.email,
+      source: source ?? this.source,
+      stage: stage ?? this.stage,
+      assignedTo: assignedTo ?? this.assignedTo,
+      notes: notes ?? this.notes,
+      parentName: parentName ?? this.parentName,
+      parentPhone: parentPhone ?? this.parentPhone,
+      customFields: customFields ?? this.customFields,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
 }
 
 // Pipeline stages are now tenant-defined via the Pipeline Builder

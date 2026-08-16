@@ -10,6 +10,7 @@ import 'add_lead_screen.dart';
 import 'import_contacts_screen.dart';
 import 'excel_import_export_screen.dart';
 import 'lead_folders_screen.dart';
+import 'pipeline_board_screen.dart';
 
 class LeadsListScreen extends StatefulWidget {
   const LeadsListScreen({super.key});
@@ -235,6 +236,14 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
     return AppBar(
       title: const Text('LeadFlow AI', style: TextStyle(fontWeight: FontWeight.bold)),
       actions: [
+        IconButton(
+          icon: const Icon(Icons.view_column_outlined),
+          tooltip: 'Pipeline Board',
+          onPressed: () async {
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => const PipelineBoardScreen()));
+            _refresh();
+          },
+        ),
         IconButton(
           icon: const Icon(Icons.upload_file),
           tooltip: 'Import CSV',
