@@ -72,6 +72,14 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   final List<String> _redoStack = [];
   static const int _maxHistory = 40;
 
+  // Inline WYSIWYG text editing -- typing directly onto the canvas instead
+  // of through a dialog. Only used for unrotated text (see _beginInlineEdit);
+  // rotated text falls back to the dialog since a rotated TextField's
+  // touch/caret geometry doesn't match its visual position.
+  String? _editingTextId;
+  TextEditingController? _inlineController;
+  FocusNode? _inlineFocusNode;
+
   @override
   void initState() {
     super.initState();
@@ -81,6 +89,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   @override
   void dispose() {
     _autosaveTimer?.cancel();
+    _inlineController?.dispose();
+    _inlineFocusNode?.dispose();
     super.dispose();
   }
 
@@ -261,7 +271,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   String _newId() => DateTime.now().microsecondsSinceEpoch.toString();
 
   void _addTextElement() {
-    _addElement(FlyerElement(
+    final el = FlyerElement(
       id: _newId(),
       type: FlyerElementType.text,
       x: _canvasWidth * 0.1,
@@ -274,7 +284,12 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       fontWeight: 'bold',
       textAlign: 'center',
       zIndex: _nextZIndex(),
-    ));
+    );
+    _addElement(el);
+    // Jump straight into editing -- Canva's "add text" behaviour is to put
+    // the caret in immediately, not leave the placeholder sitting there
+    // waiting for a second tap.
+    _beginInlineEdit(el);
   }
 
   void _addShapeElement() {
@@ -369,6 +384,37 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     if (result == null) return;
     _pushUndo();
     setState(() => el.text = result);
+    _markDirty();
+  }
+
+  /// True WYSIWYG editing: a real TextField sits exactly over the element
+  /// on the canvas, matching its font/size/color/alignment, so typing shows
+  /// up in place instead of in a separate dialog. Only safe for unrotated
+  /// text -- a rotated TextField's caret/selection hit-testing doesn't
+  /// track its visually rotated glyphs, so rotated text keeps the dialog.
+  void _beginInlineEdit(FlyerElement el) {
+    if (el.type != FlyerElementType.text) return;
+    if (el.rotation != 0) {
+      _editTextElement(el);
+      return;
+    }
+    _pushUndo();
+    _inlineController?.dispose();
+    _inlineFocusNode?.dispose();
+    _inlineController = TextEditingController(text: el.text ?? '');
+    _inlineFocusNode = FocusNode();
+    setState(() {
+      _selectedId = el.id;
+      _editingTextId = el.id;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _inlineFocusNode?.requestFocus();
+    });
+  }
+
+  void _endInlineEdit() {
+    if (_editingTextId == null) return;
+    setState(() => _editingTextId = null);
     _markDirty();
   }
 
@@ -1036,7 +1082,9 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                             ),
                           ),
-                        ..._elements.map((el) => FlyerCanvasElementWidget(
+                        ..._elements
+                            .where((el) => el.id != _editingTextId)
+                            .map((el) => FlyerCanvasElementWidget(
                               key: ValueKey(el.id),
                               element: el,
                               scale: scale,
@@ -1050,8 +1098,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               onTap: () => _selectElement(el.id),
                               onDoubleTap: () {
                                 if (el.type == FlyerElementType.text) {
-                                  _selectElement(el.id);
-                                  _editTextElement(el);
+                                  _beginInlineEdit(el);
                                 } else {
                                   _selectElement(el.id);
                                   _replaceElementImage(el);
@@ -1079,6 +1126,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                                 }
                               },
                             )),
+                        if (_editingTextId != null) _buildInlineTextEditor(scale),
                         if (_snapGuides.isNotEmpty && !_exporting)
                           Positioned.fill(
                             child: IgnorePointer(
@@ -1097,6 +1145,70 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           ),
         );
       },
+    );
+  }
+
+  /// The live overlay for inline WYSIWYG editing -- a real TextField sized,
+  /// positioned, and styled to exactly match the FlyerElement it's replacing
+  /// while `_editingTextId` is set (see _beginInlineEdit). Falls back to
+  /// nothing if the element vanished mid-edit (e.g. deleted from Layers).
+  Widget _buildInlineTextEditor(double scale) {
+    FlyerElement? el;
+    for (final e in _elements) {
+      if (e.id == _editingTextId) {
+        el = e;
+        break;
+      }
+    }
+    if (el == null || _inlineController == null) return const SizedBox.shrink();
+
+    final textAlign = el.textAlign == 'center'
+        ? TextAlign.center
+        : el.textAlign == 'right'
+            ? TextAlign.right
+            : TextAlign.left;
+
+    return Positioned(
+      left: el.x * scale,
+      top: el.y * scale,
+      width: math.max(el.width * scale, 6.0),
+      height: math.max(el.height * scale, 6.0),
+      child: Container(
+        color: el.backgroundColor != null
+            ? flyerHexToColor(el.backgroundColor!)
+            : Colors.transparent,
+        child: TextField(
+          controller: _inlineController,
+          focusNode: _inlineFocusNode,
+          maxLines: null,
+          minLines: null,
+          expands: true,
+          textAlign: textAlign,
+          textCapitalization: TextCapitalization.sentences,
+          cursorColor: flyerHexToColor(el.color),
+          style: TextStyle(
+            fontSize: el.fontSize * scale,
+            fontFamily: el.fontFamily,
+            color: flyerHexToColor(el.color),
+            fontWeight: el.fontWeight == 'bold' ? FontWeight.bold : FontWeight.normal,
+            fontStyle: el.italic ? FontStyle.italic : FontStyle.normal,
+            height: el.lineHeight,
+            letterSpacing: el.letterSpacing * scale,
+            decoration: el.underline ? TextDecoration.underline : TextDecoration.none,
+          ),
+          decoration: const InputDecoration(
+            border: InputBorder.none,
+            isDense: true,
+            contentPadding: EdgeInsets.all(4),
+          ),
+          onChanged: (v) {
+            el!.text = v;
+            _markDirty();
+          },
+          onTapOutside: (_) => _endInlineEdit(),
+          onEditingComplete: _endInlineEdit,
+        ),
+      ),
     );
   }
 
@@ -1308,7 +1420,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           IconButton(
             icon: const Icon(Icons.edit_note),
             tooltip: 'Edit text',
-            onPressed: () => _editTextElement(el),
+            onPressed: () => _beginInlineEdit(el),
           ),
         ],
       ),
@@ -1374,6 +1486,14 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               }
             },
           ),
+          IconButton(
+            icon: Icon(Icons.blur_on, color: el.textShadow ? activeColor : null),
+            tooltip: 'Drop shadow',
+            onPressed: () {
+              setState(() => el.textShadow = !el.textShadow);
+              _markDirty();
+            },
+          ),
         ],
       ),
       _sliderRow(
@@ -1393,6 +1513,26 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         max: 1.0,
         onChanged: (v) {
           setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.space_bar,
+        value: el.letterSpacing.clamp(-2.0, 20.0),
+        min: -2.0,
+        max: 20.0,
+        onChanged: (v) {
+          setState(() => el.letterSpacing = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.format_line_spacing,
+        value: el.lineHeight.clamp(0.8, 2.5),
+        min: 0.8,
+        max: 2.5,
+        onChanged: (v) {
+          setState(() => el.lineHeight = v);
           _markDirty();
         },
       ),
@@ -1474,6 +1614,60 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             },
             child: Text(el.shapeKind == 'circle' ? 'Circle' : 'Rectangle'),
           ),
+          IconButton(
+            icon: Icon(Icons.gradient,
+                color: el.shapeGradientEnd != null
+                    ? context.watch<AppearanceSettings>().primaryColor
+                    : null),
+            tooltip: el.shapeGradientEnd != null ? 'Remove gradient' : 'Add gradient',
+            onPressed: () async {
+              if (el.shapeGradientEnd != null) {
+                setState(() => el.shapeGradientEnd = null);
+                _markDirty();
+                return;
+              }
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(
+                    initial: flyerHexToColor(el.shapeColor), title: 'Gradient End Colour'),
+              );
+              if (picked != null) {
+                setState(() => el.shapeGradientEnd = flyerColorToHex(picked));
+                _markDirty();
+              }
+            },
+          ),
+          IconButton(
+            icon: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: el.strokeColor != null
+                    ? flyerHexToColor(el.strokeColor!)
+                    : Colors.transparent,
+                border: Border.all(
+                    color: Colors.grey.shade400,
+                    width: el.strokeColor != null ? 3 : 1),
+                shape: BoxShape.circle,
+              ),
+            ),
+            tooltip: 'Stroke colour',
+            onPressed: () async {
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(
+                    initial: flyerHexToColor(el.strokeColor ?? '#000000'),
+                    title: 'Stroke Colour'),
+              );
+              if (picked != null) {
+                setState(() {
+                  el.strokeColor = flyerColorToHex(picked);
+                  if (el.strokeWidth <= 0) el.strokeWidth = 4;
+                });
+                _markDirty();
+              }
+            },
+          ),
         ],
       ),
       _sliderRow(
@@ -1483,6 +1677,16 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         max: 1.0,
         onChanged: (v) {
           setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.border_outer,
+        value: el.strokeWidth.clamp(0.0, 20.0),
+        min: 0.0,
+        max: 20.0,
+        onChanged: (v) {
+          setState(() => el.strokeWidth = v);
           _markDirty();
         },
       ),

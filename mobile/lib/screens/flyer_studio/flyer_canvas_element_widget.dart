@@ -481,6 +481,15 @@ class FlyerCanvasElementWidget extends StatelessWidget {
                 letterSpacing: element.letterSpacing * scale,
                 decoration:
                     element.underline ? TextDecoration.underline : TextDecoration.none,
+                shadows: element.textShadow
+                    ? [
+                        Shadow(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          blurRadius: 6 * scale,
+                          offset: Offset(0, 2 * scale),
+                        ),
+                      ]
+                    : null,
               ),
             ),
           ),
@@ -543,12 +552,28 @@ class FlyerCanvasElementWidget extends StatelessWidget {
             width: w,
             height: h,
             decoration: BoxDecoration(
-              color: flyerHexToColor(element.shapeColor),
+              color: element.shapeGradientEnd == null ? flyerHexToColor(element.shapeColor) : null,
+              gradient: element.shapeGradientEnd != null
+                  ? LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        flyerHexToColor(element.shapeColor),
+                        flyerHexToColor(element.shapeGradientEnd!),
+                      ],
+                    )
+                  : null,
               shape:
                   element.shapeKind == 'circle' ? BoxShape.circle : BoxShape.rectangle,
               borderRadius: element.shapeKind == 'circle'
                   ? null
                   : BorderRadius.circular(element.cornerRadius * scale),
+              border: (element.strokeColor != null && element.strokeWidth > 0)
+                  ? Border.all(
+                      color: flyerHexToColor(element.strokeColor!),
+                      width: element.strokeWidth * scale,
+                    )
+                  : null,
             ),
           ),
         );

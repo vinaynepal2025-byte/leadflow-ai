@@ -131,6 +131,7 @@ class FlyerElement {
   String? backgroundColor; // hex or null (transparent)
   double lineHeight;
   double letterSpacing;
+  bool textShadow;
 
   // Image / logo-specific
   String? url;
@@ -140,6 +141,9 @@ class FlyerElement {
   // Shape-specific
   String shapeColor;
   String shapeKind; // 'rect' | 'circle'
+  String? shapeGradientEnd; // hex or null (flat fill)
+  String? strokeColor; // hex or null (no stroke)
+  double strokeWidth;
 
   FlyerElement({
     required this.id,
@@ -164,11 +168,15 @@ class FlyerElement {
     this.backgroundColor,
     this.lineHeight = 1.2,
     this.letterSpacing = 0,
+    this.textShadow = false,
     this.url,
     this.fit = 'cover',
     this.cornerRadius = 0,
     this.shapeColor = '#CCCCCC',
     this.shapeKind = 'rect',
+    this.shapeGradientEnd,
+    this.strokeColor,
+    this.strokeWidth = 0,
   });
 
   factory FlyerElement.fromJson(Map<String, dynamic> json) {
@@ -196,11 +204,15 @@ class FlyerElement {
       backgroundColor: json['backgroundColor']?.toString(),
       lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.2,
       letterSpacing: (json['letterSpacing'] as num?)?.toDouble() ?? 0,
+      textShadow: json['textShadow'] == true,
       url: json['url']?.toString(),
       fit: json['fit']?.toString() ?? 'cover',
       cornerRadius: (json['cornerRadius'] as num?)?.toDouble() ?? 0,
       shapeColor: json['shapeColor']?.toString() ?? '#CCCCCC',
       shapeKind: json['shapeKind']?.toString() ?? 'rect',
+      shapeGradientEnd: json['shapeGradientEnd']?.toString(),
+      strokeColor: json['strokeColor']?.toString(),
+      strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 0,
     );
   }
 
@@ -229,6 +241,7 @@ class FlyerElement {
       map['textAlign'] = textAlign;
       map['lineHeight'] = lineHeight;
       map['letterSpacing'] = letterSpacing;
+      map['textShadow'] = textShadow;
       if (backgroundColor != null) map['backgroundColor'] = backgroundColor;
     } else if (type == FlyerElementType.image || type == FlyerElementType.logo) {
       map['url'] = url ?? '';
@@ -238,6 +251,9 @@ class FlyerElement {
       map['shapeColor'] = shapeColor;
       map['shapeKind'] = shapeKind;
       map['cornerRadius'] = cornerRadius;
+      if (shapeGradientEnd != null) map['shapeGradientEnd'] = shapeGradientEnd;
+      if (strokeColor != null) map['strokeColor'] = strokeColor;
+      map['strokeWidth'] = strokeWidth;
     }
     return map;
   }
