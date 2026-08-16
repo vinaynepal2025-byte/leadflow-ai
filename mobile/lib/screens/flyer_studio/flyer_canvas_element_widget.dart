@@ -121,6 +121,66 @@ class FlyerGridPainter extends CustomPainter {
       old.canvasHeight != canvasHeight;
 }
 
+/// Numbered tick marks along the canvas's top and left edges, in canvas
+/// units (not screen pixels) -- lets a counsellor place something "at
+/// exactly 200" instead of eyeballing it. Draws inside the canvas bounds
+/// as a thin translucent band rather than reserving extra layout space
+/// around the canvas, so it never changes the canvas's on-screen scale.
+/// Same "never exported" rule as the grid.
+class FlyerRulerPainter extends CustomPainter {
+  final double scale;
+  final double canvasWidth;
+  final double canvasHeight;
+
+  const FlyerRulerPainter({
+    required this.scale,
+    required this.canvasWidth,
+    required this.canvasHeight,
+  });
+
+  static const double _step = 100; // canvas units between labelled ticks
+  static const double _bandThickness = 14;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bandPaint = Paint()..color = Colors.black.withValues(alpha: 0.35);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, _bandThickness), bandPaint);
+    canvas.drawRect(Rect.fromLTWH(0, 0, _bandThickness, size.height), bandPaint);
+
+    final tickPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.8)
+      ..strokeWidth = 1;
+    const textStyle = TextStyle(color: Colors.white, fontSize: 8);
+
+    for (var u = 0.0; u <= canvasWidth; u += _step) {
+      final x = u * scale;
+      if (x > size.width) break;
+      canvas.drawLine(Offset(x, 0), Offset(x, _bandThickness), tickPaint);
+      final tp = TextPainter(
+        text: TextSpan(text: u.toInt().toString(), style: textStyle),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(x + 2, 1));
+    }
+    for (var u = 0.0; u <= canvasHeight; u += _step) {
+      final y = u * scale;
+      if (y > size.height) break;
+      canvas.drawLine(Offset(0, y), Offset(_bandThickness, y), tickPaint);
+      final tp = TextPainter(
+        text: TextSpan(text: u.toInt().toString(), style: textStyle),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(1, y + 1));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant FlyerRulerPainter old) =>
+      old.scale != scale ||
+      old.canvasWidth != canvasWidth ||
+      old.canvasHeight != canvasHeight;
+}
+
 class FlyerCanvasElementWidget extends StatelessWidget {
   final FlyerElement element;
   final double scale;
@@ -136,6 +196,8 @@ class FlyerCanvasElementWidget extends StatelessWidget {
   final double canvasHeight;
   final void Function(List<FlyerSnapGuide> guides) onSnapGuides;
   final List<FlyerElement> siblings;
+  final bool groupMode;
+  final bool groupSelected;
 
   const FlyerCanvasElementWidget({
     super.key,
@@ -153,7 +215,11 @@ class FlyerCanvasElementWidget extends StatelessWidget {
     required this.canvasHeight,
     required this.onSnapGuides,
     this.siblings = const [],
+    this.groupMode = false,
+    this.groupSelected = false,
   });
+
+  static const Color _groupHighlightColor = Color(0xFF9C6ADE);
 
   static const double _snapThreshold = 18; // canvas units
   static const Color _siblingGuideColor = Color(0xFFFF3366);
@@ -274,6 +340,14 @@ class FlyerCanvasElementWidget extends StatelessWidget {
     final appearance = context.watch<AppearanceSettings>();
     final w = math.max(element.width * scale, 6.0);
     final h = math.max(element.height * scale, 6.0);
+    // In group-select mode, taps toggle group membership instead of
+    // dragging -- an accidental drag while trying to tap-select several
+    // elements would be worse than losing per-element drag temporarily.
+    final dragDisabled = element.locked || groupMode;
+    final showSelBorder = selected || groupSelected;
+    final selBorderColor = groupSelected
+        ? _groupHighlightColor
+        : (element.locked ? const Color(0xFF9AA0A6) : appearance.primaryColor);
 
     // During export we render the bare element with no chrome and no
     // gesture padding, so the exported PNG is exactly the design.
@@ -306,15 +380,15 @@ class FlyerCanvasElementWidget extends StatelessWidget {
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: onTap,
-                onDoubleTap: onDoubleTap,
-                onPanStart: element.locked ? null : (_) => onDragStart(),
-                onPanEnd: element.locked
+                onDoubleTap: groupMode ? null : onDoubleTap,
+                onPanStart: dragDisabled ? null : (_) => onDragStart(),
+                onPanEnd: dragDisabled
                     ? null
                     : (_) {
                         onSnapGuides(const []);
                         onDragEnd();
                       },
-                onPanUpdate: element.locked
+                onPanUpdate: dragDisabled
                     ? null
                     : (details) {
                         element.x += details.delta.dx / scale;
@@ -332,11 +406,8 @@ class FlyerCanvasElementWidget extends StatelessWidget {
                     height: h,
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: (element.locked
-                                ? const Color(0xFF9AA0A6)
-                                : appearance.primaryColor)
-                            .withValues(alpha: selected ? 1 : 0),
-                        width: selected ? 2 : 0,
+                        color: selBorderColor.withValues(alpha: showSelBorder ? 1 : 0),
+                        width: showSelBorder ? 2 : 0,
                       ),
                     ),
                     child: _buildContent(w, h),
@@ -344,6 +415,24 @@ class FlyerCanvasElementWidget extends StatelessWidget {
                 ),
               ),
             ),
+            if (groupMode && groupSelected)
+              Positioned(
+                left: 0,
+                top: 0,
+                child: IgnorePointer(
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    margin: const EdgeInsets.all(9),
+                    decoration: BoxDecoration(
+                      color: _groupHighlightColor,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: const Icon(Icons.check, size: 13, color: Colors.white),
+                  ),
+                ),
+              ),
             Positioned.fill(
               child: IgnorePointer(
                 ignoring: !selected,

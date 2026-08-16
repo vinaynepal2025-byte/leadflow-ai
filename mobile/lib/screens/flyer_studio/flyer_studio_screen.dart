@@ -69,6 +69,13 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   bool _showGrid = false;
   final Set<String> _multiSelectedIds = {};
 
+  // Canvas-level multi-select: a distinct mode from the normal single
+  // selection above (which drives the per-element handle panel) -- while
+  // active, taps toggle group membership and dragging any selected element
+  // (or the group's own bounding box) moves the whole group together.
+  bool _groupSelectMode = false;
+  final Set<String> _groupSelectedIds = {};
+
   Timer? _autosaveTimer;
   final List<String> _undoStack = [];
   final List<String> _redoStack = [];
@@ -254,6 +261,98 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
 
   void _onElementChanged(FlyerElement el) {
     setState(() {});
+    _markDirty();
+  }
+
+  void _toggleGroupSelectMode() {
+    if (context.read<AppearanceSettings>().haptics) HapticFeedback.selectionClick();
+    setState(() {
+      _groupSelectMode = !_groupSelectMode;
+      _groupSelectedIds.clear();
+      if (_groupSelectMode) _selectedId = null;
+    });
+  }
+
+  void _toggleGroupMember(String id) {
+    if (context.read<AppearanceSettings>().haptics) HapticFeedback.selectionClick();
+    setState(() {
+      if (_groupSelectedIds.contains(id)) {
+        _groupSelectedIds.remove(id);
+      } else {
+        _groupSelectedIds.add(id);
+      }
+    });
+  }
+
+  /// Union bounding box (canvas units) of every selected group member, or
+  /// null when nothing is selected -- drives both the dashed group outline
+  /// and the drag handle that moves everything together.
+  Rect? _groupBoundsRect() {
+    double? minX, minY, maxX, maxY;
+    for (final el in _elements) {
+      if (!_groupSelectedIds.contains(el.id)) continue;
+      minX = minX == null ? el.x : math.min(minX, el.x);
+      minY = minY == null ? el.y : math.min(minY, el.y);
+      maxX = maxX == null ? el.x + el.width : math.max(maxX, el.x + el.width);
+      maxY = maxY == null ? el.y + el.height : math.max(maxY, el.y + el.height);
+    }
+    if (minX == null) return null;
+    return Rect.fromLTRB(minX, minY!, maxX!, maxY!);
+  }
+
+  void _groupDrag(Offset rawDelta) {
+    final dx = rawDelta.dx;
+    final dy = rawDelta.dy;
+    setState(() {
+      for (final el in _elements) {
+        if (_groupSelectedIds.contains(el.id) && !el.locked) {
+          el.x += dx;
+          el.y += dy;
+        }
+      }
+    });
+    _markDirty();
+  }
+
+  void _groupDuplicate() => _bulkDuplicateSelected(Set<String>.from(_groupSelectedIds));
+
+  void _groupDelete() {
+    _bulkDeleteSelected(Set<String>.from(_groupSelectedIds));
+    setState(() => _groupSelectedIds.clear());
+  }
+
+  /// Aligns every selected element to one edge/centre of the group's own
+  /// bounding box -- the Canva/Figma "align selection" toolset, not
+  /// alignment against the page.
+  void _groupAlign(String edge) {
+    final bounds = _groupBoundsRect();
+    if (bounds == null) return;
+    _pushUndo();
+    setState(() {
+      for (final el in _elements) {
+        if (!_groupSelectedIds.contains(el.id) || el.locked) continue;
+        switch (edge) {
+          case 'left':
+            el.x = bounds.left;
+            break;
+          case 'centerH':
+            el.x = bounds.left + bounds.width / 2 - el.width / 2;
+            break;
+          case 'right':
+            el.x = bounds.right - el.width;
+            break;
+          case 'top':
+            el.y = bounds.top;
+            break;
+          case 'centerV':
+            el.y = bounds.top + bounds.height / 2 - el.height / 2;
+            break;
+          case 'bottom':
+            el.y = bounds.bottom - el.height;
+            break;
+        }
+      }
+    });
     _markDirty();
   }
 
@@ -711,8 +810,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               ),
               SwitchListTile(
                 secondary: const Icon(Icons.grid_on),
-                title: const Text('Alignment grid'),
-                subtitle: const Text('A light 10x10 guide overlay while editing'),
+                title: const Text('Grid & rulers'),
+                subtitle: const Text('A 10x10 guide overlay plus numbered edge rulers'),
                 value: _showGrid,
                 onChanged: (v) {
                   setState(() => _showGrid = v);
@@ -1063,9 +1162,13 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                         duration: const Duration(milliseconds: 200),
                         curve: Curves.easeOut,
                         alignment: Alignment.bottomCenter,
-                        child: selected != null
-                            ? _buildStylePanel(selected)
-                            : const SizedBox(width: double.infinity, height: 0),
+                        child: _groupSelectMode
+                            ? (_groupSelectedIds.isNotEmpty
+                                ? _buildGroupActionBar()
+                                : const SizedBox(width: double.infinity, height: 0))
+                            : (selected != null
+                                ? _buildStylePanel(selected)
+                                : const SizedBox(width: double.infinity, height: 0)),
                       ),
                       _buildToolbar(),
                     ],
@@ -1149,20 +1252,36 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               ),
                             ),
                           ),
+                        if (_showGrid && !_exporting)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: FlyerRulerPainter(
+                                  scale: scale,
+                                  canvasWidth: _canvasWidth,
+                                  canvasHeight: _canvasHeight,
+                                ),
+                              ),
+                            ),
+                          ),
                         ..._elements
                             .where((el) => el.id != _editingTextId)
                             .map((el) => FlyerCanvasElementWidget(
                               key: ValueKey(el.id),
                               element: el,
                               scale: scale,
-                              selected: !_exporting && el.id == _selectedId,
+                              selected: !_exporting && !_groupSelectMode && el.id == _selectedId,
                               exporting: _exporting,
                               canvasWidth: _canvasWidth,
                               canvasHeight: _canvasHeight,
+                              groupMode: _groupSelectMode,
+                              groupSelected: _groupSelectedIds.contains(el.id),
                               siblings: _exporting
                                   ? const []
                                   : _elements.where((e) => e.id != el.id).toList(),
-                              onTap: () => _selectElement(el.id),
+                              onTap: () => _groupSelectMode
+                                  ? _toggleGroupMember(el.id)
+                                  : _selectElement(el.id),
                               onDoubleTap: () {
                                 if (el.type == FlyerElementType.text) {
                                   _beginInlineEdit(el);
@@ -1194,6 +1313,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               },
                             )),
                         if (_editingTextId != null) _buildInlineTextEditor(scale),
+                        if (_groupSelectMode && _groupSelectedIds.isNotEmpty && !_exporting)
+                          _buildGroupBoundsOverlay(scale),
                         if (_snapGuides.isNotEmpty && !_exporting)
                           Positioned.fill(
                             child: IgnorePointer(
@@ -1212,6 +1333,45 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           ),
         );
       },
+    );
+  }
+
+  static const Color _groupHighlightColor = Color(0xFF9C6ADE);
+
+  /// The dashed-style bounding box around every group-selected element,
+  /// draggable to move the whole group together in one gesture -- the
+  /// piece that makes group-select an actual editing tool rather than
+  /// just a bulk-delete picker.
+  Widget _buildGroupBoundsOverlay(double scale) {
+    final bounds = _groupBoundsRect();
+    if (bounds == null) return const SizedBox.shrink();
+    const pad = 8.0;
+    return Positioned(
+      left: bounds.left * scale - pad,
+      top: bounds.top * scale - pad,
+      width: bounds.width * scale + pad * 2,
+      height: bounds.height * scale + pad * 2,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onPanStart: (_) => _pushUndo(),
+        onPanUpdate: (details) => _groupDrag(details.delta / scale),
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: _groupHighlightColor, width: 2),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: const BoxDecoration(
+                color: _groupHighlightColor,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.open_with, size: 16, color: Colors.white),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1319,6 +1479,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _toolbarButton(
                   Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
               _toolbarButton(Icons.layers, 'Layers', _showLayersSheet, appearance),
+              _toolbarToggleButton(
+                  Icons.select_all, 'Group', _groupSelectMode, _toggleGroupSelectMode, appearance),
               _toolbarButton(Icons.copy, 'Duplicate',
                   hasSelection ? _duplicateSelected : null, appearance),
               _toolbarButton(Icons.delete_outline, 'Delete',
@@ -1335,6 +1497,39 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: glass.blur * 0.5, sigmaY: glass.blur * 0.5),
         child: bar,
+      ),
+    );
+  }
+
+  Widget _toolbarToggleButton(IconData icon, String label, bool active, VoidCallback onTap,
+      AppearanceSettings appearance) {
+    final color = active ? appearance.primaryColor : null;
+    return TouchFeedbackWrapper(
+      appearance: appearance,
+      radius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () {
+          if (appearance.haptics) HapticFeedback.selectionClick();
+          onTap();
+        },
+        child: Container(
+          width: 72,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            color: active ? appearance.primaryColor.withValues(alpha: 0.12) : null,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 22, color: color),
+              const SizedBox(height: 2),
+              Text(label,
+                  style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1367,6 +1562,49 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildGroupActionBar() {
+    final appearance = context.watch<AppearanceSettings>();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: appearance.primaryColor.withValues(alpha: 0.12)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Text('${_groupSelectedIds.length} selected',
+              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          const Spacer(),
+          PopupMenuButton<String>(
+            tooltip: 'Align selection',
+            icon: const Icon(Icons.align_horizontal_left, size: 20),
+            onSelected: _groupAlign,
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(value: 'left', child: Text('Align left')),
+              PopupMenuItem(value: 'centerH', child: Text('Align centre (horizontal)')),
+              PopupMenuItem(value: 'right', child: Text('Align right')),
+              PopupMenuItem(value: 'top', child: Text('Align top')),
+              PopupMenuItem(value: 'centerV', child: Text('Align middle (vertical)')),
+              PopupMenuItem(value: 'bottom', child: Text('Align bottom')),
+            ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.copy, size: 20),
+            tooltip: 'Duplicate group',
+            onPressed: _groupDuplicate,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, size: 20),
+            tooltip: 'Delete group',
+            onPressed: _groupDelete,
+          ),
+        ],
       ),
     );
   }
