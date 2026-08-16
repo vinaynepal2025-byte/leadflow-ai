@@ -2161,6 +2161,60 @@ class ApiService {
     return data.cast<Map<String, dynamic>>();
   }
 
+  // ---------- Share Targets ----------
+  Future<List<Map<String, dynamic>>> getShareTargets() async {
+    final res = await http.get(Uri.parse('$baseUrl/share-targets'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> updateShareTarget(String targetKey, Map<String, dynamic> updates) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/share-targets/$targetKey'),
+      headers: _headers,
+      body: jsonEncode(updates),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body);
+  }
+
+  Future<Map<String, dynamic>> createShareTarget({
+    required String customLabel,
+    String? packageOrScheme,
+    String? iconOverride,
+    String? colorOverride,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/share-targets'),
+      headers: _headers,
+      body: jsonEncode({
+        'custom_label': customLabel,
+        'custom_package_or_scheme': packageOrScheme,
+        'icon_override': iconOverride,
+        'color_override': colorOverride,
+      }),
+    );
+    _checkOk(res, expected: 201);
+    return jsonDecode(res.body);
+  }
+
+  Future<void> deleteShareTarget(String targetKey) async {
+    final res = await http.delete(Uri.parse('$baseUrl/share-targets/$targetKey'), headers: _headers);
+    _checkOk(res);
+  }
+
+  Future<List<Map<String, dynamic>>> reorderShareTargets(List<String> order) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/share-targets/reorder'),
+      headers: _headers,
+      body: jsonEncode({'order': order}),
+    );
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
   void _checkOk(http.Response res, {int expected = 200}) {
     if (res.statusCode != expected) {
       String message = 'Request failed (${res.statusCode})';

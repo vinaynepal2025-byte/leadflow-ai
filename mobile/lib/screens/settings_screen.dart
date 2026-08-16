@@ -3,6 +3,8 @@ import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 import 'customize_appearance_screen.dart';
 import 'customize_lead_detail_screen.dart';
+import 'customize_share_targets_screen.dart';
+import 'customize_share_targets_screen.dart';
 import 'flyer_studio/logo_library_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -125,6 +127,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 8),
           Card(
+              child: ListTile(
+                leading: const Icon(Icons.share_outlined),
+                title: const Text('Share Targets'),
+                subtitle: const Text('Show, hide, reorder, and restyle apps for sharing flyers and creative assets'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeShareTargetsScreen())),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Card(
             child: ListTile(
               leading: const Icon(Icons.workspace_premium_outlined),
               title: const Text('Brand Logos'),
