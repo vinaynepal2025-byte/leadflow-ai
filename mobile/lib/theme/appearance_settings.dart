@@ -655,6 +655,14 @@ class AppearanceSettings extends ChangeNotifier {
     await setTouchFeedback(TouchFeedback.fade);
   }
 
+  Future<void> resetBranding() async {
+    await setAuroraBackdropEnabled(false);
+    await setAuroraIntensity(0.85);
+    await setCustomBackgroundImagePath(null);
+    await setCustomLogoPath(null);
+    await setLogoPosition(LogoPosition.topLeft);
+  }
+
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final primaryValue = prefs.getInt(_primaryKey);
