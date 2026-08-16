@@ -144,6 +144,7 @@ app.use('/documents', documentsRouter);
 app.use('/lead-detail-sections', leadDetailSectionsRouter);
 app.use('/lead-notes', leadNotesRouter);
 app.use('/tenant-logos', require('./routes/tenantLogos'));
+app.use('/more-menu-items', require('./routes/moreMenuItems'));
 app.use('/flyer-projects', require('./routes/flyerProjects'));
 app.use('/share-targets', require('./routes/shareTargets'));
 app.use('/call-prep', require('./routes/callPrep'));

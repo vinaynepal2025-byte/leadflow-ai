@@ -85,8 +85,20 @@ async function generateText(prompt, { maxTokens = 600 } = {}) {
 /// ```json fences models often add.
 async function generateJson(prompt, options) {
   const text = await generateText(prompt, options);
-  const clean = text.replace(/```json|```/g, '').trim();
-  return JSON.parse(clean);
+  let clean = text.replace(/```json|```/g, '').trim();
+  try {
+    return JSON.parse(clean);
+  } catch (err) {
+    const match = clean.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+    if (match) {
+      try {
+        return JSON.parse(match[1]);
+      } catch (_) {
+        // fall through to the descriptive error below
+      }
+    }
+    throw new Error(`AI response was not valid JSON (${err.message}). Raw response started with: "${clean.slice(0, 120)}"`);
+  }
 }
 
 module.exports = { generateText, generateJson, activeProvider, activeModel, DEFAULT_MODELS };
