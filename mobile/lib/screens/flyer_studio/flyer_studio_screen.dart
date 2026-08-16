@@ -75,6 +75,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   // (or the group's own bounding box) moves the whole group together.
   bool _groupSelectMode = false;
   final Set<String> _groupSelectedIds = {};
+  double? _groupRotateStartAngle;
 
   Timer? _autosaveTimer;
   final List<String> _undoStack = [];
@@ -309,6 +310,39 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           el.x += dx;
           el.y += dy;
         }
+      }
+    });
+    _markDirty();
+  }
+
+  /// Spins the whole group as one rigid body around its own bounding-box
+  /// centre: every element's own rotation advances by the same delta, and
+  /// each element's position revolves around the shared pivot so the
+  /// cluster visually rotates together rather than each element spinning
+  /// in place. The pivot is recomputed each tick from the elements'
+  /// axis-aligned bounds (not their true rotated footprint), so a long
+  /// continuous rotate can drift slightly -- an accepted simplification
+  /// matching how the align feature already treats bounds.
+  void _groupRotate(double deltaRad) {
+    final bounds = _groupBoundsRect();
+    if (bounds == null) return;
+    final pivotX = bounds.left + bounds.width / 2;
+    final pivotY = bounds.top + bounds.height / 2;
+    final cosT = math.cos(deltaRad);
+    final sinT = math.sin(deltaRad);
+    final deltaDeg = deltaRad * 180 / math.pi;
+    setState(() {
+      for (final el in _elements) {
+        if (!_groupSelectedIds.contains(el.id) || el.locked) continue;
+        final cx = el.x + el.width / 2;
+        final cy = el.y + el.height / 2;
+        final vx = cx - pivotX;
+        final vy = cy - pivotY;
+        final nvx = vx * cosT - vy * sinT;
+        final nvy = vx * sinT + vy * cosT;
+        el.x = pivotX + nvx - el.width / 2;
+        el.y = pivotY + nvy - el.height / 2;
+        el.rotation += deltaDeg;
       }
     });
     _markDirty();
@@ -1420,37 +1454,95 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   static const Color _groupHighlightColor = Color(0xFF9C6ADE);
 
   /// The dashed-style bounding box around every group-selected element,
-  /// draggable to move the whole group together in one gesture -- the
-  /// piece that makes group-select an actual editing tool rather than
-  /// just a bulk-delete picker.
+  /// draggable to move the whole group together in one gesture, with a
+  /// floating rotate handle above it (same stalk pattern as a single
+  /// element's own rotate handle) that spins the whole cluster around its
+  /// shared centre -- the piece that makes group-select an actual editing
+  /// tool rather than just a bulk-delete picker.
   Widget _buildGroupBoundsOverlay(double scale) {
     final bounds = _groupBoundsRect();
     if (bounds == null) return const SizedBox.shrink();
     const pad = 8.0;
+    final boxWidth = bounds.width * scale + pad * 2;
+    final boxHeight = bounds.height * scale + pad * 2;
     return Positioned(
       left: bounds.left * scale - pad,
       top: bounds.top * scale - pad,
-      width: bounds.width * scale + pad * 2,
-      height: bounds.height * scale + pad * 2,
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onPanStart: (_) => _pushUndo(),
-        onPanUpdate: (details) => _groupDrag(details.delta / scale),
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: _groupHighlightColor, width: 2),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: const BoxDecoration(
-                color: _groupHighlightColor,
-                shape: BoxShape.circle,
+      width: boxWidth,
+      height: boxHeight,
+      child: Builder(
+        builder: (boxContext) => Stack(
+          clipBehavior: Clip.none,
+          children: [
+            GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onPanStart: (_) => _pushUndo(),
+              onPanUpdate: (details) => _groupDrag(details.delta / scale),
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: _groupHighlightColor, width: 2),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: const BoxDecoration(
+                      color: _groupHighlightColor,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.open_with, size: 16, color: Colors.white),
+                  ),
+                ),
               ),
-              child: const Icon(Icons.open_with, size: 16, color: Colors.white),
             ),
-          ),
+            Positioned(
+              left: boxWidth / 2 - 1,
+              top: -22,
+              child: Container(
+                  width: 2, height: 22, color: _groupHighlightColor.withValues(alpha: 0.6)),
+            ),
+            Positioned(
+              left: boxWidth / 2 - 18,
+              top: -46,
+              child: GestureDetector(
+                onPanStart: (_) {
+                  _pushUndo();
+                  _groupRotateStartAngle = null;
+                },
+                onPanUpdate: (details) {
+                  final box = boxContext.findRenderObject() as RenderBox?;
+                  if (box == null) return;
+                  final centre =
+                      box.localToGlobal(Offset(box.size.width / 2, box.size.height / 2));
+                  final angle = math.atan2(
+                    details.globalPosition.dy - centre.dy,
+                    details.globalPosition.dx - centre.dx,
+                  );
+                  if (_groupRotateStartAngle != null) {
+                    _groupRotate(angle - _groupRotateStartAngle!);
+                  }
+                  _groupRotateStartAngle = angle;
+                },
+                onPanEnd: (_) => _groupRotateStartAngle = null,
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: _groupHighlightColor,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)],
+                    ),
+                    child: const Icon(Icons.rotate_right, size: 14, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
