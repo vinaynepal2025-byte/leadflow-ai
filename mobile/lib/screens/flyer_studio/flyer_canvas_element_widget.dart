@@ -629,6 +629,7 @@ class FlyerCanvasElementWidget extends StatelessWidget {
             decoration: BoxDecoration(
               border: Border.all(color: Colors.grey.shade400),
               color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(element.cornerRadius * scale),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,

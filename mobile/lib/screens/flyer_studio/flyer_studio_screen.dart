@@ -924,6 +924,29 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
   }
 
+  /// Captures the on-screen canvas RepaintBoundary at full canvas resolution
+  /// (not screen resolution), regardless of what phone this was designed on.
+  /// Caller is responsible for setting `_exporting = true` and waiting a
+  /// frame first, so editor chrome (handles/borders/guides) never ends up
+  /// baked into the PNG.
+  Future<Uint8List?> _captureCanvasBytes() async {
+    final boundary =
+        _canvasRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null) return null;
+    final onScreenWidth = boundary.size.width;
+    final pixelRatio = (_canvasWidth / onScreenWidth).clamp(1.0, 4.0);
+    final image = await boundary.toImage(pixelRatio: pixelRatio);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  }
+
+  Future<File> _writeCanvasPngFile(Uint8List bytes, {String? suffix}) async {
+    final dir = await getTemporaryDirectory();
+    final safeTitle = _title.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-');
+    final tag = suffix == null ? '' : '-$suffix';
+    return File('${dir.path}/$safeTitle$tag-${DateTime.now().millisecondsSinceEpoch}.png');
+  }
+
   Future<void> _exportAndShare() async {
     if (_projectId == null) return;
     // Deselect and drop editor chrome so handles/borders don't end up
@@ -935,25 +958,12 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     await Future.delayed(const Duration(milliseconds: 120));
 
     try {
-      final boundary =
-          _canvasRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) return;
-
-      // Render at full canvas resolution regardless of screen size, so a
-      // flyer designed on a 6-inch phone still exports at 1080px+.
-      final onScreenWidth = boundary.size.width;
-      final pixelRatio = (_canvasWidth / onScreenWidth).clamp(1.0, 4.0);
-      final image = await boundary.toImage(pixelRatio: pixelRatio);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) return;
-      final bytes = byteData.buffer.asUint8List();
+      final bytes = await _captureCanvasBytes();
+      if (bytes == null) return;
 
       // Write to a temp file first: the OS share sheet (and WhatsApp /
       // Instagram specifically) need a real file, not raw bytes.
-      final dir = await getTemporaryDirectory();
-      final safeTitle = _title.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-');
-      final file = File(
-          '${dir.path}/$safeTitle-${DateTime.now().millisecondsSinceEpoch}.png');
+      final file = await _writeCanvasPngFile(bytes);
       await file.writeAsBytes(bytes);
 
       // Archive to storage too, so the flyer shows a thumbnail in history
@@ -970,6 +980,74 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       _showSnack('Export failed: $e');
     } finally {
       if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  /// Renders the current design at every canvas preset in one pass and
+  /// shares them together -- Canva's "Download all sizes". Elements are
+  /// rescaled the same proportional way manual size-switching already does
+  /// (see _changeCanvasSize), one preset at a time, then the original size
+  /// and every element's original geometry are restored exactly at the end
+  /// -- this is a one-shot export, not a standing size change.
+  Future<void> _exportAllSizes() async {
+    if (_projectId == null || _elements.isEmpty) return;
+
+    final originalWidth = _canvasWidth;
+    final originalHeight = _canvasHeight;
+    final originalElements = _elements.map((e) => e.clone()).toList();
+
+    setState(() {
+      _selectedId = null;
+      _exporting = true;
+    });
+
+    final files = <File>[];
+    try {
+      for (final preset in kFlyerCanvasPresets) {
+        final scaleX = preset.width / _canvasWidth;
+        final scaleY = preset.height / _canvasHeight;
+        setState(() {
+          for (final el in _elements) {
+            el.x *= scaleX;
+            el.y *= scaleY;
+            el.width *= scaleX;
+            el.height *= scaleY;
+            if (el.type == FlyerElementType.text) el.fontSize *= scaleX;
+          }
+          _canvasWidth = preset.width;
+          _canvasHeight = preset.height;
+        });
+        // Let the resized frame actually paint before capturing it.
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        final bytes = await _captureCanvasBytes();
+        if (bytes == null) continue;
+        final file = await _writeCanvasPngFile(bytes, suffix: preset.id);
+        await file.writeAsBytes(bytes);
+        files.add(file);
+      }
+
+      if (files.isEmpty) {
+        _showSnack('Export failed: nothing captured');
+        return;
+      }
+      await Share.shareXFiles(
+        files.map((f) => XFile(f.path)).toList(),
+        text: '$_title -- all sizes',
+      );
+    } catch (e) {
+      _showSnack('Export failed: $e');
+    } finally {
+      // Restore the design exactly as the counsellor left it -- this was a
+      // one-shot export, never a standing size change.
+      if (mounted) {
+        setState(() {
+          _elements = originalElements;
+          _canvasWidth = originalWidth;
+          _canvasHeight = originalHeight;
+          _exporting = false;
+        });
+      }
     }
   }
 
@@ -1128,12 +1206,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 if (v == 'background') _showBackgroundSheet();
                 if (v == 'save') _save();
                 if (v == 'rename') _renameFlyer();
+                if (v == 'exportAll') _exportAllSizes();
               },
               itemBuilder: (ctx) => const [
                 PopupMenuItem(value: 'layers', child: Text('Layers')),
                 PopupMenuItem(value: 'background', child: Text('Background & size')),
                 PopupMenuItem(value: 'rename', child: Text('Rename')),
                 PopupMenuItem(value: 'save', child: Text('Save now')),
+                PopupMenuItem(
+                    value: 'exportAll', child: Text('Export all sizes (Story/Post/A4...)')),
               ],
             ),
           ],
