@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -68,14 +69,51 @@ class _HomeShellState extends State<HomeShell> with SingleTickerProviderStateMix
             tabs: _items.map((item) => Tab(icon: Icon(item.icon))).toList(),
           ),
         ),
-        body: IndexedStack(index: _index, children: _screens),
+        body: Stack(children: [IndexedStack(index: _index, children: _screens), _logoOverlay(appearance)]),
       );
     }
 
     return Scaffold(
       extendBody: true,
-      body: IndexedStack(index: _index, children: _screens),
+      body: Stack(children: [IndexedStack(index: _index, children: _screens), _logoOverlay(appearance)]),
       bottomNavigationBar: _customNavBar(glass, appearance),
+    );
+  }
+
+  /// Floating branding logo, positioned per the user's LogoPosition
+  /// choice. Lives above the IndexedStack (not inside any individual
+  /// screen) so it renders consistently across every tab without
+  /// touching each screen's own AppBar -- this app has no single
+  /// shared AppBar, each screen builds its own.
+  Widget _logoOverlay(AppearanceSettings appearance) {
+    final path = appearance.customLogoPath;
+    if (path == null) return const SizedBox.shrink();
+    final file = File(path);
+    if (!file.existsSync()) return const SizedBox.shrink();
+
+    Alignment align;
+    switch (appearance.logoPosition) {
+      case LogoPosition.topLeft:
+        align = Alignment.topLeft;
+        break;
+      case LogoPosition.topCenter:
+        align = Alignment.topCenter;
+        break;
+      case LogoPosition.topRight:
+        align = Alignment.topRight;
+        break;
+    }
+
+    return SafeArea(
+      child: Align(
+        alignment: align,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: IgnorePointer(
+            child: Image.file(file, height: 32, fit: BoxFit.contain),
+          ),
+        ),
+      ),
     );
   }
 

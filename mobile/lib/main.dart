@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
@@ -12,6 +13,7 @@ import 'theme/glass_settings.dart';
 import 'theme/locale_settings.dart';
 import 'services/api_service.dart';
 import 'widgets/grain_overlay.dart';
+import 'widgets/aurora_backdrop.dart';
 
 final List<String> _bootLog = [];
 final ValueNotifier<int> _tick = ValueNotifier<int>(0);
@@ -220,29 +222,49 @@ class _RealApp extends StatelessWidget {
             if (appearance.textureEnabled) {
               result = Stack(children: [result, const Positioned.fill(child: GrainOverlay(opacity: 0.05))]);
             }
-            if (glass.enabled) {
-              result = Stack(
-                children: [
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            appearance.primaryColor,
-                            appearance.accentColor.withValues(alpha: 0.7),
-                            appearance.darkMode ? const Color(0xFF14171F) : const Color(0xFFF7F8FA),
-                          ],
-                          stops: const [0.0, 0.4, 1.0],
-                        ),
-                      ),
+            if (appearance.customBackgroundImagePath != null) {
+                final bgFile = File(appearance.customBackgroundImagePath!);
+                result = Stack(
+                  children: [
+                    Positioned.fill(
+                      child: bgFile.existsSync()
+                          ? Image.file(bgFile, fit: BoxFit.cover)
+                          : ColoredBox(color: appearance.darkMode ? const Color(0xFF14171F) : const Color(0xFFF7F8FA)),
                     ),
-                  ),
-                  result,
-                ],
-              );
-            }
+                    result,
+                  ],
+                );
+              } else if (glass.enabled) {
+                final glassBg = appearance.darkMode ? const Color(0xFF14171F) : const Color(0xFFF7F8FA);
+                result = Stack(
+                  children: [
+                    Positioned.fill(
+                      child: appearance.auroraBackdropEnabled
+                          ? AuroraBackdrop(
+                              primary: appearance.primaryColor,
+                              accent: appearance.accentColor,
+                              background: glassBg,
+                              intensity: appearance.auroraIntensity,
+                            )
+                          : DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    appearance.primaryColor,
+                                    appearance.accentColor.withValues(alpha: 0.7),
+                                    glassBg,
+                                  ],
+                                  stops: const [0.0, 0.4, 1.0],
+                                ),
+                              ),
+                            ),
+                    ),
+                    result,
+                  ],
+                );
+              }
             return result;
           },
           home: loggedIn ? const HomeShell() : const LoginScreen(),

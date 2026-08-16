@@ -6,6 +6,8 @@ import '../theme/glass_settings.dart';
 import '../theme/locale_settings.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../widgets/live_preview_panel.dart';
+import 'dart:io';
+import '../services/local_branding_assets.dart';
 import '../widgets/ai_theme_generator_card.dart';
 
 class CustomizeAppearanceScreen extends StatefulWidget {
@@ -56,6 +58,26 @@ class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
       builder: (_) => ColorPickerDialog(initial: initial, title: title),
     );
     if (result != null) onPicked(result);
+  }
+
+  Future<void> _pickWallpaper(AppearanceSettings appearance) async {
+    final path = await LocalBrandingAssets.pickAndSaveBackground();
+    if (path != null) await appearance.setCustomBackgroundImagePath(path);
+  }
+
+  Future<void> _removeWallpaper(AppearanceSettings appearance) async {
+    await LocalBrandingAssets.deleteBackground();
+    await appearance.setCustomBackgroundImagePath(null);
+  }
+
+  Future<void> _pickLogo(AppearanceSettings appearance) async {
+    final path = await LocalBrandingAssets.pickAndSaveLogo();
+    if (path != null) await appearance.setCustomLogoPath(path);
+  }
+
+  Future<void> _removeLogo(AppearanceSettings appearance) async {
+    await LocalBrandingAssets.deleteLogo();
+    await appearance.setCustomLogoPath(null);
   }
 
   Future<void> _saveAsPresetDialog(AppearanceSettings appearance) async {
@@ -702,6 +724,116 @@ class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
                 ),
 
                 _category(
+                icon: Icons.auto_awesome,
+                title: 'Backdrop & Branding',
+                onReset: () => appearance.resetBranding(),
+                children: [
+                    _sectionTitle('Ambient Glow (Glass/Liquid modes)'),
+                    const SizedBox(height: 8),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Aurora Backdrop'),
+                      subtitle: const Text('Soft ambient colour blobs instead of a flat gradient'),
+                      value: appearance.auroraBackdropEnabled,
+                      onChanged: (v) => appearance.setAuroraBackdropEnabled(v),
+                    ),
+                    if (appearance.auroraBackdropEnabled) ...[
+                      Row(
+                        children: [
+                          const Text('Intensity', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          Expanded(
+                            child: Slider(
+                              value: appearance.auroraIntensity,
+                              min: 0.2,
+                              max: 1.0,
+                              onChanged: (v) => appearance.setAuroraIntensity(v),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const Divider(height: 24),
+                    _sectionTitle('Custom Wallpaper'),
+                    const SizedBox(height: 8),
+                    if (appearance.customBackgroundImagePath != null) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.file(File(appearance.customBackgroundImagePath!), height: 120, width: double.infinity, fit: BoxFit.cover),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.image_outlined, size: 18),
+                            label: Text(appearance.customBackgroundImagePath == null ? 'Upload Wallpaper' : 'Change Wallpaper'),
+                            onPressed: () => _pickWallpaper(appearance),
+                          ),
+                        ),
+                        if (appearance.customBackgroundImagePath != null) ...[
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            tooltip: 'Remove wallpaper',
+                            onPressed: () => _removeWallpaper(appearance),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text('Overrides Aurora/gradient backdrop in every mode, including Solid and Basic.', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                    ),
+                    const Divider(height: 24),
+                    _sectionTitle('Custom Logo'),
+                    const SizedBox(height: 8),
+                    if (appearance.customLogoPath != null) ...[
+                      Center(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(File(appearance.customLogoPath!), height: 56, fit: BoxFit.contain),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.badge_outlined, size: 18),
+                            label: Text(appearance.customLogoPath == null ? 'Upload Logo' : 'Change Logo'),
+                            onPressed: () => _pickLogo(appearance),
+                          ),
+                        ),
+                        if (appearance.customLogoPath != null) ...[
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            tooltip: 'Remove logo',
+                            onPressed: () => _removeLogo(appearance),
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (appearance.customLogoPath != null) ...[
+                      const SizedBox(height: 8),
+                      _sectionTitle('Logo Position'),
+                      const SizedBox(height: 8),
+                      SegmentedButton<LogoPosition>(
+                        segments: LogoPosition.values.map((p) => ButtonSegment(value: p, label: Text(p.label))).toList(),
+                        selected: {appearance.logoPosition},
+                        onSelectionChanged: (s) => appearance.setLogoPosition(s.first),
+                      ),
+                    ],
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text('App icon (home-screen icon) cannot change at runtime -- Android bakes it into the app at build time. This logo appears inside the app itself, on every screen.', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                    ),
+                ],
+              ),
+
+              _category(
                   icon: Icons.tune,
                   title: 'Mode & Accessibility',
                   onReset: () => appearance.resetModeAndAccessibility(),

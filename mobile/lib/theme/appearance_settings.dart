@@ -254,6 +254,19 @@ const List<ThemePreset> themePresets = [
 /// Every visual control the end user can personalize, all in one place,
 /// all persisted on-device (personal display preference, not synced to
 /// the backend / not shared with teammates).
+/// Where the custom branding logo renders relative to the app bar --
+/// deliberately just these three, not free-drag positioning, since a
+/// logo that can be dragged anywhere risks overlapping real content
+/// on a 6-inch screen with no way to recover except resetting.
+enum LogoPosition {
+  topLeft('Top Left'),
+  topCenter('Top Center'),
+  topRight('Top Right');
+
+  final String label;
+  const LogoPosition(this.label);
+}
+
 class AppearanceSettings extends ChangeNotifier {
   static const _primaryKey = 'appearance_primary_color';
   static const _accentKey = 'appearance_accent_color';
@@ -309,6 +322,11 @@ class AppearanceSettings extends ChangeNotifier {
   static const _surfaceOverrideKey = 'appearance_surface_override';
   static const _appBarOverrideKey = 'appearance_appbar_override';
   static const _saturationBoostKey = 'appearance_tonal_saturation_boost';
+  static const _auroraEnabledKey = 'appearance_aurora_backdrop_enabled';
+  static const _auroraIntensityKey = 'appearance_aurora_intensity';
+  static const _customBackgroundPathKey = 'appearance_custom_background_path';
+  static const _customLogoPathKey = 'appearance_custom_logo_path';
+  static const _logoPositionKey = 'appearance_logo_position';
   // Semantic colours. These were previously hardcoded in AppColors and read
   // directly by badges, alerts and status chips, which meant a tenant could
   // restyle the whole app and still be stuck with our green/amber/red.
@@ -372,6 +390,21 @@ class AppearanceSettings extends ChangeNotifier {
   Color? _surfaceOverride;
   Color? _appBarOverride;
   double _tonalSaturationBoost = 1.0;
+
+  // Theme Engine v3 -- ambient multi-blob glow backdrop (see
+  // widgets/aurora_backdrop.dart). Default false = zero visual change
+  // on ship; existing flat-gradient glass backdrop stays exactly as-is
+  // until someone opts in from Settings > Effects.
+  bool _auroraBackdropEnabled = false;
+  double _auroraIntensity = 0.85;
+
+  // Theme Engine v3 -- local branding assets (custom background
+  // wallpaper + logo). Paths point into app-local storage via
+  // services/local_branding_assets.dart; null = not set, falls back
+  // to Aurora/gradient backdrop and no logo, exactly current behaviour.
+  String? _customBackgroundImagePath;
+  String? _customLogoPath;
+  LogoPosition _logoPosition = LogoPosition.topLeft;
 
   bool _loaded = false;
 
@@ -437,6 +470,11 @@ class AppearanceSettings extends ChangeNotifier {
   Color? get surfaceOverride => _surfaceOverride;
   Color? get appBarOverride => _appBarOverride;
   double get tonalSaturationBoost => _tonalSaturationBoost;
+  bool get auroraBackdropEnabled => _auroraBackdropEnabled;
+  double get auroraIntensity => _auroraIntensity;
+  String? get customBackgroundImagePath => _customBackgroundImagePath;
+  String? get customLogoPath => _customLogoPath;
+  LogoPosition get logoPosition => _logoPosition;
 
   // ---------- Custom presets ("Save current as preset") ----------
   // Encoded as '~~'-delimited strings (not JSON, to avoid adding a
@@ -521,6 +559,48 @@ class AppearanceSettings extends ChangeNotifier {
     raw.removeWhere((r) => r.split('~~').first == name);
     await prefs.setStringList(_customPresetsKey, raw);
     notifyListeners();
+  }
+
+  // ---------- Theme Engine v3: Aurora backdrop ----------
+  Future<void> setAuroraBackdropEnabled(bool value) async {
+    _auroraBackdropEnabled = value;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setBool(_auroraEnabledKey, value);
+  }
+
+  Future<void> setAuroraIntensity(double value) async {
+    _auroraIntensity = value;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setDouble(_auroraIntensityKey, value);
+  }
+
+  // ---------- Theme Engine v3: local branding assets ----------
+  Future<void> setCustomBackgroundImagePath(String? path) async {
+    _customBackgroundImagePath = path;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (path == null) {
+      await prefs.remove(_customBackgroundPathKey);
+    } else {
+      await prefs.setString(_customBackgroundPathKey, path);
+    }
+  }
+
+  Future<void> setCustomLogoPath(String? path) async {
+    _customLogoPath = path;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    if (path == null) {
+      await prefs.remove(_customLogoPathKey);
+    } else {
+      await prefs.setString(_customLogoPathKey, path);
+    }
+  }
+
+  Future<void> setLogoPosition(LogoPosition v) async {
+    _logoPosition = v;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setInt(_logoPositionKey, v.index);
   }
 
   // ---------- Per-section reset ----------
@@ -668,6 +748,18 @@ class AppearanceSettings extends ChangeNotifier {
     final appBarOverride = prefs.getInt(_appBarOverrideKey);
     if (appBarOverride != null) _appBarOverride = Color(appBarOverride);
     _tonalSaturationBoost = prefs.getDouble(_saturationBoostKey) ?? 1.0;
+
+    // Theme Engine v3.
+    _auroraBackdropEnabled = prefs.getBool(_auroraEnabledKey) ?? false;
+    _auroraIntensity = prefs.getDouble(_auroraIntensityKey) ?? 0.85;
+
+    // Theme Engine v3 -- local branding assets.
+    _customBackgroundImagePath = prefs.getString(_customBackgroundPathKey);
+    _customLogoPath = prefs.getString(_customLogoPathKey);
+    final logoPosIndex = prefs.getInt(_logoPositionKey);
+    if (logoPosIndex != null && logoPosIndex < LogoPosition.values.length) {
+      _logoPosition = LogoPosition.values[logoPosIndex];
+    }
 
     _loaded = true;
     notifyListeners();

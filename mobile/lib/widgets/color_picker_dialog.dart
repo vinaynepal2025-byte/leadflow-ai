@@ -52,6 +52,7 @@ class ColorPickerDialog extends StatefulWidget {
 class _ColorPickerDialogState extends State<ColorPickerDialog> {
   late int _r, _g, _b;
   bool _customMode = false;
+  late final TextEditingController _hexController;
 
   @override
   void initState() {
@@ -60,6 +61,34 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
     _g = ((widget.initial.g * 255.0).round()) & 0xff;
     _b = ((widget.initial.b * 255.0).round()) & 0xff;
     _customMode = !ColorPickerDialog.swatches.contains(widget.initial);
+    _hexController = TextEditingController(text: _toHex(_current));
+  }
+
+  @override
+  void dispose() {
+    _hexController.dispose();
+    super.dispose();
+  }
+
+  String _toHex(Color c) {
+    String ch(int v) => v.toRadixString(16).padLeft(2, '0');
+    final r = (c.r * 255.0).round() & 0xff;
+    final g = (c.g * 255.0).round() & 0xff;
+    final b = (c.b * 255.0).round() & 0xff;
+    return '#${ch(r)}${ch(g)}${ch(b)}'.toUpperCase();
+  }
+
+  void _applyHex(String raw) {
+    final hex = raw.trim().replaceAll('#', '');
+    if (hex.length != 6) return;
+    final value = int.tryParse(hex, radix: 16);
+    if (value == null) return;
+    setState(() {
+      _r = (value >> 16) & 0xff;
+      _g = (value >> 8) & 0xff;
+      _b = value & 0xff;
+      _customMode = true;
+    });
   }
 
   Color get _current => Color.fromARGB(255, _r, _g, _b);
@@ -130,7 +159,21 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
               _slider('G', _g, Colors.green, (v) => setState(() => _g = v)),
               _slider('B', _b, Colors.blue, (v) => setState(() => _b = v)),
             ],
-            // Batch 3: real-time WCAG badge, shown for every color (not
+            const SizedBox(height: 12),
+              TextField(
+                controller: _hexController,
+                maxLength: 7,
+                decoration: const InputDecoration(
+                  labelText: 'Hex code',
+                  prefixIcon: Icon(Icons.tag, size: 18),
+                  border: OutlineInputBorder(),
+                  counterText: '',
+                  isDense: true,
+                ),
+                textCapitalization: TextCapitalization.characters,
+                onChanged: _applyHex,
+              ),
+              // Batch 3: real-time WCAG badge, shown for every color (not
             // just custom-mode) since a curated swatch can be a poor
             // choice too -- premium apps don't get an accessibility pass
             // just because the color came from a preset list.
