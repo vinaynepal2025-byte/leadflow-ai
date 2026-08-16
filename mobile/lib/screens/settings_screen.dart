@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'brand_kit_screen.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 import 'customize_appearance_screen.dart';
@@ -133,6 +134,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: const Text('Show, hide, reorder, and restyle apps for sharing flyers and creative assets'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeShareTargetsScreen())),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.diamond_outlined),
+                title: const Text('Brand Kit'),
+                subtitle: const Text('Colors, typography, and logos -- your brand identity in one place'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrandKitScreen())),
               ),
             ),
             const SizedBox(height: 8),
