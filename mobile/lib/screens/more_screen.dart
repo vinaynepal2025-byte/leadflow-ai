@@ -18,6 +18,7 @@ import 'triage_test_screen.dart';
 import 'insights_overview_screen.dart';
 import 'customize_more_menu_screen.dart';
 import '../services/api_service.dart';
+import '../widgets/styled_icon_badge.dart';
 
 // Curated icon set for icon_override -- same string-key-to-IconData
 // pattern as kLeadDetailIconOptions/kShareTargetIconOptions.
@@ -169,7 +170,12 @@ class _MoreScreenState extends State<MoreScreen> {
             final color = colorHex != null ? _hexToColor(colorHex) : null;
 
             return ListTile(
-              leading: Icon(icon, color: color),
+              leading: styledIconBadge(
+                icon: icon,
+                color: color ?? Theme.of(context).colorScheme.primary,
+                gradientEnd: item['gradient_override'] != null ? _hexToColor(item['gradient_override']) : null,
+                styleVariant: item['style_variant'] ?? 'flat',
+              ),
               title: Text(label),
               subtitle: subtitle.isNotEmpty ? Text(subtitle) : null,
               onTap: () {

@@ -60,7 +60,7 @@ router.get('/', async (req, res) => {
 // automatically and never created through this route.
 router.post('/', async (req, res) => {
   const tid = tenantId(req);
-  const { custom_label, custom_action_value, icon_override, color_override } = req.body;
+  const { custom_label, custom_action_value, icon_override, color_override, gradient_override, style_variant } = req.body;
 
   if (!custom_label || !custom_action_value) {
     return res.status(400).json({ error: 'custom_label and custom_action_value are required' });
@@ -81,9 +81,9 @@ router.post('/', async (req, res) => {
   const id = randomUUID();
   await db.prepare(`
     INSERT INTO more_menu_items
-      (id, tenant_id, item_key, is_custom, enabled, sort_order, custom_label, icon_override, color_override, custom_action_type, custom_action_value)
-    VALUES (?, ?, ?, true, true, ?, ?, ?, ?, 'url', ?)
-  `).run(id, tid, key, maxOrder.m + 1, custom_label, icon_override || null, color_override || null, custom_action_value);
+      (id, tenant_id, item_key, is_custom, enabled, sort_order, custom_label, icon_override, color_override, gradient_override, style_variant, custom_action_type, custom_action_value)
+    VALUES (?, ?, ?, true, true, ?, ?, ?, ?, ?, ?, 'url', ?)
+  `).run(id, tid, key, maxOrder.m + 1, custom_label, icon_override || null, color_override || null, gradient_override || null, style_variant || 'flat', custom_action_value);
 
   res.status(201).json(await db.prepare('SELECT * FROM more_menu_items WHERE id = ?').get(id));
 });
@@ -97,7 +97,7 @@ router.patch('/:item_key', async (req, res) => {
   const existing = await db.prepare('SELECT id FROM more_menu_items WHERE tenant_id = ? AND item_key = ?').get(tid, item_key);
   if (!existing) return res.status(404).json({ error: 'Item not found for this tenant' });
 
-  const allowed = ['enabled', 'sort_order', 'custom_label', 'icon_override', 'color_override'];
+  const allowed = ['enabled', 'sort_order', 'custom_label', 'icon_override', 'color_override', 'gradient_override', 'style_variant'];
   const updates = [];
   const values = [];
   for (const field of allowed) {
