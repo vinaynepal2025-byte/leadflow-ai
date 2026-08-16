@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/locale_settings.dart';
+import '../theme/label_overrides.dart';
 
 /// Real translations, not machine-generated placeholders — covers the
 /// screens a counselor looks at constantly (navigation, login, dashboard,
@@ -59,6 +60,10 @@ const Map<String, Map<String, String>> _translations = {
 /// silently blank.
 extension Translate on BuildContext {
   String tr(String key) {
+    // Theme Engine v3 -- a tenant's custom label override always wins
+    // over the language-translation lookup below.
+    final override = watch<LabelOverrides>()[key];
+    if (override != null) return override;
     final lang = watch<LocaleSettings>().language.code;
     final entry = _translations[key];
     if (entry == null) return key;

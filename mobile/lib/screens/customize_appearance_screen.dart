@@ -7,6 +7,7 @@ import '../theme/locale_settings.dart';
 import '../widgets/color_picker_dialog.dart';
 import '../widgets/live_preview_panel.dart';
 import 'dart:io';
+import '../theme/label_overrides.dart';
 import '../services/local_branding_assets.dart';
 import '../widgets/ai_theme_generator_card.dart';
 
@@ -724,6 +725,35 @@ class _CustomizeAppearanceScreenState extends State<CustomizeAppearanceScreen> {
                 ),
 
                 _category(
+                icon: Icons.edit_note,
+                title: 'Custom Labels',
+                onReset: () => context.read<LabelOverrides>().resetAll(),
+                children: [
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 8),
+                      child: Text('Rename navigation tabs to match your own terminology. Leave blank to keep the default.', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                    ),
+                    ...['nav_dashboard', 'nav_leads', 'nav_followups', 'nav_tasks', 'nav_more'].map((navKey) {
+                      final overrides = context.watch<LabelOverrides>();
+                      final controller = TextEditingController(text: overrides[navKey] ?? '');
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: TextField(
+                          controller: controller,
+                          decoration: InputDecoration(
+                            labelText: context.tr(navKey),
+                            hintText: 'Custom label',
+                            border: const OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          onSubmitted: (v) => context.read<LabelOverrides>().setOverride(navKey, v),
+                        ),
+                      );
+                    }),
+                ],
+              ),
+
+              _category(
                 icon: Icons.auto_awesome,
                 title: 'Backdrop & Branding',
                 onReset: () => appearance.resetBranding(),

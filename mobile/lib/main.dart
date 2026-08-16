@@ -11,6 +11,7 @@ import 'theme/app_theme.dart';
 import 'theme/appearance_settings.dart';
 import 'theme/glass_settings.dart';
 import 'theme/locale_settings.dart';
+import 'theme/label_overrides.dart';
 import 'services/api_service.dart';
 import 'widgets/grain_overlay.dart';
 import 'widgets/aurora_backdrop.dart';
@@ -58,6 +59,7 @@ class _DiagRootState extends State<_DiagRoot> {
   AppearanceSettings? _appearance;
   GlassSettings? _glass;
   LocaleSettings? _locale;
+  LabelOverrides? _labelOverrides;
 
   @override
   void initState() {
@@ -93,6 +95,8 @@ class _DiagRootState extends State<_DiagRoot> {
       log('AppearanceSettings constructed');
       _locale = LocaleSettings();
       log('LocaleSettings constructed');
+      _labelOverrides = LabelOverrides();
+      log('LabelOverrides constructed');
     } catch (e) {
       log('Settings construction FAILED: $e');
       return;
@@ -120,6 +124,13 @@ class _DiagRootState extends State<_DiagRoot> {
     }
 
     try {
+      await _labelOverrides!.load();
+      log('labelOverrides.load() done');
+    } catch (e) {
+      log('labelOverrides.load() FAILED: $e');
+    }
+
+    try {
       _lightTheme = AppTheme.build(_appearance!, brightness: Brightness.light);
       _darkTheme = AppTheme.build(_appearance!, brightness: Brightness.dark);
       log('AppTheme.build() done for both brightnesses');
@@ -142,7 +153,7 @@ class _DiagRootState extends State<_DiagRoot> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_ready || _appearance == null || _glass == null || _locale == null) {
+    if (!_ready || _appearance == null || _glass == null || _locale == null || _labelOverrides == null) {
       return MaterialApp(
         debugShowCheckedModeBanner: false,
         home: ValueListenableBuilder<int>(
@@ -173,6 +184,7 @@ class _DiagRootState extends State<_DiagRoot> {
       providers: [
         ChangeNotifierProvider.value(value: _glass!),
         ChangeNotifierProvider.value(value: _appearance!),
+        ChangeNotifierProvider.value(value: _labelOverrides!),
         ChangeNotifierProvider.value(value: _locale!),
       ],
       child: _RealApp(loggedIn: _loggedIn),
