@@ -2215,6 +2215,19 @@ class ApiService {
     return data.cast<Map<String, dynamic>>();
   }
 
+  // ---------- AI Emoji Suggestions ----------
+  Future<List<String>> suggestEmojis(String messageText) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/ai/suggest-emojis'),
+      headers: _headers,
+      body: jsonEncode({'message_text': messageText}),
+    );
+    _checkOk(res);
+    final data = jsonDecode(res.body);
+    final List raw = data['emojis'] ?? [];
+    return raw.cast<String>();
+  }
+
   void _checkOk(http.Response res, {int expected = 200}) {
     if (res.statusCode != expected) {
       String message = 'Request failed (${res.statusCode})';

@@ -181,4 +181,33 @@ Pick font/styleMode/radius/gradientEnd/backdropBlur that genuinely match the moo
   }
 });
 
+// POST /ai/suggest-emojis  { message_text }
+// Context-aware emoji suggestions for the message composer -- text-only,
+// reuses the existing generateJson() provider layer, zero new cost or
+// infrastructure. Deliberately stateless (no db, no tenant coupling)
+// like generate-theme above, since the message text itself is all the
+// context this needs.
+router.post('/suggest-emojis', async (req, res) => {
+  const messageText = (req.body.message_text || '').toString().trim();
+  if (!messageText) return res.status(400).json({ error: 'message_text is required' });
+
+  const prompt = `You are suggesting relevant emoji for a professional admissions-consultancy message to a student or parent.
+Given the message below, suggest 3 to 6 Unicode emoji that would appropriately accent it -- consider its content, sentiment, and professional-but-warm tone. Do not overuse emoji; prefer fewer, more relevant ones over a scattershot list.
+
+Respond with ONLY a JSON array of emoji characters, most relevant first, e.g. ["\uD83C\uDF93","\u2705"]. No markdown fences, no explanation, no other text.
+
+Message:
+\`\`\`
+${messageText.slice(0, 2000)}
+\`\`\``;
+
+  try {
+    const emojis = await generateJson(prompt, { maxTokens: 150 });
+    if (!Array.isArray(emojis)) throw new Error('AI response was not a JSON array');
+    res.json({ emojis: emojis.slice(0, 6) });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 module.exports = router;
