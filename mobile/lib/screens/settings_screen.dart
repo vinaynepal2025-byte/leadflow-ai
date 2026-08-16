@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'brand_kit_screen.dart';
+import 'emoji_generator_screen.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 import 'customize_appearance_screen.dart';
@@ -144,6 +145,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: const Text('Colors, typography, and logos -- your brand identity in one place'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrandKitScreen())),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.emoji_emotions_outlined),
+                title: const Text('Emoji Generator'),
+                subtitle: const Text('AI-suggested emoji for any message, save your favourites'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EmojiGeneratorScreen())),
               ),
             ),
             const SizedBox(height: 8),
