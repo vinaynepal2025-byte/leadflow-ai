@@ -259,6 +259,62 @@ class GlassButton extends StatelessWidget {
     final glow = _neonGlowShadows(appearance);
 
     if (!glass.enabled) {
+      // Theme Engine v3 -- gradient CTA buttons. primaryGradientEnabled/
+      // primaryGradientEnd have existed in AppearanceSettings since
+      // Batch 1 but were never actually rendered anywhere -- confirmed
+      // via a full read of this file and app_theme.dart before this
+      // change. A global ButtonStyle can only carry a flat Color (not
+      // a gradient), so this can't be wired through
+      // FilledButtonThemeData for every bare FilledButton() app-wide;
+      // GlassButton is this app's own shared premium-button widget
+      // (already the one used for hero/CTA moments), so gradient
+      // support here gets real coverage without a 40-screen sweep.
+      if (appearance.primaryGradientEnabled && appearance.primaryGradientEnd != null) {
+        final gradientOnPressed = onPressed == null
+            ? null
+            : () {
+                if (appearance.haptics) HapticFeedback.lightImpact();
+                onPressed!();
+              };
+        Widget gradientButton = Container(
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [appearance.primaryColor, appearance.primaryGradientEnd!],
+            ),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: radius,
+              onTap: gradientOnPressed,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 22),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (icon != null) ...[
+                      Icon(icon, size: 18, color: Colors.white),
+                      const SizedBox(width: 8),
+                    ],
+                    DefaultTextStyle(
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                      child: child,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        final gradientWithGlow = glow.isEmpty
+            ? gradientButton
+            : Container(decoration: BoxDecoration(borderRadius: radius, boxShadow: glow), child: gradientButton);
+        return TouchFeedbackWrapper(appearance: appearance, radius: radius, child: gradientWithGlow);
+      }
       final wrappedOnPressed = onPressed == null
           ? null
           : () {
@@ -303,6 +359,16 @@ class GlassButton extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 22),
                 decoration: BoxDecoration(
                   borderRadius: radius,
+                  gradient: appearance.styleMode == UIStyleMode.liquid
+                      ? LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.white.withValues(alpha: disabled ? 0.10 : 0.32),
+                            primary.withValues(alpha: disabled ? 0.03 : 0.10),
+                          ],
+                        )
+                      : null,
                   border: Border.all(color: Colors.white.withValues(alpha: disabled ? 0.15 : 0.4), width: 1.2),
                 ),
                 child: Row(
