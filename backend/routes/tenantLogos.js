@@ -3,6 +3,25 @@ const multer = require('multer');
 const { randomUUID } = require('crypto');
 const db = require('../db');
 const { uploadFile, getSignedUrl } = require('../services/supabaseStorage');
+const { listTemplates, renderLogoTemplate } = require('../services/logoTemplates');
+
+// sharp is loaded LAZILY -- same deliberate safety choice as
+// routes/flyers.js: if sharp fails to load, only logo generation
+// fails, the rest of the backend (including logo upload/list/delete
+// above) keeps working.
+let sharpModule = null;
+let sharpLoadError = null;
+function getSharp() {
+  if (sharpModule) return sharpModule;
+  if (sharpLoadError) throw sharpLoadError;
+  try {
+    sharpModule = require('sharp');
+    return sharpModule;
+  } catch (err) {
+    sharpLoadError = err;
+    throw err;
+  }
+}
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -83,6 +102,32 @@ router.delete('/:id', async (req, res) => {
   const result = await db.prepare('DELETE FROM tenant_logos WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Logo not found' });
   res.status(200).json({ deleted: true });
+});
+
+// GET /tenant-logos/templates -- Phase 1 (template/parametric) logo
+// generator's available templates. Kept in this file rather than a
+// separate route file since it's a thin sibling of the existing
+// logo CRUD, not a distinct feature area.
+router.get('/templates', (req, res) => {
+  res.json({ templates: listTemplates() });
+});
+
+// POST /tenant-logos/generate  { template_id, fields }
+// Renders a preview PNG (base64 data URI) immediately -- NOT saved.
+// The Flutter side writes this to a temp file and calls the existing
+// POST / (multipart upload) route to actually save it, so a
+// generated logo goes through the exact same storage path as an
+// uploaded one -- no separate save-a-generated-logo route needed.
+router.post('/generate', async (req, res) => {
+  const { template_id, fields } = req.body;
+  if (!template_id) return res.status(400).json({ error: 'template_id is required' });
+  try {
+    const svg = renderLogoTemplate(template_id, fields || {});
+    const png = await getSharp()(Buffer.from(svg)).png().toBuffer();
+    res.json({ image_data_uri: `data:image/png;base64,${png.toString('base64')}` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 module.exports = router;

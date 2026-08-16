@@ -2228,6 +2228,26 @@ class ApiService {
     return raw.cast<String>();
   }
 
+  // ---------- Logo Generator (Phase 1: template/parametric) ----------
+  Future<List<Map<String, dynamic>>> getLogoTemplates() async {
+    final res = await http.get(Uri.parse('$baseUrl/tenant-logos/templates'), headers: _headers);
+    _checkOk(res);
+    final data = jsonDecode(res.body);
+    final List raw = data['templates'] ?? [];
+    return raw.cast<Map<String, dynamic>>();
+  }
+
+  Future<String> generateLogo({required String templateId, required Map<String, dynamic> fields}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/tenant-logos/generate'),
+      headers: _headers,
+      body: jsonEncode({'template_id': templateId, 'fields': fields}),
+    );
+    _checkOk(res);
+    final data = jsonDecode(res.body);
+    return data['image_data_uri'] as String;
+  }
+
   void _checkOk(http.Response res, {int expected = 200}) {
     if (res.statusCode != expected) {
       String message = 'Request failed (${res.statusCode})';

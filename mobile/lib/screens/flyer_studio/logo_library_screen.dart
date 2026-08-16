@@ -12,6 +12,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/api_service.dart';
+import 'generate_logo_screen.dart';
 
 class LogoLibraryScreen extends StatefulWidget {
   const LogoLibraryScreen({super.key});
@@ -191,6 +192,17 @@ class _LogoLibraryScreenState extends State<LogoLibraryScreen> {
       appBar: AppBar(
         title: const Text('Brand Logos'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.auto_awesome),
+            tooltip: 'Generate Logo',
+            onPressed: () async {
+              final saved = await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const GenerateLogoScreen()),
+              );
+              if (saved == true) _load();
+            },
+          ),
           IconButton(
             icon: _uploading
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
