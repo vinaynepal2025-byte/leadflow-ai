@@ -155,9 +155,9 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
               const SizedBox(height: 20),
               Container(height: 44, decoration: BoxDecoration(color: _current, borderRadius: BorderRadius.circular(10))),
               const SizedBox(height: 12),
-              _slider('R', _r, Colors.red, (v) => setState(() => _r = v)),
-              _slider('G', _g, Colors.green, (v) => setState(() => _g = v)),
-              _slider('B', _b, Colors.blue, (v) => setState(() => _b = v)),
+              _slider('R', _r, Colors.red, (v) => setState(() { _r = v; _hexController.text = _toHex(_current); })),
+              _slider('G', _g, Colors.green, (v) => setState(() { _g = v; _hexController.text = _toHex(_current); })),
+              _slider('B', _b, Colors.blue, (v) => setState(() { _b = v; _hexController.text = _toHex(_current); })),
             ],
             const SizedBox(height: 12),
               TextField(
