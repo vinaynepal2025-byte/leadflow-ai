@@ -85,6 +85,42 @@ class FlyerSnapGuidePainter extends CustomPainter {
       old.guides.length != guides.length;
 }
 
+/// A faint 10x10 alignment grid, purely a visual placement aid (never
+/// exported -- callers only mount this outside `exporting` mode). Off by
+/// default; toggled from the Background & size sheet.
+class FlyerGridPainter extends CustomPainter {
+  final double scale;
+  final double canvasWidth;
+  final double canvasHeight;
+
+  const FlyerGridPainter({
+    required this.scale,
+    required this.canvasWidth,
+    required this.canvasHeight,
+  });
+
+  static const int _divisions = 10;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.08)
+      ..strokeWidth = 1;
+    for (var i = 1; i < _divisions; i++) {
+      final x = canvasWidth * i / _divisions * scale;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+      final y = canvasHeight * i / _divisions * scale;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant FlyerGridPainter old) =>
+      old.scale != scale ||
+      old.canvasWidth != canvasWidth ||
+      old.canvasHeight != canvasHeight;
+}
+
 class FlyerCanvasElementWidget extends StatelessWidget {
   final FlyerElement element;
   final double scale;

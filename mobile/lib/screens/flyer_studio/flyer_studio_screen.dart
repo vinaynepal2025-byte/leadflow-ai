@@ -66,6 +66,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   bool _dirty = false;
   String? _error;
   List<FlyerSnapGuide> _snapGuides = const [];
+  bool _showGrid = false;
+  final Set<String> _multiSelectedIds = {};
 
   Timer? _autosaveTimer;
   final List<String> _undoStack = [];
@@ -474,10 +476,16 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
     await showModalBottomSheet(
       context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
       builder: (ctx) => SafeArea(
         child: ListView(
           shrinkWrap: true,
-          children: logos.map((l) {
+          children: [
+            _sheetDragHandle(),
+            ...logos.map((l) {
             final logo = Map<String, dynamic>.from(l);
             return ListTile(
               leading: logo['image_url'] != null
@@ -503,7 +511,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 ));
               },
             );
-          }).toList(),
+            }),
+          ],
         ),
       ),
     );
@@ -546,10 +555,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     final primaryColor = context.read<AppearanceSettings>().primaryColor;
     final preset = await showModalBottomSheet<FlyerCanvasPreset>(
       context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
       builder: (ctx) => SafeArea(
         child: ListView(
           shrinkWrap: true,
           children: [
+            _sheetDragHandle(),
             const Padding(
               padding: EdgeInsets.all(16),
               child: Text('Canvas Size',
@@ -638,57 +652,93 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   }
 
   void _showBackgroundSheet() {
+    final appearance = context.read<AppearanceSettings>();
     showModalBottomSheet(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              leading: Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: flyerHexToColor(_backgroundColor),
-                  border: Border.all(color: Colors.grey.shade400),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              title: const Text('Background colour'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _changeBackgroundColor();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.wallpaper),
-              title: const Text('Background photo'),
-              subtitle: Text(_backgroundImageUrl == null ? 'None' : 'Tap to replace'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _changeBackgroundImage();
-              },
-            ),
-            if (_backgroundImageUrl != null)
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(appearance.cornerRadius.clamp(0, 24))),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              _sheetDragHandle(),
               ListTile(
-                leading: const Icon(Icons.hide_image_outlined),
-                title: const Text('Remove background photo'),
+                leading: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: flyerHexToColor(_backgroundColor),
+                    border: Border.all(color: Colors.grey.shade400),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                title: const Text('Background colour'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  setState(() => _backgroundImageUrl = null);
-                  _showSnack('Removed from view — re-open to restore from server');
+                  _changeBackgroundColor();
                 },
               ),
-            ListTile(
-              leading: const Icon(Icons.aspect_ratio),
-              title: const Text('Canvas size'),
-              subtitle: Text('${_canvasWidth.toInt()}×${_canvasHeight.toInt()}'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _changeCanvasSize();
-              },
-            ),
-          ],
+              ListTile(
+                leading: const Icon(Icons.wallpaper),
+                title: const Text('Background photo'),
+                subtitle: Text(_backgroundImageUrl == null ? 'None' : 'Tap to replace'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _changeBackgroundImage();
+                },
+              ),
+              if (_backgroundImageUrl != null)
+                ListTile(
+                  leading: const Icon(Icons.hide_image_outlined),
+                  title: const Text('Remove background photo'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() => _backgroundImageUrl = null);
+                    _showSnack('Removed from view — re-open to restore from server');
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.aspect_ratio),
+                title: const Text('Canvas size'),
+                subtitle: Text('${_canvasWidth.toInt()}×${_canvasHeight.toInt()}'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _changeCanvasSize();
+                },
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.grid_on),
+                title: const Text('Alignment grid'),
+                subtitle: const Text('A light 10x10 guide overlay while editing'),
+                value: _showGrid,
+                onChanged: (v) {
+                  setState(() => _showGrid = v);
+                  setSheetState(() {});
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The small rounded handle bar every bottom sheet in Flyer Studio opens
+  /// with -- a lightweight, reusable stand-in for a proper sheet theme, so
+  /// every sheet reads as one designed surface instead of a bare ListView.
+  Widget _sheetDragHandle() {
+    final appearance = context.read<AppearanceSettings>();
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.only(top: 10, bottom: 4),
+        width: 36,
+        height: 4,
+        decoration: BoxDecoration(
+          color: appearance.primaryColor.withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(4),
         ),
       ),
     );
@@ -835,10 +885,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
     await showModalBottomSheet(
       context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _sheetDragHandle(),
             ListTile(
               leading: const Icon(Icons.send, color: Color(0xFF25D366)),
               title: const Text('Send to this lead on WhatsApp'),
@@ -1080,6 +1135,18 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               _backgroundImageUrl!,
                               fit: BoxFit.cover,
                               errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                            ),
+                          ),
+                        if (_showGrid && !_exporting)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: FlyerGridPainter(
+                                  scale: scale,
+                                  canvasWidth: _canvasWidth,
+                                  canvasHeight: _canvasHeight,
+                                ),
+                              ),
                             ),
                           ),
                         ..._elements
@@ -1721,10 +1788,90 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     );
   }
 
+  void _bulkDeleteSelected(Set<String> ids) {
+    if (ids.isEmpty) return;
+    _pushUndo();
+    setState(() {
+      _elements.removeWhere((e) => ids.contains(e.id));
+      if (_selectedId != null && ids.contains(_selectedId)) _selectedId = null;
+    });
+    _markDirty();
+  }
+
+  void _bulkDuplicateSelected(Set<String> ids) {
+    if (ids.isEmpty) return;
+    _pushUndo();
+    setState(() {
+      for (final id in ids.toList()) {
+        FlyerElement? found;
+        for (final e in _elements) {
+          if (e.id == id) {
+            found = e;
+            break;
+          }
+        }
+        if (found == null) continue;
+        final copy = found.clone();
+        copy.id = _newId();
+        copy.x += _canvasWidth * 0.03;
+        copy.y += _canvasHeight * 0.02;
+        copy.zIndex = _nextZIndex();
+        copy.locked = false;
+        _elements.add(copy);
+      }
+      _sortElements();
+    });
+    _markDirty();
+  }
+
+  Widget _layerThumbnail(FlyerElement el) {
+    Widget content;
+    switch (el.type) {
+      case FlyerElementType.text:
+        content = Container(
+          color: flyerHexToColor(el.color).withValues(alpha: 0.15),
+          alignment: Alignment.center,
+          child: Text('T',
+              style: TextStyle(color: flyerHexToColor(el.color), fontWeight: FontWeight.bold)),
+        );
+        break;
+      case FlyerElementType.image:
+      case FlyerElementType.logo:
+        content = (el.url != null && el.url!.isNotEmpty)
+            ? Image.network(el.url!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    Icon(_iconFor(el.type), size: 18, color: Colors.grey))
+            : Icon(_iconFor(el.type), size: 18, color: Colors.grey);
+        break;
+      case FlyerElementType.shape:
+        content = Container(
+          margin: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: flyerHexToColor(el.shapeColor),
+            shape: el.shapeKind == 'circle' ? BoxShape.circle : BoxShape.rectangle,
+            borderRadius: el.shapeKind == 'circle' ? null : BorderRadius.circular(4),
+          ),
+        );
+        break;
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Container(width: 36, height: 36, color: Colors.grey.shade200, child: content),
+    );
+  }
+
   void _showLayersSheet() {
+    final appearance = context.read<AppearanceSettings>();
+    bool multiSelect = false;
+    _multiSelectedIds.clear();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(appearance.cornerRadius.clamp(0, 24))),
+      ),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
@@ -1732,13 +1879,29 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               ..sort((a, b) => b.zIndex.compareTo(a.zIndex));
             return SafeArea(
               child: SizedBox(
-                height: MediaQuery.of(ctx).size.height * 0.55,
+                height: MediaQuery.of(ctx).size.height * 0.6,
                 child: Column(
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: Text('Layers  ·  top to bottom',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
+                    _sheetDragHandle(),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      child: Row(
+                        children: [
+                          const Expanded(
+                            child: Text('Layers  ·  top to bottom',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                          TextButton(
+                            onPressed: sorted.isEmpty
+                                ? null
+                                : () => setSheetState(() {
+                                      multiSelect = !multiSelect;
+                                      _multiSelectedIds.clear();
+                                    }),
+                            child: Text(multiSelect ? 'Done' : 'Select'),
+                          ),
+                        ],
+                      ),
                     ),
                     Expanded(
                       child: sorted.isEmpty
@@ -1747,66 +1910,116 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               itemCount: sorted.length,
                               itemBuilder: (ctx, i) {
                                 final el = sorted[i];
+                                final checked = _multiSelectedIds.contains(el.id);
                                 return ListTile(
                                   dense: true,
-                                  leading: Icon(_iconFor(el.type), size: 20),
+                                  leading: multiSelect
+                                      ? Checkbox(
+                                          value: checked,
+                                          onChanged: (_) => setSheetState(() {
+                                            checked
+                                                ? _multiSelectedIds.remove(el.id)
+                                                : _multiSelectedIds.add(el.id);
+                                          }),
+                                        )
+                                      : _layerThumbnail(el),
                                   title: Text(_labelFor(el),
                                       maxLines: 1, overflow: TextOverflow.ellipsis),
-                                  selected: el.id == _selectedId,
+                                  selected: !multiSelect && el.id == _selectedId,
                                   onTap: () {
+                                    if (multiSelect) {
+                                      setSheetState(() {
+                                        checked
+                                            ? _multiSelectedIds.remove(el.id)
+                                            : _multiSelectedIds.add(el.id);
+                                      });
+                                      return;
+                                    }
                                     _selectElement(el.id);
                                     Navigator.pop(ctx);
                                   },
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: Icon(
-                                            el.locked ? Icons.lock : Icons.lock_open,
-                                            size: 17),
-                                        onPressed: () {
-                                          setState(() => el.locked = !el.locked);
-                                          setSheetState(() {});
-                                          _markDirty();
-                                        },
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.arrow_upward, size: 17),
-                                        onPressed: () {
-                                          _reorderLayer(el.id, 1);
-                                          setSheetState(() {});
-                                        },
-                                      ),
-                                      IconButton(
-                                        icon:
-                                            const Icon(Icons.arrow_downward, size: 17),
-                                        onPressed: () {
-                                          _reorderLayer(el.id, -1);
-                                          setSheetState(() {});
-                                        },
-                                      ),
-                                      IconButton(
-                                        icon:
-                                            const Icon(Icons.delete_outline, size: 17),
-                                        onPressed: () {
-                                          _pushUndo();
-                                          setState(() {
-                                            _elements
-                                                .removeWhere((e) => e.id == el.id);
-                                            if (_selectedId == el.id) {
-                                              _selectedId = null;
-                                            }
-                                          });
-                                          setSheetState(() {});
-                                          _markDirty();
-                                        },
-                                      ),
-                                    ],
-                                  ),
+                                  trailing: multiSelect
+                                      ? null
+                                      : Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            IconButton(
+                                              icon: Icon(
+                                                  el.locked ? Icons.lock : Icons.lock_open,
+                                                  size: 17),
+                                              onPressed: () {
+                                                setState(() => el.locked = !el.locked);
+                                                setSheetState(() {});
+                                                _markDirty();
+                                              },
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(Icons.arrow_upward, size: 17),
+                                              onPressed: () {
+                                                _reorderLayer(el.id, 1);
+                                                setSheetState(() {});
+                                              },
+                                            ),
+                                            IconButton(
+                                              icon:
+                                                  const Icon(Icons.arrow_downward, size: 17),
+                                              onPressed: () {
+                                                _reorderLayer(el.id, -1);
+                                                setSheetState(() {});
+                                              },
+                                            ),
+                                            IconButton(
+                                              icon:
+                                                  const Icon(Icons.delete_outline, size: 17),
+                                              onPressed: () {
+                                                _pushUndo();
+                                                setState(() {
+                                                  _elements
+                                                      .removeWhere((e) => e.id == el.id);
+                                                  if (_selectedId == el.id) {
+                                                    _selectedId = null;
+                                                  }
+                                                });
+                                                setSheetState(() {});
+                                                _markDirty();
+                                              },
+                                            ),
+                                          ],
+                                        ),
                                 );
                               },
                             ),
                     ),
+                    if (multiSelect && _multiSelectedIds.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text('${_multiSelectedIds.length} selected',
+                                  style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                            ),
+                            TextButton.icon(
+                              icon: const Icon(Icons.copy, size: 18),
+                              label: const Text('Duplicate'),
+                              onPressed: () {
+                                final ids = Set<String>.from(_multiSelectedIds);
+                                _bulkDuplicateSelected(ids);
+                                setSheetState(() => _multiSelectedIds.clear());
+                              },
+                            ),
+                            TextButton.icon(
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                              label: const Text('Delete'),
+                              onPressed: () {
+                                final ids = Set<String>.from(_multiSelectedIds);
+                                _bulkDeleteSelected(ids);
+                                setSheetState(() => _multiSelectedIds.clear());
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ),
