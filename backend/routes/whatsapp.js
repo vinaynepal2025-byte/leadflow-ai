@@ -190,7 +190,7 @@ router.post('/process-scheduled', async (req, res) => {
   }
 
   const due = await db.prepare(
-    "SELECT * FROM scheduled_messages WHERE status = 'pending' AND send_at <= datetime('now')"
+    "SELECT * FROM scheduled_messages WHERE status = 'pending' AND send_at <= NOW()"
   ).all();
 
   const results = [];
@@ -212,7 +212,7 @@ router.post('/process-scheduled', async (req, res) => {
           INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body)
           VALUES (?, ?, ?, 'whatsapp', 'outbound', ?)
         `).run(randomUUID(), tid, msg.lead_id, msg.body_text);
-        await db.prepare("UPDATE scheduled_messages SET status = 'sent', sent_at = datetime('now') WHERE id = ?").run(msg.id);
+        await db.prepare("UPDATE scheduled_messages SET status = 'sent', sent_at = NOW() WHERE id = ?").run(msg.id);
         results.push({ id: msg.id, status: 'sent' });
       } catch (err) {
         await db.prepare("UPDATE scheduled_messages SET status = 'failed' WHERE id = ?").run(msg.id);
@@ -232,7 +232,7 @@ router.post('/process-scheduled', async (req, res) => {
         linkType: 'lead',
         linkId: msg.lead_id,
       });
-      await db.prepare("UPDATE scheduled_messages SET status = 'needs_manual_send', sent_at = datetime('now') WHERE id = ?").run(msg.id);
+      await db.prepare("UPDATE scheduled_messages SET status = 'needs_manual_send', sent_at = NOW() WHERE id = ?").run(msg.id);
       results.push({ id: msg.id, status: 'needs_manual_send' });
     }
   }
