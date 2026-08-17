@@ -4,7 +4,7 @@ Generated read-only via the Supabase MCP server against the live `leadflow-ai` p
 
 **Live counts at snapshot time:** 4 tenants, 785 leads, 56 tables total. Real production data — treat accordingly.
 
-**Note:** `dashboard_sections` and `lead_list_fields` (added earlier this session, migration files exist at `backend/migrations/2026-08-17-dashboard-sections.js` and `2026-08-17-lead-list-fields.js`) are **not present in this list** — confirms those two migrations still haven't been run against production. Customize Dashboard / Customize Leads List will continue 404ing until someone runs them.
+**Update (2026-08-17, later same day):** `dashboard_sections` and `lead_list_fields` were missing at snapshot time (confirmed by the table list below, which predates the fix). Both migrations (`backend/migrations/2026-08-17-dashboard-sections.js`, `2026-08-17-lead-list-fields.js`) have since been applied against production via `mcp__Supabase__apply_migration` — additive, idempotent `CREATE TABLE IF NOT EXISTS` + index only, no existing data touched. Verified post-apply: both tables exist with the exact columns their routes (`backend/routes/dashboardSections.js`, `backend/routes/leadListFields.js`) expect. Customize Dashboard / Customize Leads List are no longer broken in production — the table list below is now stale on this one point.
 
 ## Tables (56)
 
