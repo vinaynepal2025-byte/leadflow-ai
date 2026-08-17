@@ -92,6 +92,29 @@ router.patch('/:id', async (req, res) => {
   res.json(await attachUrls(await db.prepare('SELECT * FROM flyer_projects WHERE id = ?').get(req.params.id)));
 });
 
+// POST /flyer-projects/:id/duplicate — copies title/canvas/elements/
+// background into a brand-new project (its own id, its own autosave
+// history from here on). Does not carry over rendered_image_path -- a
+// duplicate is a fresh editing session, not a copy of a specific past
+// export, and the two should never appear to share one exported image.
+router.post('/:id/duplicate', async (req, res) => {
+  const tid = tenantId(req);
+  const source = await db.prepare('SELECT * FROM flyer_projects WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!source) return res.status(404).json({ error: 'Flyer project not found' });
+
+  const id = randomUUID();
+  await db.prepare(`
+    INSERT INTO flyer_projects (id, tenant_id, lead_id, title, canvas_width, canvas_height, canvas_json, background_color, background_image_path, ai_generated, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, tid, source.lead_id, `Copy of ${source.title || 'Untitled'}`,
+    source.canvas_width, source.canvas_height, JSON.stringify(source.canvas_json),
+    source.background_color, source.background_image_path, source.ai_generated, source.created_by,
+  );
+
+  res.status(201).json(await attachUrls(await db.prepare('SELECT * FROM flyer_projects WHERE id = ?').get(id)));
+});
+
 // POST /flyer-projects/:id/background  (multipart: file=<image>)
 // Uploads a background image (photo behind the design elements).
 router.post('/:id/background', upload.single('file'), async (req, res) => {

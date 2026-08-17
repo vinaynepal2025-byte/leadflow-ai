@@ -2070,6 +2070,12 @@ class ApiService {
     _checkOk(res);
   }
 
+  Future<Map<String, dynamic>> duplicateFlyerProject(String id) async {
+    final res = await http.post(Uri.parse('$baseUrl/flyer-projects/$id/duplicate'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> getTenantLogos() async {
     final res = await http.get(Uri.parse('$baseUrl/tenant-logos'), headers: _headers);
     _checkOk(res);
