@@ -11,7 +11,7 @@ Legend: ✅ have it (real, working) · 🟡 partial (real seed, needs expansion)
 | 8 | AI Workforce (worker framework) | 🟡 | 4 real narrow "workers" exist (`aiAnalysis`, `leadScoring`, `smartTriage`, `predictions`) but none have the formal schema (tools/permissions/memory/audit/retry/approval) §8 requires |
 | 9 | AI Orchestrator | ❌ | No task-decomposition/worker-selection layer; each AI feature is called directly by its own route |
 | 10 | Provider abstraction | 🟡 | `aiProvider.js` real and working for text (Claude/Gemini/OpenRouter); no image/video/voice/embedding/rerank/OCR/moderation adapters |
-| 11 | Creative/Video engine | 🟡 | Image-only (SVG→PNG via `sharp`, Flyer/Logo Studio); no video, no FFmpeg, no brief→script→storyboard pipeline |
+| 11 | Creative/Video engine | 🟡 | Image-only. Substantially deepened since first noted here — see `LOGO_STUDIO_FEATURES.md`: real SVG/vector element type, real AI-composed logo generation (not just template fill-in), Asset Library, Brand Kit, multi-format export (JPG/WebP/ICO via `sharp`). Still no video, no FFmpeg, no brief→script→storyboard pipeline. |
 | 12 | Opportunity Radar | ❌ | No opportunity-detection pass exists; closest relative is `engagementTrend.js` (raw signal, not surfaced as actionable cards) |
 | 13 | Lost Lead Autopsy | ❌ | Not built. `predictions.js` (admission matching) and `leadScoring.js` are adjacent building blocks but no "why lost → recovery strategy" pipeline exists |
 | 14 | AI Creative Experimentation | ❌ | No variant generation/tracking system |
