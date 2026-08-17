@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/lead.dart';
@@ -2068,6 +2069,37 @@ class ApiService {
   Future<void> deleteFlyerProject(String id) async {
     final res = await http.delete(Uri.parse('$baseUrl/flyer-projects/$id'), headers: _headers);
     _checkOk(res);
+  }
+
+  /// Real format conversion via the backend's sharp pipeline (format: png,
+  /// jpg, webp, or favicon -- a genuine ICO container, not a relabeled
+  /// PNG). Returns the converted file's raw bytes for the caller to write
+  /// to a temp file and share/save -- see flyer_studio_screen.dart's
+  /// _exportAsFormat.
+  Future<Uint8List> exportFlyerFormat(
+    String projectId,
+    Uint8List pngBytes,
+    String format, {
+    int? width,
+    int? height,
+  }) async {
+    final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/export');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll(_multipartHeaders)
+      ..fields['format'] = format
+      ..files.add(http.MultipartFile.fromBytes('file', pngBytes, filename: 'canvas.png'));
+    if (width != null) request.fields['width'] = width.toString();
+    if (height != null) request.fields['height'] = height.toString();
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode != 200) {
+      String message = 'Export failed (${response.statusCode})';
+      try {
+        message = jsonDecode(response.body)['error'] ?? message;
+      } catch (_) {}
+      throw Exception(message);
+    }
+    return response.bodyBytes;
   }
 
   Future<Map<String, dynamic>> duplicateFlyerProject(String id) async {

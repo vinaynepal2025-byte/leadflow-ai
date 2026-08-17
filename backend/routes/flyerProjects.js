@@ -9,6 +9,50 @@ const { buildWhatsAppLink } = require('../services/phone');
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+// sharp is loaded lazily -- same deliberate safety choice as
+// routes/tenantLogos.js: if sharp fails to load, only export conversion
+// fails, the rest of this route file (including autosave, the whole
+// editor) keeps working.
+let sharpModule = null;
+let sharpLoadError = null;
+function getSharp() {
+  if (sharpModule) return sharpModule;
+  if (sharpLoadError) throw sharpLoadError;
+  try {
+    sharpModule = require('sharp');
+    return sharpModule;
+  } catch (err) {
+    sharpLoadError = err;
+    throw err;
+  }
+}
+
+// Wraps a PNG buffer in a minimal single-image ICO container (the
+// Vista+ format, where an ICO entry can hold raw PNG bytes directly --
+// every modern browser/OS accepts this for a favicon). sharp has no ICO
+// encoder, and pulling in a new dependency for ~20 lines of binary
+// header-writing didn't clear the Dependency Policy bar (master spec
+// §36) -- this is a real, spec-correct ICO file, not a renamed PNG.
+function pngToIco(pngBuffer, size) {
+  const iconDir = Buffer.alloc(6);
+  iconDir.writeUInt16LE(0, 0); // reserved
+  iconDir.writeUInt16LE(1, 2); // type: icon
+  iconDir.writeUInt16LE(1, 4); // image count
+
+  const entry = Buffer.alloc(16);
+  const dim = size >= 256 ? 0 : size; // 0 means "256" in ICO's 1-byte field
+  entry.writeUInt8(dim, 0); // width
+  entry.writeUInt8(dim, 1); // height
+  entry.writeUInt8(0, 2); // color count (0 = not palette-based)
+  entry.writeUInt8(0, 3); // reserved
+  entry.writeUInt16LE(1, 4); // color planes
+  entry.writeUInt16LE(32, 6); // bits per pixel
+  entry.writeUInt32LE(pngBuffer.length, 8); // size of image data
+  entry.writeUInt32LE(6 + 16, 12); // offset of image data from file start
+
+  return Buffer.concat([iconDir, entry, pngBuffer]);
+}
+
 function tenantId(req) {
   return req.header('x-tenant-id') || 'demo-consultancy';
 }
@@ -183,6 +227,89 @@ router.post('/:id/render', upload.single('file'), async (req, res) => {
     .run(storagePath, tid, req.params.id);
 
   res.json(await attachUrls(await db.prepare('SELECT * FROM flyer_projects WHERE id = ?').get(req.params.id)));
+});
+
+// POST /flyer-projects/:id/export  (multipart: file=<PNG>, format=png|jpg|webp|favicon, width?, height?)
+// Takes the client's captured canvas PNG and returns a genuinely
+// converted file -- real format conversion via sharp, never the same
+// bytes relabeled with a different extension. Also archives the result
+// to the tenant's Asset Library as a best-effort background step (never
+// blocks the response the counsellor is waiting on to actually share
+// the file), same "sharing is the actual intent" philosophy as /render.
+router.post('/:id/export', upload.single('file'), async (req, res) => {
+  const tid = tenantId(req);
+  const project = await db.prepare('SELECT id FROM flyer_projects WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!project) return res.status(404).json({ error: 'Flyer project not found' });
+  if (!req.file) return res.status(400).json({ error: 'file is required' });
+
+  const format = (req.body.format || 'png').toLowerCase();
+  if (!['png', 'jpg', 'webp', 'favicon'].includes(format)) {
+    return res.status(400).json({ error: 'format must be one of: png, jpg, webp, favicon' });
+  }
+  const width = req.body.width ? parseInt(req.body.width, 10) : null;
+  const height = req.body.height ? parseInt(req.body.height, 10) : null;
+
+  let sharpFn;
+  try {
+    sharpFn = getSharp();
+  } catch (err) {
+    return res.status(502).json({ error: 'Image engine unavailable' });
+  }
+
+  let outBuffer, ext, mime;
+  try {
+    if (format === 'favicon') {
+      const size = width || 32;
+      const pngBuf = await sharpFn(req.file.buffer)
+        .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toBuffer();
+      outBuffer = pngToIco(pngBuf, size);
+      ext = 'ico';
+      mime = 'image/x-icon';
+    } else {
+      let pipeline = sharpFn(req.file.buffer);
+      if (width && height) {
+        pipeline = pipeline.resize(width, height, {
+          fit: 'contain',
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        });
+      }
+      if (format === 'jpg') {
+        outBuffer = await pipeline.flatten({ background: '#FFFFFF' }).jpeg({ quality: 92 }).toBuffer();
+        ext = 'jpg';
+        mime = 'image/jpeg';
+      } else if (format === 'webp') {
+        outBuffer = await pipeline.webp({ quality: 92 }).toBuffer();
+        ext = 'webp';
+        mime = 'image/webp';
+      } else {
+        outBuffer = await pipeline.png().toBuffer();
+        ext = 'png';
+        mime = 'image/png';
+      }
+    }
+  } catch (err) {
+    return res.status(502).json({ error: `Export conversion failed: ${err.message}` });
+  }
+
+  // Fire-and-forget archive to the Asset Library.
+  (async () => {
+    try {
+      const storagePath = `flyer-exports/${tid}/${req.params.id}-${Date.now()}.${ext}`;
+      await uploadFile(outBuffer, storagePath, mime);
+      await db.prepare(`
+        INSERT INTO tenant_assets (id, tenant_id, kind, label, storage_path)
+        VALUES (?, ?, 'export', ?, ?)
+      `).run(randomUUID(), tid, req.body.label || null, storagePath);
+    } catch (_) {
+      // Silent -- this is a backup path, not the request's actual purpose.
+    }
+  })();
+
+  res.set('Content-Type', mime);
+  res.set('Content-Disposition', `attachment; filename="export.${ext}"`);
+  res.status(200).send(outBuffer);
 });
 
 // POST /flyer-projects/:id/ai-generate

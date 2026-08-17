@@ -1638,6 +1638,87 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
   }
 
+  /// Real multi-format export -- JPG/WebP/Favicon via the backend's sharp
+  /// pipeline (POST /flyer-projects/:id/export), on top of the plain-PNG
+  /// capture every other export path here uses. "Never rename one file
+  /// type as another" (master spec §17): each format is a genuine
+  /// conversion, not the same PNG bytes wearing a different extension --
+  /// see backend/routes/flyerProjects.js for the sharp calls and the
+  /// hand-rolled PNG-in-ICO container for 'favicon'.
+  Future<void> _showExportFormatSheet() async {
+    if (_projectId == null) return;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _sheetDragHandle(),
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('JPG'),
+              subtitle: const Text('Smaller file, no transparency'),
+              onTap: () => Navigator.pop(ctx, 'jpg'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('WebP'),
+              subtitle: const Text('Smaller file, keeps transparency'),
+              onTap: () => Navigator.pop(ctx, 'webp'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.web),
+              title: const Text('Favicon (.ico)'),
+              subtitle: const Text('32×32, for a website tab icon'),
+              onTap: () => Navigator.pop(ctx, 'favicon'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+    await _exportAsFormat(choice);
+  }
+
+  Future<void> _exportAsFormat(String format) async {
+    if (_projectId == null) return;
+    setState(() {
+      _selectedId = null;
+      _exporting = true;
+    });
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    try {
+      final pngBytes = await _captureCanvasBytes();
+      if (pngBytes == null) return;
+
+      final converted = await _api.exportFlyerFormat(
+        _projectId!,
+        pngBytes,
+        format,
+        width: format == 'favicon' ? 32 : null,
+        height: format == 'favicon' ? 32 : null,
+      );
+
+      final ext = format == 'favicon' ? 'ico' : format;
+      final dir = await getTemporaryDirectory();
+      final safeTitle = _title.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-');
+      final file = File('${dir.path}/$safeTitle-${DateTime.now().millisecondsSinceEpoch}.$ext');
+      await file.writeAsBytes(converted);
+
+      await Share.shareXFiles([XFile(file.path)], text: _title);
+    } catch (e) {
+      _showSnack('Export failed: $e');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   /// Share options. Sending straight to the lead is listed first and framed
   /// by name, because that is the actual job to be done -- the generic share
   /// sheet costs three extra taps (pick app, search contact, pick contact) at
@@ -1794,6 +1875,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 if (v == 'save') _save();
                 if (v == 'rename') _renameFlyer();
                 if (v == 'exportAll') _exportAllSizes();
+                if (v == 'exportFormat') _showExportFormatSheet();
               },
               itemBuilder: (ctx) => const [
                 PopupMenuItem(value: 'layers', child: Text('Layers')),
@@ -1802,6 +1884,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 PopupMenuItem(value: 'save', child: Text('Save now')),
                 PopupMenuItem(
                     value: 'exportAll', child: Text('Export all sizes (Story/Post/A4...)')),
+                PopupMenuItem(
+                    value: 'exportFormat', child: Text('Export as (JPG/WebP/Favicon)')),
               ],
             ),
           ],
