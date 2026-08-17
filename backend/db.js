@@ -32,22 +32,62 @@ function translate(sql) {
   return out;
 }
 
-function prepare(sql) {
-  const translated = translate(sql);
-  return {
-    async get(...params) {
-      const result = await pool.query(translated, params);
-      return result.rows[0];
-    },
-    async all(...params) {
-      const result = await pool.query(translated, params);
-      return result.rows;
-    },
-    async run(...params) {
-      const result = await pool.query(translated, params);
-      return { changes: result.rowCount, lastInsertRowid: undefined };
-    },
+// Builds a .get/.all/.run object bound to whatever can run a query --
+// the shared pool (auto-managed connection per call, the original
+// behaviour) or a single checked-out client (so every prepare() inside
+// one transaction runs on the same connection, same session, same
+// BEGIN/COMMIT). Same shape either way, so existing route code doesn't
+// need to know or care which one it's using.
+function makePreparer(queryable) {
+  return function prepare(sql) {
+    const translated = translate(sql);
+    return {
+      async get(...params) {
+        const result = await queryable.query(translated, params);
+        return result.rows[0];
+      },
+      async all(...params) {
+        const result = await queryable.query(translated, params);
+        return result.rows;
+      },
+      async run(...params) {
+        const result = await queryable.query(translated, params);
+        return { changes: result.rowCount, lastInsertRowid: undefined };
+      },
+    };
   };
+}
+
+const prepare = makePreparer(pool);
+
+// Real transactions -- TECH_DEBT.md's #2 finding ("no BEGIN/COMMIT
+// wrapper, multi-step writes aren't atomic") fixed. Usage:
+//   await db.transaction(async (tx) => {
+//     await tx.prepare('INSERT INTO leads (...) VALUES (...)').run(...);
+//     await tx.prepare('INSERT INTO automation_log (...) VALUES (...)').run(...);
+//   });
+// Every tx.prepare(...) call inside the callback runs on the same
+// checked-out client, so they all commit or all roll back together.
+// Returns the callback's return value; rolls back and rethrows on any
+// error, including one thrown intentionally by the caller to abort.
+async function transaction(callback) {
+  const client = await pool.connect();
+  const tx = { prepare: makePreparer(client) };
+  try {
+    await client.query('BEGIN');
+    const result = await callback(tx);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackErr) {
+      console.error('Rollback itself failed (connection likely already dead):', rollbackErr.message);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // Prevent idle connection drops (network blips, pooler timeouts) from
@@ -57,4 +97,4 @@ pool.on('error', (err) => {
   console.error('Unexpected Postgres pool error (recovered, not fatal):', err.message);
 });
 
-module.exports = { prepare, pool };
+module.exports = { prepare, transaction, pool };
