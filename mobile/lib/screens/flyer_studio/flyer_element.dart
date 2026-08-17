@@ -211,6 +211,12 @@ class FlyerElement {
   double lineHeight;
   double letterSpacing;
   bool textShadow;
+  // Text effects (Canva-parity Phase B). outlineWidth 0 / curveAmount 0 both
+  // mean "no effect", so existing text elements render and serialize
+  // identically to before these fields existed.
+  String? outlineColor; // hex or null (no stroke outline)
+  double outlineWidth; // 0..12, logical px before scale
+  double curveAmount; // -100..100; 0 = straight, + arcs up, - arcs down
 
   // Image / logo-specific
   String? url;
@@ -272,6 +278,9 @@ class FlyerElement {
     this.lineHeight = 1.2,
     this.letterSpacing = 0,
     this.textShadow = false,
+    this.outlineColor,
+    this.outlineWidth = 0,
+    this.curveAmount = 0,
     this.url,
     this.fit = 'cover',
     this.cornerRadius = 0,
@@ -314,6 +323,9 @@ class FlyerElement {
       lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.2,
       letterSpacing: (json['letterSpacing'] as num?)?.toDouble() ?? 0,
       textShadow: json['textShadow'] == true,
+      outlineColor: json['outlineColor']?.toString(),
+      outlineWidth: (json['outlineWidth'] as num?)?.toDouble() ?? 0,
+      curveAmount: (json['curveAmount'] as num?)?.toDouble() ?? 0,
       url: json['url']?.toString(),
       fit: json['fit']?.toString() ?? 'cover',
       cornerRadius: (json['cornerRadius'] as num?)?.toDouble() ?? 0,
@@ -358,6 +370,9 @@ class FlyerElement {
       map['letterSpacing'] = letterSpacing;
       map['textShadow'] = textShadow;
       if (backgroundColor != null) map['backgroundColor'] = backgroundColor;
+      if (outlineColor != null) map['outlineColor'] = outlineColor;
+      map['outlineWidth'] = outlineWidth;
+      map['curveAmount'] = curveAmount;
     } else if (type == FlyerElementType.image || type == FlyerElementType.logo) {
       map['url'] = url ?? '';
       map['fit'] = fit;

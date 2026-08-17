@@ -18,12 +18,12 @@ Today: icon picker, SVG import, and Asset Library are three separate entry point
 ## Phase B — Text effects
 
 Shadow and background-highlight already exist. Canva's other headline text effects: **outline/stroke**, **curved text** (on the live canvas, not just server-rendered logo templates), lift (soft drop shadow, a shadow-preset variant), hollow (stroke-only, no fill).
-**Status: 📋**, high value, low effort (Flutter's `TextStyle.foreground` with a stroke `Paint` gets outline directly; curved text needs per-character positioning along an arc, same math as the existing server-side `archText()` in `logoTemplates.js`, ported to the live Flutter canvas).
+**Status: ✅ shipped this pass** — outline via a stroked `Paint` copy of the text layered behind the filled copy (works standalone and combined with curve); curved text via a new `CurvedTextPainter` (`flyer_canvas_element_widget.dart`) that places each glyph along a real circular arc derived from a chord/sagitta relationship (arc always spans the element's width; `curveAmount` -100..100 controls how much it bulges, positive up / negative down) — same per-character trig as the server-side `archText()` in `logoTemplates.js`, now live and editable on-canvas instead of only baked into logo template SVGs. "Hollow" (stroke-only, transparent fill) and "Lift" (a shadow-preset variant of the existing `textShadow` toggle) were not built as separate controls this pass — the colour picker only stores opaque RGB today (`flyerColorToHex` drops alpha), so hollow specifically needs that widened before it's real, not just wired up. Tracked here rather than silently dropped.
 
 ## Phase C — Photo adjustments/filters
 
 Brightness, contrast, saturation, and a duotone effect. Today an image element only has `cornerRadius`/`fit` — zero photo-editing controls.
-**Status: 🔨 this pass** — all achievable client-side via `ColorFilter`/`ColorFiltered` matrices, no new dependency, no server round-trip.
+**Status: ✅ shipped** — brightness/contrast/saturation achieved client-side via `ColorFilter`/`ColorFiltered` matrices, no new dependency, no server round-trip. Duotone (2-colour gradient map effect) not yet built — tracked here rather than silently dropped.
 
 ## Phase D — Frames & photo grids
 
@@ -87,8 +87,8 @@ Canva's AI suite: generate a whole design from a prompt, AI copywriting, text-to
 | Phase | Status |
 |---|---|
 | A — Unified Elements panel | 📋 |
-| B — Text effects (outline/curved) | 📋 |
-| C — Photo adjustments/filters | 🔨 this pass |
+| B — Text effects (outline/curved) | ✅ outline + curve shipped; hollow/lift not yet |
+| C — Photo adjustments/filters | ✅ brightness/contrast/saturation shipped; duotone not yet |
 | D — Frames & grids | 📋 |
 | E — Draw tool | 📋 |
 | F — Charts | 📋 |

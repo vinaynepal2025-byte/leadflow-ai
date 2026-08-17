@@ -815,6 +815,76 @@ class FlyerCanvasElementWidget extends StatelessWidget {
   Widget _buildContent(double w, double h) {
     switch (element.type) {
       case FlyerElementType.text:
+        final displayText = element.text?.isNotEmpty == true
+            ? element.text!
+            : (exporting ? '' : 'Double-tap to edit');
+        final baseStyle = TextStyle(
+          fontSize: element.fontSize * scale,
+          fontFamily: element.fontFamily,
+          color: flyerHexToColor(element.color),
+          fontWeight:
+              element.fontWeight == 'bold' ? FontWeight.bold : FontWeight.normal,
+          fontStyle: element.italic ? FontStyle.italic : FontStyle.normal,
+          height: element.lineHeight,
+          letterSpacing: element.letterSpacing * scale,
+          decoration:
+              element.underline ? TextDecoration.underline : TextDecoration.none,
+          shadows: element.textShadow
+              ? [
+                  Shadow(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    blurRadius: 6 * scale,
+                    offset: Offset(0, 2 * scale),
+                  ),
+                ]
+              : null,
+        );
+        final hasOutline = element.outlineColor != null && element.outlineWidth > 0;
+        Widget textChild;
+        if (element.curveAmount != 0 && displayText.isNotEmpty) {
+          // Curved text (Canva-parity Phase B) -- each glyph placed along a
+          // real circular arc via CustomPainter, same trig used server-side
+          // by archText() in logoTemplates.js, ported to the live canvas.
+          textChild = CustomPaint(
+            size: Size(w, h),
+            painter: CurvedTextPainter(
+              text: displayText,
+              style: baseStyle,
+              curveAmount: element.curveAmount,
+              outlineColor: hasOutline ? flyerHexToColor(element.outlineColor!) : null,
+              outlineWidth: element.outlineWidth * scale,
+            ),
+          );
+        } else if (hasOutline) {
+          // Stroke-outline effect: paint a stroked copy of the text behind
+          // the normal filled copy, both identically laid out via Stack.
+          textChild = Stack(
+            children: [
+              Text(
+                displayText,
+                textAlign: _textAlignFor(element.textAlign),
+                style: baseStyle.copyWith(
+                  foreground: Paint()
+                    ..style = PaintingStyle.stroke
+                    ..strokeWidth = element.outlineWidth * scale
+                    ..color = flyerHexToColor(element.outlineColor!),
+                  shadows: null,
+                ),
+              ),
+              Text(
+                displayText,
+                textAlign: _textAlignFor(element.textAlign),
+                style: baseStyle,
+              ),
+            ],
+          );
+        } else {
+          textChild = Text(
+            displayText,
+            textAlign: _textAlignFor(element.textAlign),
+            style: baseStyle,
+          );
+        }
         return Opacity(
           opacity: element.opacity,
           child: Container(
@@ -825,33 +895,7 @@ class FlyerCanvasElementWidget extends StatelessWidget {
                 ? flyerHexToColor(element.backgroundColor!)
                 : Colors.transparent,
             padding: const EdgeInsets.all(4),
-            child: Text(
-              element.text?.isNotEmpty == true
-                  ? element.text!
-                  : (exporting ? '' : 'Double-tap to edit'),
-              textAlign: _textAlignFor(element.textAlign),
-              style: TextStyle(
-                fontSize: element.fontSize * scale,
-                fontFamily: element.fontFamily,
-                color: flyerHexToColor(element.color),
-                fontWeight:
-                    element.fontWeight == 'bold' ? FontWeight.bold : FontWeight.normal,
-                fontStyle: element.italic ? FontStyle.italic : FontStyle.normal,
-                height: element.lineHeight,
-                letterSpacing: element.letterSpacing * scale,
-                decoration:
-                    element.underline ? TextDecoration.underline : TextDecoration.none,
-                shadows: element.textShadow
-                    ? [
-                        Shadow(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          blurRadius: 6 * scale,
-                          offset: Offset(0, 2 * scale),
-                        ),
-                      ]
-                    : null,
-              ),
-            ),
+            child: textChild,
           ),
         );
       case FlyerElementType.image:
@@ -1035,5 +1079,121 @@ class FlyerCanvasElementWidget extends StatelessWidget {
       default:
         return TextAlign.left;
     }
+  }
+}
+
+/// Curved text (Canva-parity Phase B). Places each character along a real
+/// circular arc computed from a chord/sagitta relationship: the arc always
+/// spans exactly the element's width, and how far it bulges is driven by
+/// [curveAmount] (-100..100; 0 is handled by the caller before reaching
+/// here, positive bulges the text upward like a rainbow, negative bulges it
+/// downward). Same character-placement trig as the server-side archText()
+/// in backend/services/logoTemplates.js, ported to a live, editable canvas.
+class CurvedTextPainter extends CustomPainter {
+  final String text;
+  final TextStyle style;
+  final double curveAmount;
+  final Color? outlineColor;
+  final double outlineWidth;
+
+  CurvedTextPainter({
+    required this.text,
+    required this.style,
+    required this.curveAmount,
+    this.outlineColor,
+    this.outlineWidth = 0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final chars = text.split('');
+    if (chars.isEmpty || size.width <= 0 || size.height <= 0) return;
+
+    final bulgeUp = curveAmount >= 0;
+    final maxSagitta = size.height * 0.5;
+    final sagitta = (curveAmount.abs() / 100).clamp(0.0, 1.0) * maxSagitta;
+    final halfChord = size.width / 2;
+    final cx = size.width / 2;
+    final centerY = size.height / 2;
+
+    // Degenerate case (sagitta ~0, e.g. a near-flat element): fall back to
+    // a straight baseline rather than dividing by ~0 in the radius formula.
+    if (sagitta < 0.5) {
+      _paintStraightFallback(canvas, size);
+      return;
+    }
+
+    final radius = (halfChord * halfChord + sagitta * sagitta) / (2 * sagitta);
+    final halfSpanRad = math.asin((halfChord / radius).clamp(-1.0, 1.0));
+    final cyCenter =
+        bulgeUp ? centerY - sagitta / 2 + radius : centerY + sagitta / 2 - radius;
+
+    // Measure each character's width up front so characters are spaced by
+    // actual glyph advance, not a uniform guess.
+    final painters = chars
+        .map((ch) => TextPainter(
+              text: TextSpan(text: ch, style: style),
+              textDirection: TextDirection.ltr,
+            )..layout())
+        .toList();
+    final totalWidth = painters.fold<double>(0, (sum, p) => sum + p.width);
+    if (totalWidth <= 0) return;
+
+    var traveled = 0.0;
+    for (var i = 0; i < chars.length; i++) {
+      final p = painters[i];
+      // Character's centre, as a fraction of total advance, mapped onto the
+      // arc's angular span.
+      final midFraction = (traveled + p.width / 2) / totalWidth;
+      traveled += p.width;
+      final rad = -halfSpanRad + (2 * halfSpanRad) * midFraction;
+
+      final x = cx + radius * math.sin(rad);
+      final y = bulgeUp
+          ? cyCenter - radius * math.cos(rad)
+          : cyCenter + radius * math.cos(rad);
+      final rotation = bulgeUp ? rad : -rad;
+
+      canvas.save();
+      canvas.translate(x, y);
+      canvas.rotate(rotation);
+      final glyphOffset = Offset(-p.width / 2, -p.height / 2);
+      if (outlineColor != null && outlineWidth > 0) {
+        final strokePainter = TextPainter(
+          text: TextSpan(
+            text: chars[i],
+            style: style.copyWith(
+              foreground: Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = outlineWidth
+                ..color = outlineColor!,
+              shadows: null,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        strokePainter.paint(canvas, glyphOffset);
+      }
+      p.paint(canvas, glyphOffset);
+      canvas.restore();
+    }
+  }
+
+  void _paintStraightFallback(Canvas canvas, Size size) {
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: size.width);
+    tp.paint(canvas, Offset((size.width - tp.width) / 2, (size.height - tp.height) / 2));
+  }
+
+  @override
+  bool shouldRepaint(covariant CurvedTextPainter oldDelegate) {
+    return oldDelegate.text != text ||
+        oldDelegate.style != style ||
+        oldDelegate.curveAmount != curveAmount ||
+        oldDelegate.outlineColor != outlineColor ||
+        oldDelegate.outlineWidth != outlineWidth;
   }
 }

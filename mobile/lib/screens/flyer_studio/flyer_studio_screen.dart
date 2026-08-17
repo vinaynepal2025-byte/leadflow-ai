@@ -2843,7 +2843,52 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _markDirty();
             },
           ),
+          IconButton(
+            icon: Icon(Icons.format_color_text,
+                color: el.outlineColor != null ? activeColor : null),
+            tooltip: 'Outline',
+            onPressed: () async {
+              if (el.outlineColor != null) {
+                setState(() => el.outlineColor = null);
+                _markDirty();
+                return;
+              }
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => const ColorPickerDialog(
+                    initial: Colors.black, title: 'Outline Colour'),
+              );
+              if (picked != null) {
+                setState(() {
+                  el.outlineColor = flyerColorToHex(picked);
+                  if (el.outlineWidth <= 0) el.outlineWidth = 2;
+                });
+                _markDirty();
+              }
+            },
+          ),
         ],
+      ),
+      if (el.outlineColor != null)
+        _sliderRow(
+          icon: Icons.line_weight,
+          value: el.outlineWidth.clamp(0.5, 12.0),
+          min: 0.5,
+          max: 12.0,
+          onChanged: (v) {
+            setState(() => el.outlineWidth = v);
+            _markDirty();
+          },
+        ),
+      _sliderRow(
+        icon: Icons.waves,
+        value: el.curveAmount.clamp(-100.0, 100.0),
+        min: -100.0,
+        max: 100.0,
+        onChanged: (v) {
+          setState(() => el.curveAmount = v);
+          _markDirty();
+        },
       ),
       _sliderRow(
         icon: Icons.format_size,
