@@ -23,6 +23,8 @@ const Map<String, String> kIconShapeLabels = {
   'square': 'Square',
   'diamond': 'Diamond',
   'hexagon': 'Hexagon',
+  'star': 'Star',
+  'shield': 'Shield',
 };
 
 class GenerateLogoScreen extends StatefulWidget {
@@ -80,6 +82,20 @@ class _GenerateLogoScreenState extends State<GenerateLogoScreen> {
     }
   }
 
+  /// The selected template's declared field list, straight from the
+  /// backend (routes/tenantLogos.js's GET /templates) -- driving which
+  /// optional inputs (initials, icon shape) this screen shows off of
+  /// this instead of a hardcoded per-template-id switch means a new
+  /// template that declares 'initials' or 'icon_shape' in its own
+  /// fields array automatically gets the matching input here with zero
+  /// Flutter changes, the same way it already gets picked up by the
+  /// template chooser above with zero changes.
+  List<String> get _currentTemplateFields {
+    final match = _templates.where((t) => t['id'] == _templateId).toList();
+    if (match.isEmpty) return const [];
+    return (match.first['fields'] as List?)?.cast<String>() ?? const [];
+  }
+
   Map<String, dynamic> _buildFields() {
     final fields = <String, dynamic>{
       'brand_name': _brandNameCtrl.text.trim().isEmpty ? 'Brand Name' : _brandNameCtrl.text.trim(),
@@ -87,10 +103,10 @@ class _GenerateLogoScreenState extends State<GenerateLogoScreen> {
       'accent_color': _colorToHex(_accentColor),
       'font_family': _fontFamily,
     };
-    if (_templateId == 'monogram_badge' && _initialsCtrl.text.trim().isNotEmpty) {
+    if (_currentTemplateFields.contains('initials') && _initialsCtrl.text.trim().isNotEmpty) {
       fields['initials'] = _initialsCtrl.text.trim();
     }
-    if (_templateId == 'icon_text') {
+    if (_currentTemplateFields.contains('icon_shape')) {
       fields['icon_shape'] = _iconShape;
     }
     return fields;
@@ -214,7 +230,7 @@ class _GenerateLogoScreenState extends State<GenerateLogoScreen> {
                     controller: _brandNameCtrl,
                     decoration: const InputDecoration(labelText: 'Brand name', border: OutlineInputBorder(), isDense: true),
                   ),
-                  if (_templateId == 'monogram_badge') ...[
+                  if (_currentTemplateFields.contains('initials')) ...[
                     const SizedBox(height: 12),
                     TextField(
                       controller: _initialsCtrl,
@@ -222,7 +238,7 @@ class _GenerateLogoScreenState extends State<GenerateLogoScreen> {
                       decoration: const InputDecoration(labelText: 'Initials (optional)', hintText: 'Auto-derived if left blank', border: OutlineInputBorder(), isDense: true),
                     ),
                   ],
-                  if (_templateId == 'icon_text') ...[
+                  if (_currentTemplateFields.contains('icon_shape')) ...[
                     const SizedBox(height: 16),
                     const Text('Icon shape', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     const SizedBox(height: 8),
