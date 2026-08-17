@@ -18,6 +18,7 @@ import 'triage_test_screen.dart';
 import 'insights_overview_screen.dart';
 import 'customize_more_menu_screen.dart';
 import '../services/api_service.dart';
+import '../widgets/launcher_tile.dart';
 
 // Curated icon set for icon_override -- same string-key-to-IconData
 // pattern as kLeadDetailIconOptions/kShareTargetIconOptions.
@@ -207,7 +208,7 @@ class _MoreScreenState extends State<MoreScreen> {
           final gradientEnd = gradientHex != null ? _hexToColor(gradientHex) : null;
           final styleVariant = item['style_variant'] as String? ?? 'flat';
 
-          return _MoreMenuTile(
+          return LauncherTile(
             label: label,
             icon: icon,
             color: color,
@@ -230,88 +231,6 @@ class _MoreScreenState extends State<MoreScreen> {
             },
           );
         }).toList(),
-      ),
-    );
-  }
-}
-
-/// A single More-menu destination tile -- tinted/gradient/glow/glass
-/// card background (per the item's style_variant) with a centred icon
-/// and label. Mirrors lead_detail_screen.dart's private _navTile/
-/// _tileDecoration pattern exactly, so both grids share one visual
-/// language; kept as its own widget here since that one is private to
-/// _LeadDetailScreenState.
-class _MoreMenuTile extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
-  final Color? gradientEnd;
-  final String styleVariant;
-  final VoidCallback onTap;
-
-  const _MoreMenuTile({
-    required this.label,
-    required this.icon,
-    required this.color,
-    required this.gradientEnd,
-    required this.styleVariant,
-    required this.onTap,
-  });
-
-  BoxDecoration _decoration(BorderRadius radius) {
-    switch (styleVariant) {
-      case 'gradient_badge':
-        return BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [color, gradientEnd ?? color.withValues(alpha: 0.6)]),
-          borderRadius: radius,
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4))],
-        );
-      case 'glow':
-        return BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: radius,
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.45), blurRadius: 14, spreadRadius: 1)],
-        );
-      case 'glass':
-        return BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
-          borderRadius: radius,
-          border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
-        );
-      default:
-        return BoxDecoration(
-          color: color.withValues(alpha: 0.09),
-          borderRadius: radius,
-          border: Border.all(color: color.withValues(alpha: 0.28)),
-        );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(16);
-    final onGradient = styleVariant == 'gradient_badge';
-    return InkWell(
-      onTap: onTap,
-      borderRadius: radius,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-        decoration: _decoration(radius),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 26, color: onGradient ? Colors.white : color),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, height: 1.2, color: onGradient ? Colors.white : null),
-            ),
-          ],
-        ),
       ),
     );
   }
