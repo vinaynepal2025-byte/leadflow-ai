@@ -23,6 +23,16 @@ const DEFAULTS = [
   { field_key: 'field_created_date', enabled: false, sort_order: 4 },
   { field_key: 'badge_stage',        enabled: true,  sort_order: 5 },
   { field_key: 'badge_score',        enabled: true,  sort_order: 6 },
+  // Not real optional display fields -- always enabled, never reordered.
+  // These two rows exist purely as style_json storage for whole-element
+  // appearance ("Leads button, cards mein bhi [free size/texture/icon]
+  // control do"): card_container is the whole lead row's card look,
+  // bulk_action_bar is the shared look of the Select All/Move/Delete
+  // buttons that appear during multi-select. The client filters both out
+  // of the normal show/hide/reorder list and edits them from a separate
+  // "Appearance" section instead.
+  { field_key: 'card_container',     enabled: true,  sort_order: 100 },
+  { field_key: 'bulk_action_bar',    enabled: true,  sort_order: 101 },
 ];
 
 // Ensures a tenant has all 7 built-in field rows. Safe to call every

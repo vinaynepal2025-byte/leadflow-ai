@@ -1,9 +1,11 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../models/lead.dart';
 import '../services/api_service.dart';
 import '../widgets/stage_chip.dart';
 import '../widgets/swipeable_card.dart';
 import '../widgets/score_badge.dart';
+import '../widgets/launcher_tile.dart' show LauncherTile, TileTexturePainter;
 import '../l10n/app_strings.dart';
 import 'lead_detail_screen.dart';
 import 'add_lead_screen.dart';
@@ -318,6 +320,7 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
                 if (created == true) _refresh();
               },
             ),
+      bottomNavigationBar: _selectionMode ? _buildBulkActionBar() : null,
     );
   }
 
@@ -366,9 +369,12 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
     );
   }
 
+  // Bulk actions (Select All/Move/Delete) moved out of these tiny AppBar
+  // icons into a real styled bottom bar (_buildBulkActionBar) -- "Leads
+  // button... mein bhi [free size/texture/icon] control do" needs an
+  // actual LauncherTile-sized surface to style, which an AppBar action
+  // icon is too small to meaningfully be.
   PreferredSizeWidget _selectionAppBar() {
-    final visibleIds = _visibleLeads.map((l) => l.id).toSet();
-    final allSelected = visibleIds.isNotEmpty && visibleIds.every(_selectedIds.contains);
     return AppBar(
       leading: IconButton(
         icon: const Icon(Icons.close),
@@ -376,24 +382,71 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
         onPressed: () => setState(_exitSelectionMode),
       ),
       title: Text('${_selectedIds.length} selected'),
-      actions: [
-        IconButton(
-          icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
-          tooltip: allSelected ? 'Deselect all' : 'Select all',
-          onPressed: _toggleSelectAll,
-        ),
-        if (!_isTrashView)
-          IconButton(
-            icon: const Icon(Icons.drive_file_move_outline),
-            tooltip: 'Move to stage',
-            onPressed: _stages.isEmpty ? null : _bulkMove,
+    );
+  }
+
+  /// bulk_action_bar is the other style-only pseudo-row in
+  /// lead_list_fields (see card_container's doc above) -- shared style
+  /// for the Select All/Move/Delete buttons.
+  Map<String, dynamic>? get _bulkBarStyleJson {
+    for (final f in _listFields) {
+      if (f['field_key'] == 'bulk_action_bar') return (f['style_json'] as Map?)?.cast<String, dynamic>();
+    }
+    return null;
+  }
+
+  Widget _buildBulkActionBar() {
+    final visibleIds = _visibleLeads.map((l) => l.id).toSet();
+    final allSelected = visibleIds.isNotEmpty && visibleIds.every(_selectedIds.contains);
+    final sj = _bulkBarStyleJson;
+
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -2))],
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 76,
+          child: Row(
+            children: [
+              Expanded(
+                child: LauncherTile(
+                  label: allSelected ? 'Deselect all' : 'Select all',
+                  icon: allSelected ? Icons.deselect : Icons.select_all,
+                  color: Theme.of(context).colorScheme.primary,
+                  styleJson: sj,
+                  onTap: _toggleSelectAll,
+                ),
+              ),
+              if (!_isTrashView) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: LauncherTile(
+                    label: 'Move',
+                    icon: Icons.drive_file_move_outline,
+                    color: Colors.orange,
+                    styleJson: sj,
+                    onTap: _stages.isEmpty ? () {} : _bulkMove,
+                  ),
+                ),
+              ],
+              const SizedBox(width: 8),
+              Expanded(
+                child: LauncherTile(
+                  label: _isTrashView ? 'Restore' : 'Delete',
+                  icon: _isTrashView ? Icons.restore : Icons.delete_outline,
+                  color: _isTrashView ? Colors.green : Colors.red,
+                  styleJson: sj,
+                  onTap: _bulkAction,
+                ),
+              ),
+            ],
           ),
-        IconButton(
-          icon: Icon(_isTrashView ? Icons.restore : Icons.delete_outline),
-          tooltip: _isTrashView ? 'Restore selected' : 'Delete selected',
-          onPressed: _bulkAction,
         ),
-      ],
+      ),
     );
   }
 
@@ -483,6 +536,81 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
     return widgets;
   }
 
+  /// "Leads button, cards mein bhi [free size/texture/icon] control do" --
+  /// card_container is a style-only pseudo-row in lead_list_fields (not a
+  /// real toggleable field, see backend/routes/leadListFields.js DEFAULTS)
+  /// holding the whole lead row's corner radius/border/glow/blur/texture.
+  Map<String, dynamic>? get _cardStyleJson {
+    for (final f in _listFields) {
+      if (f['field_key'] == 'card_container') return (f['style_json'] as Map?)?.cast<String, dynamic>();
+    }
+    return null;
+  }
+
+  Widget _wrapInCard(Widget child) {
+    final sj = _cardStyleJson;
+    if (sj == null || sj.isEmpty) return child;
+
+    final cornerRadius = ((sj['cornerRadius'] as num?)?.toDouble() ?? 0).clamp(0.0, 40.0);
+    final borderColorHex = sj['borderColor'] as String?;
+    final borderWidth = ((sj['borderWidth'] as num?)?.toDouble() ?? 1.0).clamp(0.0, 6.0);
+    final glowColorHex = sj['glowColor'] as String?;
+    final glowIntensity = ((sj['glowIntensity'] as num?)?.toDouble() ?? 0).clamp(0.0, 1.0);
+    final blurAmount = ((sj['blurAmount'] as num?)?.toDouble() ?? 0).clamp(0.0, 16.0);
+    final textureId = sj['textureId'] as String?;
+    final radius = BorderRadius.circular(cornerRadius);
+
+    Widget card = Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: radius,
+        border: borderColorHex != null
+            ? Border.all(color: _hexToColorStatic(borderColorHex), width: borderWidth)
+            : Border.all(color: Colors.grey.withValues(alpha: 0.15)),
+        boxShadow: glowColorHex != null && glowIntensity > 0
+            ? [
+                BoxShadow(
+                  color: _hexToColorStatic(glowColorHex).withValues(alpha: 0.2 + glowIntensity * 0.5),
+                  blurRadius: 4 + glowIntensity * 20,
+                  spreadRadius: glowIntensity * 2,
+                ),
+              ]
+            : null,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          if (textureId != null && textureId != 'none')
+            Positioned.fill(
+              child: CustomPaint(
+                painter: TileTexturePainter(textureId: textureId, color: Colors.grey.withValues(alpha: 0.10)),
+              ),
+            ),
+          child,
+        ],
+      ),
+    );
+
+    if (blurAmount > 0) {
+      card = ClipRRect(
+        borderRadius: radius,
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: blurAmount, sigmaY: blurAmount),
+          child: card,
+        ),
+      );
+    }
+    return card;
+  }
+
+  static Color _hexToColorStatic(String hex) {
+    var h = hex.replaceAll('#', '');
+    if (h.length == 6) h = 'FF$h';
+    final value = int.tryParse(h, radix: 16);
+    return value == null ? Colors.grey : Color(value);
+  }
+
   Widget _leadTile(Lead lead) {
     final selected = _selectedIds.contains(lead.id);
 
@@ -529,10 +657,12 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
       selectedTileColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.06),
     );
 
+    final styledTile = _wrapInCard(tile);
+
     // Trash view and selection-mode both disable the swipe-to-delete
     // gesture — swiping a lead you're about to bulk-act on, or one
     // that's already in Trash, would be confusing/redundant.
-    if (_isTrashView || _selectionMode) return tile;
+    if (_isTrashView || _selectionMode) return styledTile;
 
     return SwipeableCard(
       dismissKey: lead.id,
@@ -567,7 +697,7 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
           }
         }
       },
-      child: tile,
+      child: styledTile,
     );
   }
 
