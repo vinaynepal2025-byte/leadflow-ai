@@ -191,7 +191,7 @@ class ThemePreset {
       {this.glow = false, this.glowColor, this.floating = false, this.texture = false, required this.category, this.gradientEnd, this.backdropBlur = 0.0, this.tonalSaturationBoost = 1.0, this.borderThickness = 1.0, this.aurora = false});
 }
 
-/// 19 fully distinct, ready-to-launch looks, matching the Customize
+/// 25 fully distinct, ready-to-launch looks, matching the Customize
 /// Studio master-prompt's 20-template spec (#20, "Custom AI-Generated,"
 /// is intentionally not a static entry here -- it's the existing AI
 /// Design Engine card, generated live, never a fixed preset).
@@ -201,6 +201,11 @@ class ThemePreset {
 /// already applied one of them keeps the same underlying look; nine are
 /// new. Each carries a `category` for the gallery's tab filter (Glass /
 /// Solid & Corporate / Soft & Playful / Bold & Dark).
+///
+/// Batch 6 adds 6 more, each modelled directly on a specific reference
+/// screenshot the user supplied as "this is the visual theme I want":
+/// Violet Bloom, Sky Voyage, Lavender Mist, Sunrise Tutor, Neon Pulse,
+/// Dusk Dashboard (see each preset's own comment for its source image).
 const List<ThemePreset> themePresets = [
   // --- Glass ---
   // Theme Engine v2: tonalSaturationBoost is what actually makes these
@@ -219,6 +224,11 @@ const List<ThemePreset> themePresets = [
       glow: true, glowColor: Color(0xFFEC4899), floating: true, category: TemplateCategory.glass, gradientEnd: Color(0xFF06B6D4), backdropBlur: 0.6, tonalSaturationBoost: 1.8, aurora: true),
   ThemePreset('Frosted Acrylic', 'Fluent-style acrylic blur + depth layering', Color(0xFF2564CF), Color(0xFF60CDFF), FontPairing.poppinsRoboto, 8, false, UIStyleMode.glass,
       category: TemplateCategory.glass, backdropBlur: 0.9, tonalSaturationBoost: 1.1, aurora: true),
+  // Batch 6 -- user-supplied reference: purple-gradient hero cards with
+  // glossy illustration tiles (file-manager / illustration-marketplace
+  // style screenshots).
+  ThemePreset('Violet Bloom', 'Purple-to-teal gradient, glossy hero cards', Color(0xFF7C3AED), Color(0xFF14B8A6), FontPairing.poppinsRoboto, 22, false, UIStyleMode.liquid,
+      floating: true, category: TemplateCategory.glass, gradientEnd: Color(0xFF14B8A6), backdropBlur: 0.6, tonalSaturationBoost: 1.4, aurora: true),
 
   // --- Solid & Corporate ---
   ThemePreset('Corporate Trust', 'Navy/slate, banking-grade seriousness', Color(0xFF1B2A4A), Color(0xFFE8A33D), FontPairing.spaceGroteskInter, 12, false, UIStyleMode.solid,
@@ -233,6 +243,10 @@ const List<ThemePreset> themePresets = [
       category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.25, borderThickness: 0.5),
   ThemePreset('Executive Slate', 'Muted greys + single jewel accent, boardroom minimalism', Color(0xFF3F3F46), Color(0xFF7C3AED), FontPairing.playfairLato, 8, false, UIStyleMode.corporate,
       category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.3, borderThickness: 0.75),
+  // Batch 6 -- user-supplied reference: clean blue/white travel-booking
+  // app screenshot.
+  ThemePreset('Sky Voyage', 'Crisp blue/white, booking-app clarity', Color(0xFF2563EB), Color(0xFF0EA5E9), FontPairing.interRoboto, 16, false, UIStyleMode.basic,
+      category: TemplateCategory.solidCorporate, tonalSaturationBoost: 0.35, borderThickness: 0.6),
 
   // --- Soft & Playful ---
   ThemePreset('Soft UI 2.0', 'Accessible neumorphism, tactile press states', Color(0xFF6366F1), Color(0xFFA5B4FC), FontPairing.montserratOpenSans, 20, false, UIStyleMode.basic,
@@ -245,6 +259,14 @@ const List<ThemePreset> themePresets = [
       texture: true, category: TemplateCategory.softPlayful, tonalSaturationBoost: 0.3),
   ThemePreset('Playful Rounded', 'Soft pastel, big radius, polished (not childish)', Color(0xFFDC2626), Color(0xFFFACC15), FontPairing.poppinsRoboto, 22, false, UIStyleMode.cartoon,
       category: TemplateCategory.softPlayful, tonalSaturationBoost: 1.1),
+  // Batch 6 -- user-supplied reference screenshots. "Lavender Mist" from
+  // the pastel lavender/teal "Themes that change everything" marketing
+  // screens; "Sunrise Tutor" from the AI-tutor app's orange-to-purple
+  // gradient hero card + pill-shaped CTA buttons + glassy white cards.
+  ThemePreset('Lavender Mist', 'Soft lavender-teal, cloud-light and airy', Color(0xFF8B7FD6), Color(0xFF2DD4BF), FontPairing.poppinsOpenSans, 24, false, UIStyleMode.basic,
+      category: TemplateCategory.softPlayful, tonalSaturationBoost: 0.8),
+  ThemePreset('Sunrise Tutor', 'Orange-to-purple gradient, pill buttons, glass cards', Color(0xFFFF7A30), Color(0xFF9333EA), FontPairing.poppinsRoboto, 28, false, UIStyleMode.liquid,
+      floating: true, category: TemplateCategory.softPlayful, gradientEnd: Color(0xFF9333EA), backdropBlur: 0.4, tonalSaturationBoost: 1.2),
 
   // --- Bold & Dark ---
   ThemePreset('Fintech Dark', 'Deep charcoal, emerald/gold, dashboard-density optimized', Color(0xFF10B981), Color(0xFFEAB308), FontPairing.spaceGroteskInter, 10, true, UIStyleMode.solid,
@@ -253,6 +275,14 @@ const List<ThemePreset> themePresets = [
       category: TemplateCategory.boldDark, tonalSaturationBoost: 0.0, borderThickness: 3.0),
   ThemePreset('Cyberpunk Neon', 'Electric night-drive, neon edges, gradient borders', Color(0xFF0A0A0F), Color(0xFF00E5FF), FontPairing.spaceGroteskInter, 10, true, UIStyleMode.solid,
       glow: true, glowColor: Color(0xFF00E5FF), floating: true, category: TemplateCategory.boldDark, gradientEnd: Color(0xFFFF00E5), tonalSaturationBoost: 2.0, borderThickness: 1.5, aurora: true),
+  // Batch 6 -- user-supplied reference screenshots. "Neon Pulse" from the
+  // black-background launcher-theme screens (glowing electric-blue icon
+  // outlines on pure black); "Dusk Dashboard" from the dark analytics
+  // dashboard screens (charcoal canvas, muted pastel data cards).
+  ThemePreset('Neon Pulse', 'Electric-blue neon lines on true black', Color(0xFF0A0E27), Color(0xFF00B8FF), FontPairing.spaceGroteskInter, 14, true, UIStyleMode.solid,
+      glow: true, glowColor: Color(0xFF00B8FF), category: TemplateCategory.boldDark, tonalSaturationBoost: 1.4, aurora: true),
+  ThemePreset('Dusk Dashboard', 'Charcoal canvas, muted pastel data cards', Color(0xFF15171C), Color(0xFFE7C9A9), FontPairing.interRoboto, 18, true, UIStyleMode.solid,
+      category: TemplateCategory.boldDark, tonalSaturationBoost: 0.6, borderThickness: 0.75),
 ];
 
 /// Every visual control the end user can personalize, all in one place,
