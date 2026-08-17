@@ -2208,6 +2208,27 @@ class ApiService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  /// Logo Studio's AI generator -- composes an editable icon+shape+text
+  /// logo mark (canvas_json) instead of the flyer prompt's promotional-
+  /// layout style. [iconKeys] is the client's own icon library (same
+  /// pattern as aiFindIcon) so the backend never needs its own copy to
+  /// keep in sync.
+  Future<Map<String, dynamic>> generateLogoAI(
+    String projectId,
+    String prompt,
+    List<String> iconKeys,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/flyer-projects/$projectId/ai-generate-logo'),
+      headers: _headers,
+      body: jsonEncode({'prompt': prompt, 'iconKeys': iconKeys}),
+    );
+    if (res.statusCode != 200) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'AI generation failed');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
 
   // ---------- Lead Folders (Phase 6) ----------
 

@@ -397,6 +397,105 @@ Rules: 4-8 elements total. All x/y/width/height must fit within the ${canvasW}x$
   res.json({ canvas_json: validated });
 });
 
+// POST /flyer-projects/:id/ai-generate-logo  { prompt, iconKeys }
+// Logo-specific sibling of /ai-generate above -- same "propose, don't
+// auto-save" philosophy, but composes a minimal icon+shape+text logo
+// mark instead of a promotional flyer layout, so this is the real
+// generative gap the Phase 1 audit flagged ("today's AI generation is
+// parametric fill-in of 7 fixed templates, not AI-driven layout") --
+// the output is genuinely editable canvas_json, the same document model
+// every other Logo Studio element uses, never a raster image passed off
+// as an editable logo (master spec §14). iconKeys is the client's own
+// kFlyerIconLibrary key list (same pattern as POST /ai/find-icon), so
+// this route never carries its own copy that could drift out of sync.
+router.post('/:id/ai-generate-logo', async (req, res) => {
+  const tid = tenantId(req);
+  const project = await db.prepare('SELECT * FROM flyer_projects WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!project) return res.status(404).json({ error: 'Flyer project not found' });
+
+  const { prompt, iconKeys } = req.body;
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    return res.status(400).json({ error: 'prompt is required' });
+  }
+  if (!Array.isArray(iconKeys) || iconKeys.length === 0) {
+    return res.status(400).json({ error: 'iconKeys is required' });
+  }
+
+  const canvasW = project.canvas_width || 512;
+  const canvasH = project.canvas_height || 512;
+  const KNOWN_FONTS = ['SpaceGrotesk','Inter','PlayfairDisplay','Lato','Poppins','Roboto','Montserrat','OpenSans'];
+
+  const aiPrompt = `You are a logo designer for an education-admissions consultancy. Design a simple, professional logo mark as a JSON array of elements for a square canvas that is ${canvasW}x${canvasH} pixels.
+
+Brief: "${prompt.trim()}"
+
+Return ONLY a JSON array (no prose, no markdown fences). Each element must be one of:
+- Shape (a background mark, e.g. a circle/rounded badge behind the icon): {"type":"shape","x":<number>,"y":<number>,"width":<number>,"height":<number>,"shapeKind":"rect"|"circle","shapeColor":"<#RRGGBB hex>","cornerRadius":<0-100>}
+- Icon: {"type":"icon","x":<number>,"y":<number>,"width":<number>,"height":<number>,"iconKey":"<one of ${iconKeys.join(', ')}>","shapeColor":"<#RRGGBB hex>"}
+- Text (brand name or initials, short): {"type":"text","x":<number>,"y":<number>,"width":<number>,"height":<number>,"text":"<short brand name or initials, max 24 chars>","fontSize":<12-72>,"fontFamily":"<one of ${KNOWN_FONTS.join(', ')}>","color":"<#RRGGBB hex>","fontWeight":"normal"|"bold","textAlign":"center"}
+
+Rules: 2-4 elements total -- a logo mark is not a flyer, keep it minimal and iconic. All x/y/width/height must fit within the ${canvasW}x${canvasH} canvas (x>=0, y>=0, x+width<=${canvasW}, y+height<=${canvasH}). Use at most 2 colors total for a cohesive brand mark. Never include rotation. Center the composition.`;
+
+  let rawElements;
+  try {
+    rawElements = await generateJson(aiPrompt, { maxTokens: 2000 });
+  } catch (err) {
+    return res.status(502).json({ error: `AI generation failed: ${err.message}` });
+  }
+  if (!Array.isArray(rawElements)) {
+    return res.status(502).json({ error: 'AI returned an unexpected format' });
+  }
+
+  const hexRe = /^#[0-9A-Fa-f]{6}$/;
+  const iconKeySet = new Set(iconKeys);
+  const clampNum = (v, lo, hi, fallback) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(hi, Math.max(lo, n));
+  };
+
+  const validated = rawElements
+    .filter((el) => el && ['text', 'shape', 'icon'].includes(el.type))
+    .slice(0, 8)
+    .map((el, i) => {
+      const width = clampNum(el.width, 10, canvasW, 100);
+      const height = clampNum(el.height, 10, canvasH, 100);
+      const x = clampNum(el.x, 0, Math.max(0, canvasW - width), 0);
+      const y = clampNum(el.y, 0, Math.max(0, canvasH - height), 0);
+      const base = { id: `ai-logo-${Date.now()}-${i}`, type: el.type, x, y, width, height, rotation: 0, zIndex: i };
+      if (el.type === 'text') {
+        return {
+          ...base,
+          text: typeof el.text === 'string' ? el.text.slice(0, 24) : 'Brand',
+          fontSize: clampNum(el.fontSize, 12, 72, 24),
+          fontFamily: KNOWN_FONTS.includes(el.fontFamily) ? el.fontFamily : 'Montserrat',
+          color: hexRe.test(el.color) ? el.color : '#1B2A4A',
+          fontWeight: el.fontWeight === 'bold' ? 'bold' : 'normal',
+          textAlign: 'center',
+        };
+      }
+      if (el.type === 'icon') {
+        return {
+          ...base,
+          iconKey: iconKeySet.has(el.iconKey) ? el.iconKey : iconKeys[0],
+          shapeColor: hexRe.test(el.shapeColor) ? el.shapeColor : '#1B2A4A',
+        };
+      }
+      return {
+        ...base,
+        shapeKind: el.shapeKind === 'circle' ? 'circle' : 'rect',
+        shapeColor: hexRe.test(el.shapeColor) ? el.shapeColor : '#F2F2F2',
+        cornerRadius: clampNum(el.cornerRadius, 0, 100, 0),
+      };
+    });
+
+  if (validated.length === 0) {
+    return res.status(502).json({ error: 'AI returned no usable elements' });
+  }
+
+  res.json({ canvas_json: validated });
+});
+
 // POST /flyer-projects/:id/share-link  { lead_id }
 // Turns a finished flyer into something that can be sent to one specific
 // person in one tap.

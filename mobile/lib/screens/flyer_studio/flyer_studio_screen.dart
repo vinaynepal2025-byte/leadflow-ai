@@ -1407,9 +1407,11 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               controller: promptController,
               autofocus: true,
               maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'e.g. "MBBS admission open, navy and gold, urgent tone"',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: widget.isLogoMode
+                    ? 'e.g. "Medical education consultancy, navy and gold, a graduation-cap mark"'
+                    : 'e.g. "MBBS admission open, navy and gold, urgent tone"',
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 8),
@@ -1450,7 +1452,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
 
     setState(() => _generatingAI = true);
     try {
-      final result = await _api.generateFlyerAI(_projectId!, prompt);
+      // Logo Studio gets a dedicated logo-composition prompt (icon + brand
+      // mark + minimal text, 2-4 elements) instead of the flyer prompt's
+      // promotional-layout style (headline/body/image placeholder) --
+      // reusing the flyer endpoint here would produce results that don't
+      // fit a logo at all. Both stay real, editable canvas_json though --
+      // same "propose, don't auto-save" validated pipeline either way.
+      final result = widget.isLogoMode
+          ? await _api.generateLogoAI(_projectId!, prompt, kFlyerIconLibrary.keys.toList())
+          : await _api.generateFlyerAI(_projectId!, prompt);
       final raw = (result['canvas_json'] as List?) ?? [];
       _pushUndo();
       setState(() {
@@ -1719,6 +1729,162 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
   }
 
+  /// Logo Variations (master spec §15) -- mechanical transforms over the
+  /// existing document model, deliberately NOT new AI calls: a variant is
+  /// a colour/composition rule applied to the current elements, not a
+  /// fresh generation that could drift from the original mark. Each
+  /// variant becomes its own saved project (via the real duplicate
+  /// endpoint, so it's independently editable/reopenable afterwards),
+  /// linked back to this one only by both having started from the same
+  /// canvas -- there's no separate "variant group" concept to keep in
+  /// sync, which also means a variant surviving further hand-editing is
+  /// just... editing a normal project, no special-casing needed anywhere
+  /// else in the app.
+  Future<void> _generateVariants() async {
+    if (_projectId == null || _elements.isEmpty) {
+      _showSnack('Add some elements to the logo first');
+      return;
+    }
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _sheetDragHandle(),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Generate variant', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.emoji_symbols_outlined),
+              title: const Text('Icon only'),
+              subtitle: const Text('Drops text -- for a social avatar / favicon'),
+              onTap: () => Navigator.pop(ctx, 'icon_only'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.title),
+              title: const Text('Text only (wordmark)'),
+              subtitle: const Text('Drops the icon/shape mark'),
+              onTap: () => Navigator.pop(ctx, 'text_only'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.circle, color: Colors.black),
+              title: const Text('Monochrome — black'),
+              onTap: () => Navigator.pop(ctx, 'mono_black'),
+            ),
+            ListTile(
+              leading: Icon(Icons.circle, color: Colors.grey.shade200),
+              title: const Text('Monochrome — white'),
+              subtitle: const Text('For a dark-background use'),
+              onTap: () => Navigator.pop(ctx, 'mono_white'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.dark_mode_outlined),
+              title: const Text('Dark-background version'),
+              subtitle: const Text('White elements on a navy canvas'),
+              onTap: () => Navigator.pop(ctx, 'dark_bg'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.light_mode_outlined),
+              title: const Text('Light-background version'),
+              subtitle: const Text('Navy elements on a white canvas'),
+              onTap: () => Navigator.pop(ctx, 'light_bg'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+
+    setState(() => _saving = true);
+    try {
+      final duplicated = await _api.duplicateFlyerProject(_projectId!);
+      final newId = duplicated['id']?.toString();
+      if (newId == null) throw Exception('Could not create a variant project');
+
+      List<FlyerElement> variantElements;
+      String? bgOverride;
+      switch (choice) {
+        case 'icon_only':
+          variantElements =
+              _elements.where((e) => e.type != FlyerElementType.text).map((e) => e.clone()).toList();
+          break;
+        case 'text_only':
+          variantElements =
+              _elements.where((e) => e.type == FlyerElementType.text).map((e) => e.clone()).toList();
+          break;
+        case 'mono_black':
+          variantElements = _recolorAllElements(_elements, '#000000');
+          break;
+        case 'mono_white':
+          variantElements = _recolorAllElements(_elements, '#FFFFFF');
+          break;
+        case 'dark_bg':
+          variantElements = _recolorAllElements(_elements, '#FFFFFF');
+          bgOverride = '#1B2A4A';
+          break;
+        case 'light_bg':
+          variantElements = _recolorAllElements(_elements, '#1B2A4A');
+          bgOverride = '#FFFFFF';
+          break;
+        default:
+          variantElements = _elements.map((e) => e.clone()).toList();
+      }
+
+      await _api.updateFlyerProjectCanvas(newId, variantElements.map((e) => e.toJson()).toList());
+      if (bgOverride != null) {
+        await _api.updateFlyerProject(newId, backgroundColor: bgOverride);
+      }
+
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FlyerStudioScreen(projectId: newId, isLogoMode: widget.isLogoMode),
+        ),
+      );
+    } catch (e) {
+      _showSnack('Could not generate variant: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  /// Forces every element's colour to [hex] -- text.color, shape/icon's
+  /// shapeColor, and an SVG element's recolour tint (turning svgRecolor on
+  /// if it wasn't already, since an un-recoloured multi-colour SVG can't
+  /// meaningfully participate in a one-colour monochrome variant).
+  /// Images/logos are left untouched -- there's no single "colour" to
+  /// force on a photo.
+  List<FlyerElement> _recolorAllElements(List<FlyerElement> source, String hex) {
+    return source.map((e) {
+      final copy = e.clone();
+      switch (copy.type) {
+        case FlyerElementType.text:
+          copy.color = hex;
+          break;
+        case FlyerElementType.shape:
+        case FlyerElementType.icon:
+          copy.shapeColor = hex;
+          break;
+        case FlyerElementType.svg:
+          copy.svgRecolor = true;
+          copy.shapeColor = hex;
+          break;
+        case FlyerElementType.image:
+        case FlyerElementType.logo:
+          break;
+      }
+      return copy;
+    }).toList();
+  }
+
   /// Share options. Sending straight to the lead is listed first and framed
   /// by name, because that is the actual job to be done -- the generic share
   /// sheet costs three extra taps (pick app, search contact, pick contact) at
@@ -1876,16 +2042,20 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 if (v == 'rename') _renameFlyer();
                 if (v == 'exportAll') _exportAllSizes();
                 if (v == 'exportFormat') _showExportFormatSheet();
+                if (v == 'variants') _generateVariants();
               },
-              itemBuilder: (ctx) => const [
-                PopupMenuItem(value: 'layers', child: Text('Layers')),
-                PopupMenuItem(value: 'background', child: Text('Background & size')),
-                PopupMenuItem(value: 'rename', child: Text('Rename')),
-                PopupMenuItem(value: 'save', child: Text('Save now')),
-                PopupMenuItem(
+              itemBuilder: (ctx) => [
+                const PopupMenuItem(value: 'layers', child: Text('Layers')),
+                const PopupMenuItem(value: 'background', child: Text('Background & size')),
+                const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                const PopupMenuItem(value: 'save', child: Text('Save now')),
+                const PopupMenuItem(
                     value: 'exportAll', child: Text('Export all sizes (Story/Post/A4...)')),
-                PopupMenuItem(
+                const PopupMenuItem(
                     value: 'exportFormat', child: Text('Export as (JPG/WebP/Favicon)')),
+                if (widget.isLogoMode)
+                  const PopupMenuItem(
+                      value: 'variants', child: Text('Generate variant (mono/dark/icon-only...)')),
               ],
             ),
           ],
