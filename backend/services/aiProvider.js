@@ -15,6 +15,25 @@ const DEFAULT_MODELS = {
   openrouter: 'anthropic/claude-3.5-sonnet',
 };
 
+// Retries a transient-overload response (429 rate-limited, 503 model
+// currently overloaded -- both explicitly "try again shortly" per Google/
+// OpenRouter's own error bodies, not a real failure) with short backoff
+// before giving up. A single retry-less request was surfacing raw 503s
+// straight to the user on every brief provider hiccup even though the
+// same request typically succeeds a couple seconds later.
+async function fetchWithRetry(url, init, { retries = 2, baseDelayMs = 1200 } = {}) {
+  let lastRes;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetch(url, init);
+    if (res.status !== 429 && res.status !== 503) return res;
+    lastRes = res;
+    if (attempt < retries) {
+      await new Promise((r) => setTimeout(r, baseDelayMs * 2 ** attempt));
+    }
+  }
+  return lastRes;
+}
+
 function activeProvider() {
   return (process.env.AI_PROVIDER || 'claude').toLowerCase();
 }
@@ -45,7 +64,7 @@ async function generateText(prompt, { maxTokens = 600 } = {}) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error('Gemini not configured. Set GEMINI_API_KEY in .env (get one at aistudio.google.com/apikey).');
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel()}:generateContent?key=${apiKey}`;
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -54,14 +73,19 @@ async function generateText(prompt, { maxTokens = 600 } = {}) {
       }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(`Gemini request failed: ${JSON.stringify(data)}`);
+    if (!res.ok) {
+      if (res.status === 503 || res.status === 429) {
+        throw new Error('Gemini is temporarily overloaded (tried 3 times). Please try again in a minute.');
+      }
+      throw new Error(`Gemini request failed: ${JSON.stringify(data)}`);
+    }
     return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   }
 
   if (provider === 'openrouter') {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error('OpenRouter not configured. Set OPENROUTER_API_KEY in .env (get one at openrouter.ai/keys).');
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const res = await fetchWithRetry('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -74,7 +98,12 @@ async function generateText(prompt, { maxTokens = 600 } = {}) {
       }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(`OpenRouter request failed: ${JSON.stringify(data)}`);
+    if (!res.ok) {
+      if (res.status === 503 || res.status === 429) {
+        throw new Error('The AI model is temporarily overloaded (tried 3 times). Please try again in a minute.');
+      }
+      throw new Error(`OpenRouter request failed: ${JSON.stringify(data)}`);
+    }
     return data.choices?.[0]?.message?.content || '';
   }
 

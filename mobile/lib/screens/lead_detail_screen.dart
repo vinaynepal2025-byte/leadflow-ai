@@ -1,13 +1,18 @@
 import 'dart:ui';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/lead.dart';
 import '../models/communication.dart';
 import '../services/api_service.dart';
+import '../theme/edit_mode_settings.dart';
 import '../widgets/stage_chip.dart';
 import '../widgets/score_badge.dart';
 import '../widgets/lead360_panel.dart';
+import '../widgets/launcher_tile.dart';
+import '../widgets/quick_style_editor_sheet.dart';
+import 'customize_registry.dart';
 import 'documents_screen.dart';
 import 'admissions_fees_screen.dart';
 import 'email_compose_screen.dart';
@@ -425,45 +430,84 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
     }
   }
 
-  /// Compact grid tile. The old screen stacked eleven identical full-width
-  /// buttons, which meant a long scroll just to reach a module — the tile
-  /// grid fits the same modules in roughly a third of the height and makes
-  /// them scannable by icon and colour rather than by reading each label.
-  /// Still honours the user's per-section colour and shape overrides.
-  BoxDecoration _tileDecoration(String styleVariant, Color color, Color? gradientEnd, BorderRadius radius) {
-    switch (styleVariant) {
-      case 'gradient_badge':
-        return BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [color, gradientEnd ?? color.withValues(alpha: 0.6)]),
-          borderRadius: radius,
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4))],
-        );
-      case 'glow':
-        return BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: radius,
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.45), blurRadius: 14, spreadRadius: 1)],
-        );
-      case 'glass':
-        return BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
-          borderRadius: radius,
-          border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
-        );
-      default:
-        return BoxDecoration(
-          color: color.withValues(alpha: 0.07),
-          borderRadius: radius,
-          border: Border.all(color: color.withValues(alpha: 0.28)),
-        );
+  // Built once, not per-build -- the registry is static data (labels/
+  // icons/screen builders), only the live _sections list changes.
+  late final List<CustomizeRegistryItem> _registry = buildCustomizeRegistry();
+
+  /// Folds the older shape_override/size_override fields (predating
+  /// style_json) into equivalent style_json defaults, so a section
+  /// customised before this session's fine-grained controls existed keeps
+  /// looking the way it did instead of silently resetting the first time
+  /// this screen renders through LauncherTile. Once a user actually opens
+  /// the style editor and changes cornerRadius/contentScale directly,
+  /// those explicit values take over.
+  Map<String, dynamic> _effectiveStyleJson(String key) {
+    final sj = (_configFor(key)?['style_json'] as Map?)?.cast<String, dynamic>() ?? {};
+    final result = Map<String, dynamic>.from(sj);
+    if (!result.containsKey('cornerRadius')) {
+      final shape = _shapeFor(key);
+      result['cornerRadius'] = shape == 'square' ? 0.0 : (shape == 'pill' ? 24.0 : 14.0);
     }
+    if (!result.containsKey('contentScale')) {
+      final size = _sizeFor(key);
+      result['contentScale'] = size == 'compact' ? 0.85 : (size == 'large' ? 1.15 : 1.0);
+    }
+    return result;
   }
 
+  /// Edit Mode entry point for a Modules tile -- mirrors More screen's
+  /// _openQuickEditor exactly, so "tap a tile while Edit Mode is on"
+  /// means the same thing everywhere in the app. '__email' is a
+  /// pseudo-section (no DB row, no registry entry) and stays
+  /// uncustomizable, same as before.
+  Future<void> _openQuickEditor(String sectionKey) async {
+    CustomizeRegistryItem? regItem;
+    for (final r in _registry) {
+      if (r.source == CustomizeSource.leadDetail && r.key == sectionKey) {
+        regItem = r;
+        break;
+      }
+    }
+    if (regItem == null) return;
+
+    final config = _configFor(sectionKey);
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => QuickStyleEditorSheet(
+        item: regItem!,
+        currentColorHex: (config?['color_override'] as String?) ?? '#1B2A4A',
+        currentStyleVariant: (config?['style_variant'] as String?) ?? 'flat',
+        currentGradientEndHex: config?['gradient_override'] as String?,
+        currentStyleJson: _effectiveStyleJson(sectionKey),
+      ),
+    );
+    if (result == null) return;
+    setState(() {
+      final idx = _sections.indexWhere((s) => s['section_key'] == sectionKey);
+      if (idx != -1) {
+        _sections[idx] = {
+          ..._sections[idx],
+          'color_override': result['color'],
+          'style_variant': result['styleVariant'],
+          'gradient_override': result['gradientEnd'],
+          'style_json': result['styleJson'],
+        };
+      }
+    });
+  }
+
+  /// Compact grid tile -- built on the same LauncherTile every other
+  /// "grid of destinations" screen uses (More, Settings, Leads List),
+  /// so a section's fine-grained style (corner radius, border, glow,
+  /// blur, texture, free-form size) actually applies here too, not just
+  /// on the More menu. Previously this screen had its own separate
+  /// tile-rendering code that only understood colour/style_variant/
+  /// shape_override/size_override and had never been wired to
+  /// style_json at all -- so setting any of the newer per-tile controls
+  /// from Settings Studio / AI Quick Restyle silently did nothing here.
   Widget _navTile(String sectionKey, Color defaultColor, VoidCallback onTap) {
     final color = _colorFor(sectionKey, defaultColor);
-    final shape = _shapeFor(sectionKey);
-    final size = _sizeFor(sectionKey);
     final styleVariant = _configFor(sectionKey)?['style_variant'] as String? ?? 'flat';
     final gradHex = _configFor(sectionKey)?['gradient_override'] as String?;
     Color? gradientEnd;
@@ -472,37 +516,17 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
       if (gh.length == 6) gh = 'FF' + gh;
       gradientEnd = Color(int.parse(gh, radix: 16));
     }
-    // The old full-width buttons used size_override to change height. In a
-    // fixed grid that would break alignment, so it now scales the icon and
-    // label instead — the setting still has a visible effect rather than
-    // silently doing nothing after the redesign.
-    final iconSize = size == 'compact' ? 20.0 : (size == 'large' ? 28.0 : 24.0);
-    final fontSize = size == 'compact' ? 10.0 : (size == 'large' ? 12.0 : 11.0);
-    final radius = shape == 'square'
-        ? BorderRadius.zero
-        : (shape == 'pill' ? BorderRadius.circular(24) : BorderRadius.circular(14));
+    final editModeOn = sectionKey != '__email' && context.watch<EditModeSettings>().enabled;
 
-    return InkWell(
+    return LauncherTile(
+      label: _labelFor(sectionKey),
+      icon: _iconFor(sectionKey),
+      color: color,
+      gradientEnd: gradientEnd,
+      styleVariant: styleVariant,
+      styleJson: _effectiveStyleJson(sectionKey),
       onTap: onTap,
-      borderRadius: radius,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-        decoration: _tileDecoration(styleVariant, color, gradientEnd, radius),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(_iconFor(sectionKey), size: iconSize, color: styleVariant == 'gradient_badge' ? Colors.white : color),
-            const SizedBox(height: 6),
-            Text(
-              _labelFor(sectionKey),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600, height: 1.2, color: styleVariant == 'gradient_badge' ? Colors.white : null),
-            ),
-          ],
-        ),
-      ),
+      onEditTap: editModeOn ? () => _openQuickEditor(sectionKey) : null,
     );
   }
 
@@ -613,31 +637,64 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
             ],
 
             if (navSections.isNotEmpty || lead.email != null) ...[
-              const Text('Modules', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
-              const SizedBox(height: 10),
-              GridView.count(
-                crossAxisCount: 3,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 1.05,
+              Row(
                 children: [
-                  // Email isn't part of the customizable section set, but
-                  // belongs in the same launcher grid rather than floating
-                  // above it as a lone full-width button.
-                  if (lead.email != null)
-                    _navTile('__email', Colors.blue, () => Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => EmailComposeScreen(lead: lead)),
-                        )),
-                  ...navSections.map((s) {
-                    final key = s['section_key'] as String;
-                    final action = _navActionFor(key, lead)!;
-                    return _navTile(key, action.color, action.onTap);
-                  }),
+                  const Text('Modules', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
+                  const Spacer(),
+                  if (context.watch<EditModeSettings>().enabled)
+                    const Text('Edit Mode -- tap a tile to restyle it',
+                        style: TextStyle(fontSize: 11, color: Colors.grey)),
                 ],
               ),
+              const SizedBox(height: 10),
+              // A Wrap, not GridView.count -- a fixed 3-column grid forces
+              // every tile to the same cell size, which would make the
+              // free-form width/height controls in the style editor a
+              // no-op here even after wiring style_json through (exactly
+              // the "set width, nothing happens" bug this pass fixes).
+              // Mirrors More screen's own _buildGrid: each tile picks its
+              // own widthFraction/tileHeight via style_json, falling back
+              // to the same 3-per-row size the old GridView.count produced
+              // when neither is set, so nothing shifts until a tile is
+              // actually resized.
+              LayoutBuilder(builder: (context, constraints) {
+                const spacing = 10.0;
+                final defaultCellWidth = (constraints.maxWidth - 2 * spacing) / 3;
+
+                Widget sized(String key, Widget tile) {
+                  final sj = _effectiveStyleJson(key);
+                  final widthFraction = (sj['widthFraction'] as num?)?.toDouble();
+                  final tileWidth = widthFraction != null
+                      ? (constraints.maxWidth * widthFraction).clamp(60.0, constraints.maxWidth)
+                      : defaultCellWidth;
+                  final explicitHeight = (sj['tileHeight'] as num?)?.toDouble();
+                  final tileHeight = explicitHeight ?? (tileWidth / 0.95);
+                  return SizedBox(width: tileWidth, height: tileHeight, child: tile);
+                }
+
+                return Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  children: [
+                    // Email isn't part of the customizable section set, but
+                    // belongs in the same launcher grid rather than floating
+                    // above it as a lone full-width button.
+                    if (lead.email != null)
+                      sized(
+                        '__email',
+                        _navTile('__email', Colors.blue, () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => EmailComposeScreen(lead: lead)),
+                            )),
+                      ),
+                    ...navSections.map((s) {
+                      final key = s['section_key'] as String;
+                      final action = _navActionFor(key, lead)!;
+                      return sized(key, _navTile(key, action.color, action.onTap));
+                    }),
+                  ],
+                );
+              }),
               const SizedBox(height: 20),
             ],
 

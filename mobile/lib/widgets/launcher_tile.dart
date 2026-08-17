@@ -200,6 +200,17 @@ class LauncherTile extends StatelessWidget {
     }
 
     return Stack(
+      // Every call site (More screen grid, Leads List bulk-action buttons,
+      // Settings grid, the style editor's live preview) already wraps this
+      // tile in a SizedBox/Expanded that provides tight/bounded sizing --
+      // none rely on shrink-wrap. StackFit.loose (the default) gives its
+      // non-positioned child LOOSE constraints regardless, so the
+      // decorated Container below always rendered at its own intrinsic
+      // content size (icon + label) and ignored the parent's requested
+      // width/height entirely -- the free-form size sliders had no visible
+      // effect. StackFit.expand forces the InkWell/Container to fill the
+      // exact box the parent gives it.
+      fit: StackFit.expand,
       children: [
         InkWell(
           onTap: editModeOn ? onEditTap : onTap,
