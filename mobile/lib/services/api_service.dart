@@ -73,6 +73,23 @@ class ApiService {
         if (authToken != null) 'Authorization': 'Bearer $authToken',
       };
 
+  /// Real bug found while wiring Logo Studio's save flow: every
+  /// MultipartRequest (file uploads -- documents, voice notes, images,
+  /// flyer backgrounds/elements/renders, brand kit + tenant logos) built
+  /// its own headers map with only 'x-tenant-id', never the
+  /// 'Authorization' bearer token _headers above already carries. That
+  /// was silently fine before the backend's global enforceAuth gate
+  /// (middleware/auth.js) started requiring req.user on every
+  /// non-public route -- after that, every upload for a logged-in user
+  /// started failing with 401 "Authentication required. Please log in
+  /// again.", which is exactly the error Logo Studio's "Save to Brand
+  /// Logos" surfaced. Fixes all 11 call sites at once by having them
+  /// share this getter instead of each hand-building the same map.
+  Map<String, String> get _multipartHeaders => {
+        'x-tenant-id': tenantId,
+        if (authToken != null) 'Authorization': 'Bearer $authToken',
+      };
+
   // ---------- Leads ----------
 
   Future<List<Lead>> getLeads({String? stage, bool? hasParent}) async {
@@ -500,7 +517,7 @@ class ApiService {
   }) async {
     final uri = Uri.parse('$baseUrl/documents');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..fields['lead_id'] = leadId
       ..fields['doc_type'] = docType
       ..fields['uploaded_by'] = uploadedBy ?? ''
@@ -826,7 +843,7 @@ class ApiService {
   Future<Map<String, dynamic>> importLeadsCsv(String filePath, String fileName) async {
     final uri = Uri.parse('$baseUrl/leads/import');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -966,7 +983,7 @@ class ApiService {
   Future<void> uploadVoiceNote({required String leadId, required String filePath, required String fileName, String? recordedBy}) async {
     final uri = Uri.parse('$baseUrl/voice-notes');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..fields['lead_id'] = leadId
       ..fields['recorded_by'] = recordedBy ?? ''
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
@@ -1010,7 +1027,7 @@ class ApiService {
   Future<String> uploadLogo(String filePath, String fileName) async {
     final uri = Uri.parse('$baseUrl/settings/logo');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -1081,7 +1098,7 @@ class ApiService {
   Future<Map<String, dynamic>> importLeadsExcel(String filePath, String fileName) async {
     final uri = Uri.parse('$baseUrl/leads/import-excel');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -1789,7 +1806,7 @@ class ApiService {
   Future<Map<String, dynamic>> previewLeadsExcelImport(String filePath, String fileName) async {
     final uri = Uri.parse('$baseUrl/leads-excel/import/preview');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -1806,7 +1823,7 @@ class ApiService {
   ) async {
     final uri = Uri.parse('$baseUrl/leads-excel/import/commit');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..fields['mapping'] = jsonEncode(mapping)
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
     final streamed = await request.send();
@@ -1950,7 +1967,7 @@ class ApiService {
   Future<Map<String, dynamic>> uploadFlyerElementImage(String projectId, String filePath) async {
     final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/element-image');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -1961,7 +1978,7 @@ class ApiService {
   Future<void> uploadFlyerRender(String projectId, List<int> pngBytes) async {
     final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/render');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(http.MultipartFile.fromBytes('file', pngBytes, filename: 'flyer-render.png'));
     final streamed = await request.send();
     if (streamed.statusCode != 200) {
@@ -1994,7 +2011,7 @@ class ApiService {
   Future<Map<String, dynamic>> uploadFlyerBackground(String projectId, String filePath) async {
     final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/background');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -2051,7 +2068,7 @@ class ApiService {
   }) async {
     final uri = Uri.parse('$baseUrl/tenant-logos');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..fields['label'] = label ?? ''
       ..fields['is_default'] = isDefault.toString()
       ..files.add(await http.MultipartFile.fromPath('file', filePath));

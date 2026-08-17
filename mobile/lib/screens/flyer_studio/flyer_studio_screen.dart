@@ -1358,23 +1358,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             ),
           ],
         ),
-        // Logo Studio's primary action is "finish and save into Brand
-        // Logos", not "share" -- a logo isn't usually the thing being
-        // sent to someone directly, it's an asset other designs (flyers,
-        // letterheads) will pull in afterward. Flyers keep the existing
-        // Share FAB unchanged.
-        floatingActionButton: _loading || _error != null
-            ? null
-            : FloatingActionButton.extended(
-                onPressed: _exporting ? null : (widget.isLogoMode ? _saveAsLogo : _showShareOptions),
-                icon: _exporting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : Icon(widget.isLogoMode ? Icons.check : Icons.share),
-                label: Text(widget.isLogoMode ? 'Save to Brand Logos' : 'Share'),
-              ),
+        // Save/Share used to be a Scaffold floatingActionButton, which
+        // floats at a fixed screen position with no idea the bottom
+        // toolbar (a normal Column child, not a bottomNavigationBar
+        // slot) exists -- on Logo Studio's longer "Save to Brand Logos"
+        // label it visibly sat on top of and hid several toolbar icons.
+        // Making it a real block-level row in the Column instead (see
+        // _buildActionBar below) means it can never overlap anything;
+        // this fixes the same latent overlap risk for Flyer Studio's
+        // shorter "Share" label too, since both share this exact layout.
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null
@@ -1395,6 +1387,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                                 ? _buildStylePanel(selected)
                                 : const SizedBox(width: double.infinity, height: 0)),
                       ),
+                      _buildActionBar(),
                       _buildToolbar(),
                     ],
                   ),
@@ -1755,6 +1748,29 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           },
           onTapOutside: (_) => _endInlineEdit(),
           onEditingComplete: _endInlineEdit,
+        ),
+      ),
+    );
+  }
+
+  /// The former FloatingActionButton, now a normal full-width block
+  /// above the toolbar instead of an OS-level overlay -- see the "Save/
+  /// Share" comment at the Scaffold's body for why.
+  Widget _buildActionBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      child: SizedBox(
+        width: double.infinity,
+        height: 44,
+        child: FilledButton.icon(
+          onPressed: _exporting ? null : (widget.isLogoMode ? _saveAsLogo : _showShareOptions),
+          icon: _exporting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : Icon(widget.isLogoMode ? Icons.check : Icons.share, size: 18),
+          label: Text(widget.isLogoMode ? 'Save to Brand Logos' : 'Share'),
         ),
       ),
     );
