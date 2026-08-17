@@ -38,8 +38,17 @@ import 'flyer_canvas_element_widget.dart';
 class FlyerStudioScreen extends StatefulWidget {
   final String? projectId;
   final String? leadId;
+  // Logo Studio mode -- same freeform canvas engine (shapes, text,
+  // images, groups, undo/redo, export), just started with a square
+  // canvas, a transparent background (a logo composites onto other
+  // designs, unlike a flyer which is always its own opaque page), and
+  // an extra "Save to Brand Logos" export destination alongside the
+  // normal flyer save/share flow. Nothing about the editor itself
+  // branches on this flag -- every tool works exactly the same either
+  // way, it only changes the starting defaults and what "done" saves to.
+  final bool isLogoMode;
 
-  const FlyerStudioScreen({super.key, this.projectId, this.leadId});
+  const FlyerStudioScreen({super.key, this.projectId, this.leadId, this.isLogoMode = false});
 
   @override
   State<FlyerStudioScreen> createState() => _FlyerStudioScreenState();
@@ -134,8 +143,11 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     });
     try {
       final data = await _api.createFlyerProject(
-        title: 'Untitled Flyer',
+        title: widget.isLogoMode ? 'Untitled Logo' : 'Untitled Flyer',
         leadId: widget.leadId,
+        canvasWidth: widget.isLogoMode ? 512 : null,
+        canvasHeight: widget.isLogoMode ? 512 : null,
+        backgroundColor: widget.isLogoMode ? 'transparent' : null,
       );
       _applyProjectData(data);
     } catch (e) {
@@ -825,21 +837,47 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             children: [
               _sheetDragHandle(),
               ListTile(
-                leading: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: flyerHexToColor(_backgroundColor),
-                    border: Border.all(color: Colors.grey.shade400),
-                    shape: BoxShape.circle,
-                  ),
-                ),
+                leading: _backgroundColor == 'transparent'
+                    ? SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: ClipOval(child: CustomPaint(painter: const CheckerboardPainter(cellSize: 7))),
+                      )
+                    : Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: flyerHexToColor(_backgroundColor),
+                          border: Border.all(color: Colors.grey.shade400),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
                 title: const Text('Background colour'),
                 onTap: () {
                   Navigator.pop(ctx);
                   _changeBackgroundColor();
                 },
               ),
+              if (widget.isLogoMode)
+                ListTile(
+                  leading: Icon(
+                    _backgroundColor == 'transparent' ? Icons.check_circle : Icons.circle_outlined,
+                    color: _backgroundColor == 'transparent' ? Theme.of(context).colorScheme.primary : null,
+                  ),
+                  title: const Text('Transparent background'),
+                  subtitle: const Text('Recommended -- a logo usually composites onto other designs'),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    if (_projectId == null) return;
+                    setState(() => _backgroundColor = 'transparent');
+                    _markDirty();
+                    try {
+                      await _api.updateFlyerProject(_projectId!, backgroundColor: 'transparent');
+                    } catch (e) {
+                      _showSnack('Could not save background: $e');
+                    }
+                  },
+                ),
               ListTile(
                 leading: const Icon(Icons.wallpaper),
                 title: const Text('Background photo'),
@@ -1038,6 +1076,47 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       await Share.shareXFiles([XFile(file.path)], text: _title);
     } catch (e) {
       _showSnack('Export failed: $e');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  /// Logo Studio's "done" action -- captures the canvas exactly like
+  /// _exportAndShare, but saves straight into the tenant's Brand Logos
+  /// library (the same upload endpoint the Upload and AI-Generate logo
+  /// flows already use) instead of opening the OS share sheet. A
+  /// transparent background here really does export as a transparent
+  /// PNG -- toImage() captures actual alpha, the checkerboard shown
+  /// while editing is a sibling widget outside this RepaintBoundary,
+  /// never part of what gets captured.
+  Future<void> _saveAsLogo() async {
+    if (_projectId == null) return;
+    setState(() {
+      _selectedId = null;
+      _exporting = true;
+    });
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    try {
+      final bytes = await _captureCanvasBytes();
+      if (bytes == null) return;
+      final file = await _writeCanvasPngFile(bytes);
+      await file.writeAsBytes(bytes);
+
+      await _api.uploadTenantLogo(filePath: file.path, label: _title, isDefault: false);
+
+      try {
+        await _api.uploadFlyerRender(_projectId!, bytes);
+      } catch (_) {
+        // Non-fatal -- the logo library save above is what matters here.
+      }
+
+      if (mounted) {
+        _showSnack('Saved to Brand Logos');
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      _showSnack('Could not save to Brand Logos: $e');
     } finally {
       if (mounted) setState(() => _exporting = false);
     }
@@ -1279,17 +1358,22 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             ),
           ],
         ),
+        // Logo Studio's primary action is "finish and save into Brand
+        // Logos", not "share" -- a logo isn't usually the thing being
+        // sent to someone directly, it's an asset other designs (flyers,
+        // letterheads) will pull in afterward. Flyers keep the existing
+        // Share FAB unchanged.
         floatingActionButton: _loading || _error != null
             ? null
             : FloatingActionButton.extended(
-                onPressed: _exporting ? null : _showShareOptions,
+                onPressed: _exporting ? null : (widget.isLogoMode ? _saveAsLogo : _showShareOptions),
                 icon: _exporting
                     ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.share),
-                label: const Text('Share'),
+                    : Icon(widget.isLogoMode ? Icons.check : Icons.share),
+                label: Text(widget.isLogoMode ? 'Save to Brand Logos' : 'Share'),
               ),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -1336,7 +1420,19 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         return Center(
           child: Padding(
             padding: const EdgeInsets.all(12),
-            child: RepaintBoundary(
+            // Checkerboard sits BEHIND the RepaintBoundary, as a sibling
+            // rather than inside it, so toImage() export never captures
+            // it -- only genuinely-transparent pixels do.
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (_backgroundColor == 'transparent')
+                  SizedBox(
+                    width: displayW,
+                    height: displayH,
+                    child: CustomPaint(painter: const CheckerboardPainter()),
+                  ),
+                RepaintBoundary(
               key: _canvasRepaintKey,
               child: GestureDetector(
                 onTap: () => _selectElement(null),
@@ -1470,6 +1566,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                   ),
                 ),
               ),
+            ),
+              ],
             ),
           ),
         );

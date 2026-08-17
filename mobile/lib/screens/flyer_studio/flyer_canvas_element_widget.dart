@@ -29,6 +29,11 @@ import 'flyer_element.dart';
 typedef ElementChanged = void Function(FlyerElement element);
 
 Color flyerHexToColor(String hex, {double opacity = 1.0}) {
+  // 'transparent' is a sentinel, not a real hex value -- used by Logo
+  // Studio (a logo composites onto other designs, so a genuinely
+  // transparent canvas background matters there in a way it never did
+  // for flyers, which always render onto an opaque page).
+  if (hex == 'transparent') return Colors.transparent;
   var h = hex.replaceAll('#', '').trim();
   if (h.length == 6) h = 'FF$h';
   if (h.length != 8) return Colors.black.withOpacity(opacity);
@@ -88,6 +93,37 @@ class FlyerSnapGuidePainter extends CustomPainter {
 /// A faint 10x10 alignment grid, purely a visual placement aid (never
 /// exported -- callers only mount this outside `exporting` mode). Off by
 /// default; toggled from the Background & size sheet.
+/// The classic grey/white checkerboard indicating "genuinely
+/// transparent" -- shown BEHIND the canvas (outside its RepaintBoundary)
+/// when Logo Studio's background is set to transparent, so the person
+/// editing can see exactly what won't render, without that pattern
+/// itself ever ending up baked into the exported PNG.
+class CheckerboardPainter extends CustomPainter {
+  final double cellSize;
+  const CheckerboardPainter({this.cellSize = 12});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final light = Paint()..color = const Color(0xFFF0F0F0);
+    final dark = Paint()..color = const Color(0xFFD8D8D8);
+    canvas.drawRect(Offset.zero & size, light);
+    final cols = (size.width / cellSize).ceil();
+    final rows = (size.height / cellSize).ceil();
+    for (var row = 0; row < rows; row++) {
+      for (var col = 0; col < cols; col++) {
+        if ((row + col) % 2 == 0) continue;
+        canvas.drawRect(
+          Rect.fromLTWH(col * cellSize, row * cellSize, cellSize, cellSize),
+          dark,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CheckerboardPainter old) => old.cellSize != cellSize;
+}
+
 class FlyerGridPainter extends CustomPainter {
   final double scale;
   final double canvasWidth;

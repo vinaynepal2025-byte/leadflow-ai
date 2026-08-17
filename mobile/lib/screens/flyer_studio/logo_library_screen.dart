@@ -20,6 +20,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../theme/appearance_settings.dart';
 import '../../widgets/share_targets_sheet.dart';
 import 'generate_logo_screen.dart';
+import 'flyer_studio_screen.dart';
 
 class LogoLibraryScreen extends StatefulWidget {
   const LogoLibraryScreen({super.key});
@@ -219,6 +220,25 @@ class _LogoLibraryScreenState extends State<LogoLibraryScreen> {
       appBar: AppBar(
         title: const Text('Brand Logos'),
         actions: [
+          // Full freeform editor -- shapes, text, gradients, groups,
+          // undo/redo, the same canvas engine Flyer Studio's editor
+          // uses, started with a square transparent-background canvas.
+          // The direct answer to "logo customization abhi bahut limited
+          // hai, ek complete logo design engine chahiye jaha apni marzi
+          // se logo banaya ja sake" -- template-fill-in-the-blanks
+          // (Generate Logo, still here for a quick start) and this
+          // genuinely open canvas now sit side by side.
+          IconButton(
+            icon: const Icon(Icons.brush_outlined),
+            tooltip: 'Design Your Own',
+            onPressed: () async {
+              final saved = await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const FlyerStudioScreen(isLogoMode: true)),
+              );
+              if (saved == true) _load();
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.auto_awesome),
             tooltip: 'Generate Logo',
@@ -280,9 +300,21 @@ class _LogoLibraryScreenState extends State<LogoLibraryScreen> {
             ),
             const SizedBox(height: 20),
             FilledButton.icon(
+              onPressed: () async {
+                final saved = await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const FlyerStudioScreen(isLogoMode: true)),
+                );
+                if (saved == true) _load();
+              },
+              icon: const Icon(Icons.brush_outlined),
+              label: const Text('Design Your Own'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
               onPressed: _uploading ? null : _uploadNewLogo,
               icon: const Icon(Icons.add_a_photo_outlined),
-              label: const Text('Add Your First Logo'),
+              label: const Text('Upload a Logo'),
             ),
           ],
         ),
