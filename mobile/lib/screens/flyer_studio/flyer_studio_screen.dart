@@ -2926,6 +2926,57 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           _markDirty();
         },
       ),
+      // Photo adjustments (Canva-parity Phase C) -- real ColorFilter.matrix
+      // math (see imageAdjustmentMatrix in flyer_canvas_element_widget.dart),
+      // not a fake/cosmetic control.
+      Row(
+        children: [
+          const Text('Adjust', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          const Spacer(),
+          if (el.brightness != 0 || el.contrast != 0 || el.saturation != 1)
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  el.brightness = 0;
+                  el.contrast = 0;
+                  el.saturation = 1;
+                });
+                _markDirty();
+              },
+              child: const Text('Reset', style: TextStyle(fontSize: 12)),
+            ),
+        ],
+      ),
+      _sliderRow(
+        icon: Icons.wb_sunny_outlined,
+        value: el.brightness.clamp(-100, 100),
+        min: -100,
+        max: 100,
+        onChanged: (v) {
+          setState(() => el.brightness = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.contrast,
+        value: el.contrast.clamp(-100, 100),
+        min: -100,
+        max: 100,
+        onChanged: (v) {
+          setState(() => el.contrast = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.invert_colors_outlined,
+        value: el.saturation.clamp(0, 2),
+        min: 0,
+        max: 2,
+        onChanged: (v) {
+          setState(() => el.saturation = v);
+          _markDirty();
+        },
+      ),
     ];
   }
 

@@ -43,6 +43,83 @@ Color flyerHexToColor(String hex, {double opacity = 1.0}) {
   return Color(value).withOpacity(opacity);
 }
 
+/// Photo adjustments (Canva-parity Phase C, see CANVA_PARITY_PLAN.md) --
+/// combines brightness/contrast/saturation into the single 4x5 matrix
+/// `ColorFilter.matrix` accepts, entirely client-side, no new dependency.
+/// Flutter's matrix operates on channel values in the 0-255 range (not
+/// 0-1), with the 5th column of each row being an additive offset in
+/// that same range.
+List<double> imageAdjustmentMatrix({
+  required double brightness, // -100..100
+  required double contrast, // -100..100
+  required double saturation, // 0 (greyscale) .. 2 (double), 1 = no change
+}) {
+  // Standard luminance-preserving saturation matrix.
+  const lumR = 0.2126, lumG = 0.7152, lumB = 0.0722;
+  final sr = (1 - saturation) * lumR;
+  final sg = (1 - saturation) * lumG;
+  final sb = (1 - saturation) * lumB;
+  final saturationMatrix = <double>[
+    sr + saturation, sg, sb, 0, 0,
+    sr, sg + saturation, sb, 0, 0,
+    sr, sg, sb + saturation, 0, 0,
+    0, 0, 0, 1, 0,
+  ];
+
+  // contrast: -100..100 -> a multiplicative factor around 1.0, pivoting
+  // around mid-grey (128) so contrast changes don't also shift brightness.
+  final contrastFactor = 1 + (contrast.clamp(-100, 100) / 100);
+  final contrastOffset = 128 * (1 - contrastFactor);
+  final contrastMatrix = <double>[
+    contrastFactor, 0, 0, 0, contrastOffset,
+    0, contrastFactor, 0, 0, contrastOffset,
+    0, 0, contrastFactor, 0, contrastOffset,
+    0, 0, 0, 1, 0,
+  ];
+
+  final brightnessOffset = brightness.clamp(-100, 100).toDouble();
+  final brightnessMatrix = <double>[
+    1, 0, 0, 0, brightnessOffset,
+    0, 1, 0, 0, brightnessOffset,
+    0, 0, 1, 0, brightnessOffset,
+    0, 0, 0, 1, 0,
+  ];
+
+  // Compose as brightness(contrast(saturation(colour))) -- apply
+  // saturation first (so contrast/brightness act on the final tone), via
+  // proper 5x5 homogeneous matrix multiplication (each 4x5 input
+  // represents a 5x5 affine matrix with an implicit [0,0,0,0,1] last row).
+  return _multiplyColorMatrices(brightnessMatrix, _multiplyColorMatrices(contrastMatrix, saturationMatrix));
+}
+
+List<double> _multiplyColorMatrices(List<double> a, List<double> b) {
+  List<List<double>> to5x5(List<double> m) => [
+        [m[0], m[1], m[2], m[3], m[4]],
+        [m[5], m[6], m[7], m[8], m[9]],
+        [m[10], m[11], m[12], m[13], m[14]],
+        [m[15], m[16], m[17], m[18], m[19]],
+        [0, 0, 0, 0, 1],
+      ];
+  final ma = to5x5(a);
+  final mb = to5x5(b);
+  final result = List.generate(5, (_) => List<double>.filled(5, 0));
+  for (var i = 0; i < 5; i++) {
+    for (var j = 0; j < 5; j++) {
+      var sum = 0.0;
+      for (var k = 0; k < 5; k++) {
+        sum += ma[i][k] * mb[k][j];
+      }
+      result[i][j] = sum;
+    }
+  }
+  return [
+    result[0][0], result[0][1], result[0][2], result[0][3], result[0][4],
+    result[1][0], result[1][1], result[1][2], result[1][3], result[1][4],
+    result[2][0], result[2][1], result[2][2], result[2][3], result[2][4],
+    result[3][0], result[3][1], result[3][2], result[3][3], result[3][4],
+  ];
+}
+
 String flyerColorToHex(Color c) =>
     '#${c.value.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
 
@@ -808,25 +885,37 @@ class FlyerCanvasElementWidget extends StatelessWidget {
             ),
           );
         }
+        final hasPhotoAdjustments = element.brightness != 0 || element.contrast != 0 || element.saturation != 1;
+        Widget photo = Image.network(
+          element.url!,
+          width: w,
+          height: h,
+          fit: element.fit == 'contain' ? BoxFit.contain : BoxFit.cover,
+          loadingBuilder: (ctx, child, progress) => progress == null
+              ? child
+              : Container(width: w, height: h, color: Colors.grey.shade100),
+          errorBuilder: (_, __, ___) => Container(
+            width: w,
+            height: h,
+            color: Colors.grey.shade200,
+            child: const Icon(Icons.broken_image, color: Colors.grey),
+          ),
+        );
+        if (hasPhotoAdjustments) {
+          photo = ColorFiltered(
+            colorFilter: ColorFilter.matrix(imageAdjustmentMatrix(
+              brightness: element.brightness,
+              contrast: element.contrast,
+              saturation: element.saturation,
+            )),
+            child: photo,
+          );
+        }
         return Opacity(
           opacity: element.opacity,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(element.cornerRadius * scale),
-            child: Image.network(
-              element.url!,
-              width: w,
-              height: h,
-              fit: element.fit == 'contain' ? BoxFit.contain : BoxFit.cover,
-              loadingBuilder: (ctx, child, progress) => progress == null
-                  ? child
-                  : Container(width: w, height: h, color: Colors.grey.shade100),
-              errorBuilder: (_, __, ___) => Container(
-                width: w,
-                height: h,
-                color: Colors.grey.shade200,
-                child: const Icon(Icons.broken_image, color: Colors.grey),
-              ),
-            ),
+            child: photo,
           ),
         );
       case FlyerElementType.shape:

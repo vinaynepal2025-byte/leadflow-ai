@@ -216,6 +216,12 @@ class FlyerElement {
   String? url;
   String fit; // 'cover' | 'contain'
   double cornerRadius;
+  // Photo adjustments (Canva-parity Phase C) -- 0 means "no change" for
+  // all three, so an element with no adjustments applied renders and
+  // serializes identically to before these fields existed.
+  double brightness; // -100..100
+  double contrast; // -100..100
+  double saturation; // 0 (greyscale) .. 2 (double), 1 = no change
 
   // Shape-specific
   String shapeColor;
@@ -269,6 +275,9 @@ class FlyerElement {
     this.url,
     this.fit = 'cover',
     this.cornerRadius = 0,
+    this.brightness = 0,
+    this.contrast = 0,
+    this.saturation = 1,
     this.shapeColor = '#CCCCCC',
     this.shapeKind = 'rect',
     this.shapeGradientEnd,
@@ -308,6 +317,9 @@ class FlyerElement {
       url: json['url']?.toString(),
       fit: json['fit']?.toString() ?? 'cover',
       cornerRadius: (json['cornerRadius'] as num?)?.toDouble() ?? 0,
+      brightness: (json['brightness'] as num?)?.toDouble() ?? 0,
+      contrast: (json['contrast'] as num?)?.toDouble() ?? 0,
+      saturation: (json['saturation'] as num?)?.toDouble() ?? 1,
       shapeColor: json['shapeColor']?.toString() ?? '#CCCCCC',
       shapeKind: json['shapeKind']?.toString() ?? 'rect',
       shapeGradientEnd: json['shapeGradientEnd']?.toString(),
@@ -350,6 +362,9 @@ class FlyerElement {
       map['url'] = url ?? '';
       map['fit'] = fit;
       map['cornerRadius'] = cornerRadius;
+      map['brightness'] = brightness;
+      map['contrast'] = contrast;
+      map['saturation'] = saturation;
     } else if (type == FlyerElementType.shape) {
       map['shapeColor'] = shapeColor;
       map['shapeKind'] = shapeKind;
