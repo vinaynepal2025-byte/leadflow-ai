@@ -41,11 +41,18 @@ class CustomizeRegistryItem {
   /// command changes only this one section, nothing else. Not used by
   /// Settings Studio, which instead opens the item's own editor sheet
   /// for a full manual edit.
-  Future<void> applyStyle(ApiService api, {String? colorHex, String? styleVariant, String? gradientEndHex}) async {
+  Future<void> applyStyle(
+    ApiService api, {
+    String? colorHex,
+    String? styleVariant,
+    String? gradientEndHex,
+    Map<String, dynamic>? styleJson,
+  }) async {
     final updates = <String, dynamic>{
       if (colorHex != null) 'color_override': colorHex,
       if (styleVariant != null) 'style_variant': styleVariant,
       if (gradientEndHex != null) 'gradient_override': gradientEndHex,
+      if (styleJson != null) 'style_json': styleJson,
     };
     switch (source) {
       case CustomizeSource.moreMenu:

@@ -186,6 +186,7 @@ class _MoreScreenState extends State<MoreScreen> {
         currentColorHex: (item['color_override'] as String?) ?? '#1B2A4A',
         currentStyleVariant: (item['style_variant'] as String?) ?? 'flat',
         currentGradientEndHex: item['gradient_override'] as String?,
+        currentStyleJson: (item['style_json'] as Map?)?.cast<String, dynamic>(),
       ),
     );
     if (result == null) return;
@@ -198,6 +199,7 @@ class _MoreScreenState extends State<MoreScreen> {
           'color_override': result['color'],
           'style_variant': result['styleVariant'],
           'gradient_override': result['gradientEnd'],
+          'style_json': result['styleJson'],
         };
       }
     });
@@ -281,6 +283,7 @@ class _MoreScreenState extends State<MoreScreen> {
           final gradientHex = item['gradient_override'] as String?;
           final gradientEnd = gradientHex != null ? _hexToColor(gradientHex) : null;
           final styleVariant = item['style_variant'] as String? ?? 'flat';
+          final styleJson = (item['style_json'] as Map?)?.cast<String, dynamic>();
 
           return LauncherTile(
             label: label,
@@ -288,6 +291,7 @@ class _MoreScreenState extends State<MoreScreen> {
             color: color,
             gradientEnd: gradientEnd,
             styleVariant: styleVariant,
+            styleJson: styleJson,
             onEditTap: isCustom ? null : () => _openQuickEditor(item),
             onTap: () {
               if (isCustom) {
