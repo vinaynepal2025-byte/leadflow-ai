@@ -2196,6 +2196,44 @@ class ApiService {
     _checkOk(res);
   }
 
+  /// Returns null if the tenant hasn't created a Brand Kit yet.
+  Future<Map<String, dynamic>?> getBrandKit() async {
+    final res = await http.get(Uri.parse('$baseUrl/brand-kit'), headers: _headers);
+    _checkOk(res);
+    final decoded = jsonDecode(res.body);
+    return decoded == null ? null : decoded as Map<String, dynamic>;
+  }
+
+  /// Upserts the tenant's Brand Kit. Every field is optional -- pass only
+  /// what changed (e.g. one role assignment) to avoid clobbering the rest.
+  Future<Map<String, dynamic>> saveBrandKit({
+    String? primaryLogoId,
+    String? secondaryLogoId,
+    String? monoLogoId,
+    String? darkBgLogoId,
+    String? lightBgLogoId,
+    String? iconMarkLogoId,
+    List<String>? palette,
+  }) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/brand-kit'),
+      headers: _headers,
+      body: jsonEncode({
+        if (primaryLogoId != null) 'primary_logo_id': primaryLogoId,
+        if (secondaryLogoId != null) 'secondary_logo_id': secondaryLogoId,
+        if (monoLogoId != null) 'mono_logo_id': monoLogoId,
+        if (darkBgLogoId != null) 'dark_bg_logo_id': darkBgLogoId,
+        if (lightBgLogoId != null) 'light_bg_logo_id': lightBgLogoId,
+        if (iconMarkLogoId != null) 'icon_mark_logo_id': iconMarkLogoId,
+        if (palette != null) 'palette': palette,
+      }),
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Could not save Brand Kit');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> generateFlyerAI(String projectId, String prompt) async {
     final res = await http.post(
       Uri.parse('$baseUrl/flyer-projects/$projectId/ai-generate'),
