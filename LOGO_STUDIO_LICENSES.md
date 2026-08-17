@@ -11,15 +11,14 @@ Tracks third-party code/asset reuse decisions for the Logo Studio build, per the
 
 **Net effect: zero third-party application code is being reused.** All Logo Studio functionality is built natively, extending the existing `FlyerElement`/`FlyerStudioScreen` engine already in this repository (see `LOGO_STUDIO_ARCHITECTURE.md` §1) plus vetted open-source *packages* (below) — not copied application source.
 
-## New package dependencies (proposed, Phase 4+)
+## New package dependencies
 
-None of these are added yet — this table is the pre-approval license check required before `pubspec.yaml`/`package.json` changes land. Update this table when each is actually added, with the exact installed version.
+| Package | Version installed | Purpose | License | Commercial SaaS OK? |
+|---|---|---|---|---|
+| `flutter_svg` | 2.3.0 | Renders SVG within Flutter — true vector element type in Flyer/Logo Studio (`FlyerElementType.svg`), replacing the flatten-to-PNG-only approach | BSD-3-Clause | Yes — permissive, no copyleft, attribution via standard OSS notices only |
+| `xml` (Dart) | 6.6.1 | Real XML parsing for `svg_sanitizer.dart` (strips `<script>`/event handlers/external hrefs from imported SVGs) | MIT | Yes |
 
-| Package | Purpose | License (publicly known, verify exact version at install time) | Commercial SaaS OK? |
-|---|---|---|---|
-| `flutter_svg` | Render SVG within Flutter (needed for true vector icons/imported SVG, replacing the flatten-to-PNG approach) | BSD-3-Clause | Yes — permissive, no copyleft, attribution via standard OSS notices only |
-| `xml` (Dart) | Parse SVG's underlying XML for the custom two-way SVG-path editor (no mature Flutter package does editable SVG paths, per `LOGO_STUDIO_ARCHITECTURE.md` §3 Phase 4) | MIT | Yes |
-| `path_drawing` (if used, for SVG path-data parsing helpers) | Parse `<path d="...">` strings into Flutter `Path` objects | MIT | Yes |
+`path_drawing` was evaluated but not added — not needed for the Phase 4 slice shipped (element-level SVG import/render/transform/recolor). Full per-node SVG path editing is deferred to a later Phase 4 increment; re-evaluate then.
 
 All three are permissive (BSD-3/MIT): no source-disclosure obligation, no "SaaS/network use = distribution" clause (unlike AGPL), only a standard copyright/license-notice preservation requirement, which is satisfied by keeping the package's own LICENSE file intact in the dependency tree (Flutter/npm tooling does this automatically — no manual action needed beyond not deleting `pub-cache`/`node_modules` license files).
 
