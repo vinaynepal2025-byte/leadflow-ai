@@ -18,9 +18,11 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -34,6 +36,7 @@ import '../../widgets/color_picker_dialog.dart';
 import '../../widgets/glass_widgets.dart';
 import 'flyer_element.dart';
 import 'flyer_canvas_element_widget.dart';
+import 'svg_sanitizer.dart';
 
 class FlyerStudioScreen extends StatefulWidget {
   final String? projectId;
@@ -489,6 +492,59 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       height: size,
       iconKey: iconKey,
       shapeColor: color,
+      zIndex: _nextZIndex(),
+    ));
+  }
+
+  /// Imports a user-picked .svg file as a true vector element -- stays
+  /// editable (recolourable, moveable, resizable, re-exportable as SVG
+  /// later) rather than flattening it to a bitmap on the way in. Every
+  /// file is run through sanitizeSvg() before it ever touches the
+  /// document model (see svg_sanitizer.dart for what that strips).
+  /// [replaceTarget] set swaps an existing SVG element's artwork in place
+  /// (its "Replace SVG" button) instead of adding a new element.
+  Future<void> _importSvgElement({FlyerElement? replaceTarget}) async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['svg'],
+    );
+    if (picked == null || picked.files.single.path == null) return;
+
+    String raw;
+    try {
+      raw = await File(picked.files.single.path!).readAsString();
+    } catch (e) {
+      _showSnack('Could not read that file: $e');
+      return;
+    }
+
+    String sanitized;
+    try {
+      sanitized = sanitizeSvg(raw);
+    } on SvgSanitizeException catch (e) {
+      _showSnack('Could not import: ${e.message}');
+      return;
+    } catch (e) {
+      _showSnack('Could not import this SVG: $e');
+      return;
+    }
+
+    if (replaceTarget != null) {
+      _pushUndo();
+      setState(() => replaceTarget.svgData = sanitized);
+      _markDirty();
+      return;
+    }
+
+    final size = math.min(_canvasWidth, _canvasHeight) * 0.4;
+    _addElement(FlyerElement(
+      id: _newId(),
+      type: FlyerElementType.svg,
+      x: (_canvasWidth - size) / 2,
+      y: (_canvasHeight - size) / 2,
+      width: size,
+      height: size,
+      svgData: sanitized,
       zIndex: _nextZIndex(),
     ));
   }
@@ -1954,6 +2010,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _toolbarButton(Icons.workspace_premium, 'Logo', _addLogoElement, appearance),
               _toolbarButton(Icons.rectangle, 'Shape', _addShapeElement, appearance),
               _toolbarButton(Icons.emoji_symbols_outlined, 'Icon', _openIconPicker, appearance),
+              _toolbarButton(Icons.polyline, 'SVG', _importSvgElement, appearance),
               _toolbarButton(
                   Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
               _toolbarButton(Icons.layers, 'Layers', _showLayersSheet, appearance),
@@ -2125,6 +2182,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                       ..._imageControls(el),
                     if (el.type == FlyerElementType.shape) ..._shapeControls(el),
                     if (el.type == FlyerElementType.icon) ..._iconControls(el),
+                    if (el.type == FlyerElementType.svg) ..._svgControls(el),
                   ],
                 ),
               ),
@@ -2547,6 +2605,69 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     ];
   }
 
+  List<Widget> _svgControls(FlyerElement el) {
+    return [
+      Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.swap_horiz),
+            tooltip: 'Replace SVG',
+            onPressed: () => _importSvgElement(replaceTarget: el),
+          ),
+          const Spacer(),
+          const Text('Force single colour', style: TextStyle(fontSize: 12)),
+          Switch(
+            value: el.svgRecolor,
+            onChanged: (v) {
+              setState(() => el.svgRecolor = v);
+              _markDirty();
+            },
+          ),
+        ],
+      ),
+      if (el.svgRecolor)
+        Row(
+          children: [
+            const Text('Colour', style: TextStyle(fontSize: 12)),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: flyerHexToColor(el.shapeColor),
+                  border: Border.all(color: Colors.grey.shade400),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              tooltip: 'SVG colour',
+              onPressed: () async {
+                final picked = await showDialog<Color>(
+                  context: context,
+                  builder: (_) =>
+                      ColorPickerDialog(initial: flyerHexToColor(el.shapeColor), title: 'SVG Colour'),
+                );
+                if (picked != null) {
+                  setState(() => el.shapeColor = flyerColorToHex(picked));
+                  _markDirty();
+                }
+              },
+            ),
+          ],
+        ),
+      _sliderRow(
+        icon: Icons.opacity,
+        value: el.opacity.clamp(0.1, 1.0),
+        min: 0.1,
+        max: 1.0,
+        onChanged: (v) {
+          setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+    ];
+  }
+
   Widget _sliderRow({
     required IconData icon,
     required double value,
@@ -2632,6 +2753,18 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         break;
       case FlyerElementType.icon:
         content = Icon(kFlyerIconLibrary[el.iconKey] ?? Icons.star, color: flyerHexToColor(el.shapeColor), size: 22);
+        break;
+      case FlyerElementType.svg:
+        content = (el.svgData != null && el.svgData!.isNotEmpty)
+            ? SvgPicture.string(
+                el.svgData!,
+                fit: BoxFit.contain,
+                colorFilter: el.svgRecolor
+                    ? ColorFilter.mode(flyerHexToColor(el.shapeColor), BlendMode.srcIn)
+                    : null,
+                errorBuilder: (_, __, ___) => Icon(_iconFor(el.type), size: 18, color: Colors.grey),
+              )
+            : Icon(_iconFor(el.type), size: 18, color: Colors.grey);
         break;
     }
     return ClipRRect(
@@ -2821,6 +2954,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         return Icons.rectangle;
       case FlyerElementType.icon:
         return Icons.emoji_symbols_outlined;
+      case FlyerElementType.svg:
+        return Icons.polyline;
     }
   }
 

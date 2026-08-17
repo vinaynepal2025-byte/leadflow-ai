@@ -11,7 +11,7 @@
 
 import 'package:flutter/material.dart' show IconData, Icons;
 
-enum FlyerElementType { text, image, logo, shape, icon }
+enum FlyerElementType { text, image, logo, shape, icon, svg }
 
 FlyerElementType flyerElementTypeFromString(String? s) {
   switch (s) {
@@ -23,6 +23,8 @@ FlyerElementType flyerElementTypeFromString(String? s) {
       return FlyerElementType.shape;
     case 'icon':
       return FlyerElementType.icon;
+    case 'svg':
+      return FlyerElementType.svg;
     case 'text':
     default:
       return FlyerElementType.text;
@@ -39,6 +41,8 @@ String flyerElementTypeToString(FlyerElementType t) {
       return 'shape';
     case FlyerElementType.icon:
       return 'icon';
+    case FlyerElementType.svg:
+      return 'svg';
     case FlyerElementType.text:
       return 'text';
   }
@@ -237,6 +241,17 @@ class FlyerElement {
   // apply) works on it for free this way.
   String iconKey; // key into kFlyerIconLibrary
 
+  // SVG-specific. svgData holds the sanitized SVG markup itself (already
+  // run through svg_sanitizer.dart before an element is ever created), not
+  // a URL -- this is what keeps an imported SVG a true vector object that
+  // stays editable (recolourable, re-exportable as SVG) through save/
+  // reopen, rather than a bitmap. svgRecolor reuses shapeColor (same
+  // reasoning as icons above) to force the whole graphic to one flat
+  // colour via a ColorFilter, for monochrome/icon-style source SVGs;
+  // multi-colour source SVGs should leave it off and render as authored.
+  String? svgData;
+  bool svgRecolor;
+
   FlyerElement({
     required this.id,
     required this.type,
@@ -270,6 +285,8 @@ class FlyerElement {
     this.strokeColor,
     this.strokeWidth = 0,
     this.iconKey = 'star',
+    this.svgData,
+    this.svgRecolor = false,
   });
 
   factory FlyerElement.fromJson(Map<String, dynamic> json) {
@@ -307,6 +324,8 @@ class FlyerElement {
       strokeColor: json['strokeColor']?.toString(),
       strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 0,
       iconKey: json['iconKey']?.toString() ?? 'star',
+      svgData: json['svgData']?.toString(),
+      svgRecolor: json['svgRecolor'] == true,
     );
   }
 
@@ -351,6 +370,10 @@ class FlyerElement {
     } else if (type == FlyerElementType.icon) {
       map['iconKey'] = iconKey;
       map['shapeColor'] = shapeColor;
+    } else if (type == FlyerElementType.svg) {
+      map['svgData'] = svgData ?? '';
+      map['svgRecolor'] = svgRecolor;
+      if (svgRecolor) map['shapeColor'] = shapeColor;
     }
     return map;
   }

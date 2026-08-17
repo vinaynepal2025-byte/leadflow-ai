@@ -22,6 +22,7 @@
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import '../../theme/appearance_settings.dart';
 import 'flyer_element.dart';
@@ -886,6 +887,39 @@ class FlyerCanvasElementWidget extends StatelessWidget {
               kFlyerIconLibrary[element.iconKey] ?? Icons.star,
               size: (w < h ? w : h) * 0.82,
               color: flyerHexToColor(element.shapeColor),
+            ),
+          ),
+        );
+      case FlyerElementType.svg:
+        if (element.svgData == null || element.svgData!.isEmpty) {
+          if (exporting) return const SizedBox.shrink();
+          return Container(
+            width: w,
+            height: h,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade400),
+              color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: const Icon(Icons.polyline, color: Colors.grey),
+          );
+        }
+        return Opacity(
+          opacity: element.opacity,
+          child: SvgPicture.string(
+            element.svgData!,
+            width: w,
+            height: h,
+            fit: BoxFit.contain,
+            colorFilter: element.svgRecolor
+                ? ColorFilter.mode(flyerHexToColor(element.shapeColor), BlendMode.srcIn)
+                : null,
+            placeholderBuilder: (_) => SizedBox(width: w, height: h),
+            errorBuilder: (_, __, ___) => Container(
+              width: w,
+              height: h,
+              color: Colors.grey.shade200,
+              child: const Icon(Icons.broken_image, color: Colors.grey),
             ),
           ),
         );
