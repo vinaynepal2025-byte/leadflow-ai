@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../theme/edit_mode_settings.dart';
 import 'settings_screen.dart';
 import 'performance_screen.dart';
 import 'audit_screen.dart';
@@ -17,8 +19,10 @@ import 'scoring_config_screen.dart';
 import 'triage_test_screen.dart';
 import 'insights_overview_screen.dart';
 import 'customize_more_menu_screen.dart';
+import 'customize_registry.dart';
 import '../services/api_service.dart';
 import '../widgets/launcher_tile.dart';
+import '../widgets/quick_style_editor_sheet.dart';
 
 // Curated icon set for icon_override -- same string-key-to-IconData
 // pattern as kLeadDetailIconOptions/kShareTargetIconOptions.
@@ -159,6 +163,46 @@ class _MoreScreenState extends State<MoreScreen> {
     _load();
   }
 
+  // Built once, not per-build -- the registry is static data (labels/
+  // icons/screen builders), only the live _items list above changes.
+  late final List<CustomizeRegistryItem> _registry = buildCustomizeRegistry();
+
+  Future<void> _openQuickEditor(Map<String, dynamic> item) async {
+    final key = item['item_key'] as String;
+    CustomizeRegistryItem? regItem;
+    for (final r in _registry) {
+      if (r.source == CustomizeSource.moreMenu && r.key == key) {
+        regItem = r;
+        break;
+      }
+    }
+    if (regItem == null) return; // custom link items: no registry entry yet
+
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => QuickStyleEditorSheet(
+        item: regItem!,
+        currentColorHex: (item['color_override'] as String?) ?? '#1B2A4A',
+        currentStyleVariant: (item['style_variant'] as String?) ?? 'flat',
+        currentGradientEndHex: item['gradient_override'] as String?,
+      ),
+    );
+    if (result == null) return;
+    // Live update -- reflect the new look immediately, no re-fetch wait.
+    setState(() {
+      final idx = _items.indexWhere((i) => i['item_key'] == key);
+      if (idx != -1) {
+        _items[idx] = {
+          ..._items[idx],
+          'color_override': result['color'],
+          'style_variant': result['styleVariant'],
+          'gradient_override': result['gradientEnd'],
+        };
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -170,10 +214,18 @@ class _MoreScreenState extends State<MoreScreen> {
 
     final visibleItems = _items.where((i) => i['enabled'] != false).toList();
 
+    final editMode = context.watch<EditModeSettings>();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('More'),
         actions: [
+          IconButton(
+            icon: Icon(editMode.enabled ? Icons.edit : Icons.edit_outlined),
+            tooltip: editMode.enabled ? 'Exit Edit Mode' : 'Edit Mode -- tap any tile to restyle it live',
+            color: editMode.enabled ? Theme.of(context).colorScheme.primary : null,
+            onPressed: editMode.toggle,
+          ),
           IconButton(
             icon: const Icon(Icons.tune),
             tooltip: 'Customize this menu',
@@ -188,7 +240,29 @@ class _MoreScreenState extends State<MoreScreen> {
       // (tinted/gradient/glow/glass background + colour-matched icon)
       // so every "grid of destinations" screen in the app looks like
       // one consistent, premium design system rather than two.
-      body: GridView.count(
+      body: Column(
+        children: [
+          if (editMode.enabled)
+            Container(
+              width: double.infinity,
+              color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Text('Edit Mode is on -- tap any tile to restyle it live', style: TextStyle(fontSize: 12))),
+                ],
+              ),
+            ),
+          Expanded(child: _buildGrid(visibleItems)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGrid(List<Map<String, dynamic>> visibleItems) {
+    return GridView.count(
         padding: const EdgeInsets.all(14),
         crossAxisCount: 3,
         mainAxisSpacing: 12,
@@ -214,6 +288,7 @@ class _MoreScreenState extends State<MoreScreen> {
             color: color,
             gradientEnd: gradientEnd,
             styleVariant: styleVariant,
+            onEditTap: isCustom ? null : () => _openQuickEditor(item),
             onTap: () {
               if (isCustom) {
                 // Custom items are URL-only for now (matches backend
@@ -231,7 +306,6 @@ class _MoreScreenState extends State<MoreScreen> {
             },
           );
         }).toList(),
-      ),
     );
   }
 }
