@@ -675,6 +675,257 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     );
   }
 
+  /// The Asset Library -- a tenant-wide pool of saved SVGs/images/logos
+  /// that any project can pull from, instead of every project re-picking
+  /// or re-generating the same graphic (Phase 1 audit: "no generic asset
+  /// library concept exists"). Always inserts a new element; there's no
+  /// [replaceTarget] variant here since the toolbar entry point is the
+  /// only caller and always adds fresh.
+  Future<void> _openAssetLibrary() async {
+    List<Map<String, dynamic>> assets;
+    try {
+      assets = await _api.getTenantAssets();
+    } catch (e) {
+      _showSnack('Could not load assets: $e');
+      return;
+    }
+    if (!mounted) return;
+
+    String? kindFilter;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final items = kindFilter == null
+              ? assets
+              : assets.where((a) => a['kind'] == kindFilter).toList();
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 16, right: 16, top: 16,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+            ),
+            child: SizedBox(
+              height: MediaQuery.of(ctx).size.height * 0.7,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _sheetDragHandle(),
+                  Row(
+                    children: [
+                      Text('Asset Library', style: Theme.of(ctx).textTheme.titleMedium),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.add_photo_alternate_outlined),
+                        tooltip: 'Upload image',
+                        onPressed: () async {
+                          final picked = await _imagePicker.pickImage(
+                              source: ImageSource.gallery, imageQuality: 90);
+                          if (picked == null) return;
+                          try {
+                            final created = await _api.uploadTenantAsset(
+                                filePath: picked.path, kind: 'image');
+                            setSheetState(() => assets = [created, ...assets]);
+                          } catch (e) {
+                            _showSnack('Upload failed: $e');
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _assetKindChip('All', null, kindFilter,
+                            (v) => setSheetState(() => kindFilter = v)),
+                        _assetKindChip('SVG', 'svg', kindFilter,
+                            (v) => setSheetState(() => kindFilter = v)),
+                        _assetKindChip('Images', 'image', kindFilter,
+                            (v) => setSheetState(() => kindFilter = v)),
+                        _assetKindChip('Logos', 'logo', kindFilter,
+                            (v) => setSheetState(() => kindFilter = v)),
+                        _assetKindChip('Icons', 'icon', kindFilter,
+                            (v) => setSheetState(() => kindFilter = v)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: items.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                'No saved assets yet — save an SVG from its properties panel, or upload an image here.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.grey.shade600),
+                              ),
+                            ),
+                          )
+                        : GridView.builder(
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 4,
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 8,
+                            ),
+                            itemCount: items.length,
+                            itemBuilder: (gridCtx, i) {
+                              final asset = items[i];
+                              return InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  _insertAsset(asset);
+                                },
+                                onLongPress: () async {
+                                  final confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (dctx) => AlertDialog(
+                                      title: const Text('Remove asset?'),
+                                      content: const Text('This only removes it from your Asset Library.'),
+                                      actions: [
+                                        TextButton(
+                                            onPressed: () => Navigator.pop(dctx, false),
+                                            child: const Text('Cancel')),
+                                        FilledButton(
+                                            onPressed: () => Navigator.pop(dctx, true),
+                                            child: const Text('Remove')),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirm == true) {
+                                    try {
+                                      await _api.deleteTenantAsset(asset['id'].toString());
+                                      setSheetState(
+                                          () => assets = assets.where((a) => a['id'] != asset['id']).toList());
+                                    } catch (e) {
+                                      _showSnack('Could not remove: $e');
+                                    }
+                                  }
+                                },
+                                child: _assetThumbnail(asset),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _assetKindChip(
+      String label, String? value, String? current, ValueChanged<String?> onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: ChoiceChip(
+        label: Text(label, style: const TextStyle(fontSize: 12)),
+        selected: current == value,
+        onSelected: (_) => onTap(value),
+      ),
+    );
+  }
+
+  Widget _assetThumbnail(Map<String, dynamic> asset) {
+    final kind = asset['kind']?.toString();
+    Widget content;
+    if (kind == 'svg' && asset['svg_data'] != null) {
+      content = SvgPicture.string(asset['svg_data'].toString(), fit: BoxFit.contain);
+    } else if (asset['asset_url'] != null) {
+      content = Image.network(
+        asset['asset_url'].toString(),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.grey),
+      );
+    } else {
+      content = const Icon(Icons.image_not_supported, color: Colors.grey);
+    }
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.all(6),
+      child: content,
+    );
+  }
+
+  void _insertAsset(Map<String, dynamic> asset) {
+    if (asset['kind']?.toString() == 'svg') {
+      final svgData = asset['svg_data']?.toString();
+      if (svgData == null) return;
+      final size = math.min(_canvasWidth, _canvasHeight) * 0.4;
+      _addElement(FlyerElement(
+        id: _newId(),
+        type: FlyerElementType.svg,
+        x: (_canvasWidth - size) / 2,
+        y: (_canvasHeight - size) / 2,
+        width: size,
+        height: size,
+        svgData: svgData,
+        zIndex: _nextZIndex(),
+      ));
+      return;
+    }
+    final url = asset['asset_url']?.toString();
+    if (url == null) {
+      _showSnack('This asset\'s file is no longer available');
+      return;
+    }
+    final size = _canvasWidth * 0.6;
+    _addElement(FlyerElement(
+      id: _newId(),
+      type: FlyerElementType.image,
+      x: (_canvasWidth - size) / 2,
+      y: (_canvasHeight - size) / 2,
+      width: size,
+      height: size,
+      url: url,
+      zIndex: _nextZIndex(),
+    ));
+  }
+
+  Future<void> _saveSvgToLibrary(FlyerElement el) async {
+    if (el.svgData == null || el.svgData!.isEmpty) return;
+    final labelCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Save to Asset Library'),
+        content: TextField(
+          controller: labelCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+              hintText: 'Label (optional)', border: OutlineInputBorder(), isDense: true),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await _api.saveSvgAsset(
+        el.svgData!,
+        label: labelCtrl.text.trim().isEmpty ? null : labelCtrl.text.trim(),
+      );
+      _showSnack('Saved to Asset Library');
+    } catch (e) {
+      _showSnack('Could not save: $e');
+    }
+  }
+
   void _duplicateSelected() {
     final el = _selected;
     if (el == null) return;
@@ -2012,6 +2263,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _toolbarButton(Icons.rectangle, 'Shape', _addShapeElement, appearance),
               _toolbarButton(Icons.emoji_symbols_outlined, 'Icon', _openIconPicker, appearance),
               _toolbarButton(Icons.polyline, 'SVG', _importSvgElement, appearance),
+              _toolbarButton(Icons.perm_media_outlined, 'Assets', _openAssetLibrary, appearance),
               _toolbarButton(
                   Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
               _toolbarButton(Icons.layers, 'Layers', _showLayersSheet, appearance),
@@ -2614,6 +2866,11 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             icon: const Icon(Icons.swap_horiz),
             tooltip: 'Replace SVG',
             onPressed: () => _importSvgElement(replaceTarget: el),
+          ),
+          IconButton(
+            icon: const Icon(Icons.bookmark_add_outlined),
+            tooltip: 'Save to Asset Library',
+            onPressed: () => _saveSvgToLibrary(el),
           ),
           const Spacer(),
           const Text('Force single colour', style: TextStyle(fontSize: 12)),

@@ -148,6 +148,7 @@ app.use('/dashboard-sections', dashboardSectionsRouter);
 app.use('/lead-list-fields', leadListFieldsRouter);
 app.use('/lead-notes', leadNotesRouter);
 app.use('/tenant-logos', require('./routes/tenantLogos'));
+app.use('/tenant-assets', require('./routes/tenantAssets'));
 app.use('/more-menu-items', require('./routes/moreMenuItems'));
 app.use('/flyer-projects', require('./routes/flyerProjects'));
 app.use('/share-targets', require('./routes/shareTargets'));

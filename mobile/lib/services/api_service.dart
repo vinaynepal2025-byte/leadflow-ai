@@ -2118,6 +2118,52 @@ class ApiService {
     _checkOk(res);
   }
 
+  Future<List<Map<String, dynamic>>> getTenantAssets({String? kind, String? search}) async {
+    final qp = <String, String>{};
+    if (kind != null) qp['kind'] = kind;
+    if (search != null && search.isNotEmpty) qp['search'] = search;
+    final uri = Uri.parse('$baseUrl/tenant-assets')
+        .replace(queryParameters: qp.isEmpty ? null : qp);
+    final res = await http.get(uri, headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  /// Saves sanitized SVG markup (already run through svg_sanitizer.dart on
+  /// the client) as a reusable Asset Library entry.
+  Future<Map<String, dynamic>> saveSvgAsset(String svgData, {String? label}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/tenant-assets/svg'),
+      headers: _headers,
+      body: jsonEncode({'svgData': svgData, if (label != null) 'label': label}),
+    );
+    _checkOk(res, expected: 201);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> uploadTenantAsset({
+    required String filePath,
+    required String kind,
+    String? label,
+  }) async {
+    final uri = Uri.parse('$baseUrl/tenant-assets');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll(_multipartHeaders)
+      ..fields['kind'] = kind
+      ..files.add(await http.MultipartFile.fromPath('file', filePath));
+    if (label != null) request.fields['label'] = label;
+    final streamed = await request.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 201) throw Exception('Asset upload failed: $body');
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteTenantAsset(String id) async {
+    final res = await http.delete(Uri.parse('$baseUrl/tenant-assets/$id'), headers: _headers);
+    _checkOk(res);
+  }
+
   Future<Map<String, dynamic>> generateFlyerAI(String projectId, String prompt) async {
     final res = await http.post(
       Uri.parse('$baseUrl/flyer-projects/$projectId/ai-generate'),
