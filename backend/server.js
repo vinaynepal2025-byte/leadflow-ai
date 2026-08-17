@@ -45,6 +45,7 @@ const predictionsRouter = require('./routes/predictions');
 const inboxRouter = require('./routes/inbox');
 const complianceRouter = require('./routes/compliance');
 const leadDetailSectionsRouter = require('./routes/leadDetailSections');
+const dashboardSectionsRouter = require('./routes/dashboardSections');
 const leadNotesRouter = require('./routes/leadNotes');
 const db = require('./db');
 
@@ -142,6 +143,7 @@ app.use('/reminders', remindersRouter);
 app.use('/analytics', analyticsRouter);
 app.use('/documents', documentsRouter);
 app.use('/lead-detail-sections', leadDetailSectionsRouter);
+app.use('/dashboard-sections', dashboardSectionsRouter);
 app.use('/lead-notes', leadNotesRouter);
 app.use('/tenant-logos', require('./routes/tenantLogos'));
 app.use('/more-menu-items', require('./routes/moreMenuItems'));
