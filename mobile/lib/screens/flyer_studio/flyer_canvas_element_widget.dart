@@ -878,6 +878,17 @@ class FlyerCanvasElementWidget extends StatelessWidget {
             ),
           ),
         );
+      case FlyerElementType.icon:
+        return Opacity(
+          opacity: element.opacity,
+          child: Center(
+            child: Icon(
+              kFlyerIconLibrary[element.iconKey] ?? Icons.star,
+              size: (w < h ? w : h) * 0.82,
+              color: flyerHexToColor(element.shapeColor),
+            ),
+          ),
+        );
     }
   }
 

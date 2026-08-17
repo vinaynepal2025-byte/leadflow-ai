@@ -478,6 +478,146 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     ));
   }
 
+  void _addIconElement(String iconKey, {String color = '#1B2A4A'}) {
+    final size = math.min(_canvasWidth, _canvasHeight) * 0.28;
+    _addElement(FlyerElement(
+      id: _newId(),
+      type: FlyerElementType.icon,
+      x: (_canvasWidth - size) / 2,
+      y: (_canvasHeight - size) / 2,
+      width: size,
+      height: size,
+      iconKey: iconKey,
+      shapeColor: color,
+      zIndex: _nextZIndex(),
+    ));
+  }
+
+  /// Shared by both the picker grid and the AI Icon Finder result --
+  /// see _openIconPicker's replaceTarget doc for why this branches.
+  void _applyIconChoice(FlyerElement? replaceTarget, String iconKey, {String? color}) {
+    if (replaceTarget != null) {
+      _pushUndo();
+      setState(() {
+        replaceTarget.iconKey = iconKey;
+        if (color != null) replaceTarget.shapeColor = color;
+      });
+      _markDirty();
+    } else {
+      _addIconElement(iconKey, color: color ?? '#1B2A4A');
+    }
+  }
+
+  /// Icon Library + AI Icon Finder -- "different shapes ... jaha apni
+  /// marzi se logo banaya ja sake" needed more than 6 hand-drawn shapes;
+  /// this is the other half of that ask, plus the one AI-integrated
+  /// tool from this pass: type a concept, the real configured AI
+  /// provider (POST /ai/find-icon) picks the closest match from the
+  /// curated set and a fitting colour, one tap to drop it on the canvas.
+  ///
+  /// [replaceTarget] set (from an icon element's own "change icon"
+  /// button) swaps that element's icon in place instead of adding a new
+  /// one -- same picker UI, different outcome, so there's exactly one
+  /// icon-choosing surface to build and maintain rather than two.
+  Future<void> _openIconPicker({FlyerElement? replaceTarget}) async {
+    final searchCtrl = TextEditingController();
+    bool searching = false;
+    String? searchError;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 16, right: 16, top: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+          ),
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.7,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _sheetDragHandle(),
+                Text('Add an icon', style: Theme.of(ctx).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: searchCtrl,
+                        decoration: const InputDecoration(
+                          hintText: 'Describe one, e.g. "graduation cap"',
+                          prefixIcon: Icon(Icons.auto_awesome, size: 20),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        onSubmitted: (_) async {
+                          if (searchCtrl.text.trim().isEmpty) return;
+                          setSheetState(() {
+                            searching = true;
+                            searchError = null;
+                          });
+                          try {
+                            final result = await _api.aiFindIcon(
+                              searchCtrl.text.trim(),
+                              kFlyerIconLibrary.keys.toList(),
+                            );
+                            if (mounted) {
+                              Navigator.pop(ctx);
+                              _applyIconChoice(replaceTarget, result['iconKey'] as String, color: result['color'] as String?);
+                            }
+                          } catch (e) {
+                            setSheetState(() {
+                              searching = false;
+                              searchError = 'Could not find a match: $e';
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                if (searching) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
+                if (searchError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(searchError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+                  ),
+                const SizedBox(height: 12),
+                const Text('Or pick one', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: GridView.count(
+                    crossAxisCount: 6,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    children: kFlyerIconLibrary.entries.map((e) {
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _applyIconChoice(replaceTarget, e.key);
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.grey.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(e.value, size: 22),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _duplicateSelected() {
     final el = _selected;
     if (el == null) return;
@@ -1813,6 +1953,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                   Icons.add_photo_alternate, 'Photo', _addImageElement, appearance),
               _toolbarButton(Icons.workspace_premium, 'Logo', _addLogoElement, appearance),
               _toolbarButton(Icons.rectangle, 'Shape', _addShapeElement, appearance),
+              _toolbarButton(Icons.emoji_symbols_outlined, 'Icon', _openIconPicker, appearance),
               _toolbarButton(
                   Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
               _toolbarButton(Icons.layers, 'Layers', _showLayersSheet, appearance),
@@ -1983,6 +2124,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                         el.type == FlyerElementType.logo)
                       ..._imageControls(el),
                     if (el.type == FlyerElementType.shape) ..._shapeControls(el),
+                    if (el.type == FlyerElementType.icon) ..._iconControls(el),
                   ],
                 ),
               ),
@@ -2359,6 +2501,52 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     ];
   }
 
+  List<Widget> _iconControls(FlyerElement el) {
+    return [
+      Row(
+        children: [
+          IconButton(
+            icon: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: flyerHexToColor(el.shapeColor),
+                border: Border.all(color: Colors.grey.shade400),
+                shape: BoxShape.circle,
+              ),
+            ),
+            tooltip: 'Icon colour',
+            onPressed: () async {
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(initial: flyerHexToColor(el.shapeColor), title: 'Icon Colour'),
+              );
+              if (picked != null) {
+                setState(() => el.shapeColor = flyerColorToHex(picked));
+                _markDirty();
+              }
+            },
+          ),
+          IconButton(
+            icon: Icon(kFlyerIconLibrary[el.iconKey] ?? Icons.star),
+            tooltip: 'Change icon',
+            onPressed: () => _openIconPicker(replaceTarget: el),
+          ),
+        ],
+      ),
+      _sliderRow(
+        icon: Icons.opacity,
+        value: el.opacity.clamp(0.1, 1.0),
+        min: 0.1,
+        max: 1.0,
+        onChanged: (v) {
+          setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+    ];
+  }
+
   Widget _sliderRow({
     required IconData icon,
     required double value,
@@ -2441,6 +2629,9 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             borderRadius: el.shapeKind == 'circle' ? null : BorderRadius.circular(4),
           ),
         );
+        break;
+      case FlyerElementType.icon:
+        content = Icon(kFlyerIconLibrary[el.iconKey] ?? Icons.star, color: flyerHexToColor(el.shapeColor), size: 22);
         break;
     }
     return ClipRRect(
@@ -2628,6 +2819,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         return Icons.workspace_premium;
       case FlyerElementType.shape:
         return Icons.rectangle;
+      case FlyerElementType.icon:
+        return Icons.emoji_symbols_outlined;
     }
   }
 

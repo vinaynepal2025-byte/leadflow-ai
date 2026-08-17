@@ -259,4 +259,41 @@ Interpret colour words naturally (e.g. "gold" -> a real gold hex, "forest green"
   }
 });
 
+// POST /ai/find-icon  { query, available_keys }
+// Flyer/Logo Studio's "AI Icon Finder" -- type a concept ("graduation
+// cap", "handshake deal"), get back the best-matching icon from the
+// app's own curated library (kFlyerIconLibrary, mobile/lib/screens/
+// flyer_studio/flyer_element.dart) plus a fitting colour, added to the
+// canvas in one tap. The client sends its own available_keys so this
+// route never needs a second copy of the icon list to keep in sync --
+// the AI can only pick a key that's actually in the set it was given,
+// validated below rather than trusted blindly.
+router.post('/find-icon', async (req, res) => {
+  const { query, available_keys } = req.body || {};
+  if (!query || typeof query !== 'string' || !query.trim()) {
+    return res.status(400).json({ error: 'query is required, e.g. "graduation cap"' });
+  }
+  if (!Array.isArray(available_keys) || available_keys.length === 0) {
+    return res.status(400).json({ error: 'available_keys must be a non-empty array' });
+  }
+
+  const prompt = `You are matching a plain-language concept to the closest icon in a fixed icon set for a design tool.
+Available icon keys (pick EXACTLY ONE of these, verbatim): ${available_keys.join(', ')}
+Concept to match: "${query.trim()}"
+Output ONLY a JSON object (no markdown fences, no commentary):
+{
+  "iconKey": "one of the available icon keys above, your best match for the concept",
+  "color": "6-digit hex color that suits the concept's mood, e.g. #1B2A4A"
+}`;
+
+  try {
+    const raw = await generateJson(prompt, { maxTokens: 200 });
+    const iconKey = available_keys.includes(raw.iconKey) ? raw.iconKey : available_keys[0];
+    const color = asHex(raw.color, '#1B2A4A');
+    res.json({ iconKey, color });
+  } catch (err) {
+    res.status(502).json({ error: 'Icon search failed: ' + err.message });
+  }
+});
+
 module.exports = router;

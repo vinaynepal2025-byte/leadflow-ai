@@ -410,6 +410,22 @@ class ApiService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  /// AI Icon Finder (Flyer/Logo Studio) -- matches a plain-language
+  /// concept to the closest key in [availableKeys] (the app's own
+  /// curated icon set, kFlyerIconLibrary), plus a fitting colour.
+  Future<Map<String, dynamic>> aiFindIcon(String query, List<String> availableKeys) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/ai/find-icon'),
+      headers: _headers,
+      body: jsonEncode({'query': query, 'available_keys': availableKeys}),
+    );
+    if (res.statusCode == 502 || res.statusCode == 400) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Icon search failed');
+    }
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   // ---------- Reminders ----------
 
   Future<List<ReminderItem>> getReminders({String? status, String? leadId}) async {
