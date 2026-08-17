@@ -30,6 +30,10 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
 
   bool _selectionMode = false;
   final Set<String> _selectedIds = {};
+  // The most recently rendered (filtered + searched) lead list -- kept so
+  // "select all" can select exactly what's currently on screen, not every
+  // lead in the tenant regardless of the active stage filter/search.
+  List<Lead> _visibleLeads = [];
 
   // lead_id -> {score, temperature, ...} from /scoring/ranked, fetched
   // once per screen load (not per row) to avoid an N+1 call storm.
@@ -132,6 +136,61 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
     });
   }
 
+  void _toggleSelectAll() {
+    setState(() {
+      final visibleIds = _visibleLeads.map((l) => l.id).toSet();
+      final allSelected = visibleIds.isNotEmpty && visibleIds.every(_selectedIds.contains);
+      if (allSelected) {
+        _selectedIds.removeAll(visibleIds);
+        if (_selectedIds.isEmpty) _selectionMode = false;
+      } else {
+        _selectedIds.addAll(visibleIds);
+        _selectionMode = true;
+      }
+    });
+  }
+
+  Future<void> _bulkMove() async {
+    if (_selectedIds.isEmpty || _stages.isEmpty) return;
+    final target = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Move ${_selectedIds.length} lead(s) to...', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            for (final s in _stages)
+              ListTile(
+                leading: Icon(Icons.circle, size: 14, color: stageColor(s['name'] as String)),
+                title: Text(s['name'] as String),
+                onTap: () => Navigator.pop(context, s['name'] as String),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (target == null) return;
+
+    final ids = _selectedIds.toList();
+    try {
+      await Future.wait(ids.map((id) => _api.updateLeadStage(id, target)));
+      setState(() {
+        _selectionMode = false;
+        _selectedIds.clear();
+      });
+      _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${ids.length} lead(s) moved to $target')));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Move failed: $e')));
+    }
+  }
+
   Future<void> _bulkAction() async {
     if (_selectedIds.isEmpty) return;
     final ids = _selectedIds.toList();
@@ -175,7 +234,11 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
       appBar: _selectionMode ? _selectionAppBar() : _normalAppBar(),
       body: Column(
         children: [
-          if (!_selectionMode) ...[
+          // Search + stage filter chips stay visible in selection mode too
+          // (previously hidden the moment you long-pressed a lead) --
+          // narrowing down by stage while selecting is exactly the
+          // "filter" half of "select, then filter/move/delete in one go".
+          if (!_selectionMode)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: TextField(
@@ -188,29 +251,28 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
                 onChanged: (v) => setState(() => _searchQuery = v.toLowerCase()),
               ),
             ),
-            SizedBox(
-              height: 44,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                children: [
-                  _filterChip(null, 'All', selected: !_isTrashView && _stageFilter == null),
-                  for (final s in _stages)
-                    _filterChip(s['name'] as String, s['name'] as String, selected: !_isTrashView && _stageFilter == s['name']),
-                  const SizedBox(width: 4),
-                  const VerticalDivider(width: 1, indent: 8, endIndent: 8),
-                  const SizedBox(width: 4),
-                  ChoiceChip(
-                    avatar: const Icon(Icons.delete_outline, size: 16),
-                    label: const Text('Trash'),
-                    selected: _isTrashView,
-                    onSelected: (_) => _selectTrashView(),
-                  ),
-                ],
-              ),
+          SizedBox(
+            height: 44,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              children: [
+                _filterChip(null, 'All', selected: !_isTrashView && _stageFilter == null),
+                for (final s in _stages)
+                  _filterChip(s['name'] as String, s['name'] as String, selected: !_isTrashView && _stageFilter == s['name']),
+                const SizedBox(width: 4),
+                const VerticalDivider(width: 1, indent: 8, endIndent: 8),
+                const SizedBox(width: 4),
+                ChoiceChip(
+                  avatar: const Icon(Icons.delete_outline, size: 16),
+                  label: const Text('Trash'),
+                  selected: _isTrashView,
+                  onSelected: (_) => _selectTrashView(),
+                ),
+              ],
             ),
-            const SizedBox(height: 4),
-          ],
+          ),
+          const SizedBox(height: 4),
           Expanded(
             child: RefreshIndicator(
               onRefresh: () async => _refresh(),
@@ -226,6 +288,7 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
                   final leads = (snapshot.data ?? [])
                       .where((l) => l.fullName.toLowerCase().contains(_searchQuery))
                       .toList();
+                  _visibleLeads = leads;
                   if (leads.isEmpty) {
                     return _isTrashView ? _emptyTrashState() : _emptyState();
                   }
@@ -304,13 +367,27 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
   }
 
   PreferredSizeWidget _selectionAppBar() {
+    final visibleIds = _visibleLeads.map((l) => l.id).toSet();
+    final allSelected = visibleIds.isNotEmpty && visibleIds.every(_selectedIds.contains);
     return AppBar(
       leading: IconButton(
         icon: const Icon(Icons.close),
+        tooltip: 'Cancel selection',
         onPressed: () => setState(_exitSelectionMode),
       ),
       title: Text('${_selectedIds.length} selected'),
       actions: [
+        IconButton(
+          icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
+          tooltip: allSelected ? 'Deselect all' : 'Select all',
+          onPressed: _toggleSelectAll,
+        ),
+        if (!_isTrashView)
+          IconButton(
+            icon: const Icon(Icons.drive_file_move_outline),
+            tooltip: 'Move to stage',
+            onPressed: _stages.isEmpty ? null : _bulkMove,
+          ),
         IconButton(
           icon: Icon(_isTrashView ? Icons.restore : Icons.delete_outline),
           tooltip: _isTrashView ? 'Restore selected' : 'Delete selected',
