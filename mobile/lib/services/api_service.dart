@@ -366,6 +366,33 @@ class ApiService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  /// AI Quick Restyle -- interprets a plain-language instruction for ONE
+  /// already-identified button/section (which item is resolved on-device
+  /// by customize_registry.dart, not by this call) and returns just its
+  /// new colour/style-variant/gradient, never a whole-app theme.
+  Future<Map<String, dynamic>> aiRestyleSection(
+    String instruction, {
+    required String itemLabel,
+    String? currentColor,
+    String? currentStyleVariant,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/ai/restyle-section'),
+      headers: _headers,
+      body: jsonEncode({
+        'instruction': instruction,
+        'item_label': itemLabel,
+        'current_color': currentColor,
+        'current_style_variant': currentStyleVariant,
+      }),
+    );
+    if (res.statusCode == 502 || res.statusCode == 400) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'AI restyle failed');
+    }
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   // ---------- Reminders ----------
 
   Future<List<ReminderItem>> getReminders({String? status, String? leadId}) async {
