@@ -11,6 +11,7 @@ import 'import_contacts_screen.dart';
 import 'excel_import_export_screen.dart';
 import 'lead_folders_screen.dart';
 import 'pipeline_board_screen.dart';
+import 'customize_leads_list_screen.dart';
 
 class LeadsListScreen extends StatefulWidget {
   const LeadsListScreen({super.key});
@@ -34,12 +35,37 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
   // once per screen load (not per row) to avoid an N+1 call storm.
   Map<String, Map<String, dynamic>> _scores = {};
 
+  // The row's optional-field config -- see CustomizeLeadsListScreen. Falls
+  // back to this fixed default (matching the backend's own DEFAULTS and
+  // the row's original fixed layout) if the config can't be loaded, so a
+  // network hiccup only costs the ability to customize, not the list itself.
+  static const List<Map<String, Object>> _defaultFields = [
+    {'field_key': 'field_phone', 'enabled': false, 'sort_order': 0},
+    {'field_key': 'field_email', 'enabled': false, 'sort_order': 1},
+    {'field_key': 'field_source', 'enabled': true, 'sort_order': 2},
+    {'field_key': 'field_assigned_to', 'enabled': false, 'sort_order': 3},
+    {'field_key': 'field_created_date', 'enabled': false, 'sort_order': 4},
+    {'field_key': 'badge_stage', 'enabled': true, 'sort_order': 5},
+    {'field_key': 'badge_score', 'enabled': true, 'sort_order': 6},
+  ];
+  List<Map<String, dynamic>> _listFields = _defaultFields;
+
   @override
   void initState() {
     super.initState();
     _leadsFuture = _api.getLeads();
     _loadStages();
     _loadScores();
+    _loadListFields();
+  }
+
+  Future<void> _loadListFields() async {
+    try {
+      final fields = await _api.getLeadListFields();
+      if (mounted) setState(() => _listFields = fields);
+    } catch (_) {
+      // Non-critical -- keep the default field set above.
+    }
   }
 
   Future<void> _loadScores() async {
@@ -237,6 +263,14 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
       title: const Text('LeadFlow AI', style: TextStyle(fontWeight: FontWeight.bold)),
       actions: [
         IconButton(
+          icon: const Icon(Icons.tune),
+          tooltip: 'Customize Leads List',
+          onPressed: () async {
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeLeadsListScreen()));
+            _loadListFields();
+          },
+        ),
+        IconButton(
           icon: const Icon(Icons.view_column_outlined),
           tooltip: 'Pipeline Board',
           onPressed: () async {
@@ -297,6 +331,78 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
     );
   }
 
+  List<Map<String, dynamic>> get _sortedListFields {
+    final list = List<Map<String, dynamic>>.from(_listFields)
+      ..sort((a, b) => ((a['sort_order'] as num?) ?? 0).compareTo((b['sort_order'] as num?) ?? 0));
+    return list;
+  }
+
+  String? _fieldValue(Lead lead, String key) {
+    switch (key) {
+      case 'field_phone':
+        return lead.phone;
+      case 'field_email':
+        return lead.email;
+      case 'field_source':
+        return lead.source;
+      case 'field_assigned_to':
+        return lead.assignedTo;
+      case 'field_created_date':
+        return _formatDate(lead.createdAt);
+      default:
+        return null;
+    }
+  }
+
+  String _formatDate(String iso) {
+    try {
+      final dt = DateTime.parse(iso);
+      return '${dt.day}/${dt.month}/${dt.year}';
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  /// Joins every enabled "field_*" entry (in the user's chosen order) into
+  /// one subtitle line. Falls back to the row's original source/phone
+  /// chain when nothing is enabled or every enabled field is empty for
+  /// this particular lead, so a lead missing its one customized field
+  /// never shows a blank subtitle.
+  String _subtitleFor(Lead lead) {
+    final parts = <String>[];
+    for (final f in _sortedListFields) {
+      final key = f['field_key'] as String;
+      if (f['enabled'] == false || isLeadListBadge(key)) continue;
+      final value = _fieldValue(lead, key);
+      if (value != null && value.isNotEmpty) parts.add(value);
+    }
+    if (parts.isEmpty) return lead.source ?? lead.phone ?? 'No source';
+    return parts.join(' · ');
+  }
+
+  /// Every enabled "badge_*" entry (in order), each followed by a small
+  /// gap -- badge_score is silently skipped for leads with no score yet
+  /// (nothing to show) rather than leaving an empty slot.
+  List<Widget> _trailingBadgesFor(Lead lead) {
+    final widgets = <Widget>[];
+    for (final f in _sortedListFields) {
+      final key = f['field_key'] as String;
+      if (f['enabled'] == false || !isLeadListBadge(key)) continue;
+      if (key == 'badge_stage') {
+        widgets.add(StageChip(stage: lead.stage));
+        widgets.add(const SizedBox(height: 4));
+      } else if (key == 'badge_score' && _scores[lead.id] != null) {
+        widgets.add(ScoreBadgeCompact(
+          score: _scores[lead.id]!['score'] as int,
+          temperature: _scores[lead.id]!['temperature'] as String,
+        ));
+        widgets.add(const SizedBox(height: 4));
+      }
+    }
+    if (widgets.isNotEmpty) widgets.removeLast();
+    return widgets;
+  }
+
   Widget _leadTile(Lead lead) {
     final selected = _selectedIds.contains(lead.id);
 
@@ -311,7 +417,7 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
               ),
             ),
       title: Text(lead.fullName, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(lead.source ?? lead.phone ?? 'No source'),
+      subtitle: Text(_subtitleFor(lead)),
       trailing: _isTrashView
           ? IconButton(
               icon: const Icon(Icons.restore),
@@ -327,16 +433,7 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
           : Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                StageChip(stage: lead.stage),
-                if (_scores[lead.id] != null) ...[
-                  const SizedBox(height: 4),
-                  ScoreBadgeCompact(
-                    score: _scores[lead.id]!['score'] as int,
-                    temperature: _scores[lead.id]!['temperature'] as String,
-                  ),
-                ],
-              ],
+              children: _trailingBadgesFor(lead),
             ),
       onTap: () async {
         if (_selectionMode) {
