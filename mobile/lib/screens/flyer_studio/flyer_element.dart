@@ -48,20 +48,10 @@ String flyerElementTypeToString(FlyerElementType t) {
   }
 }
 
-// The bundled font families. Keeping Flyer Studio on the same set as the
-// rest of the app means every font here is guaranteed to render on-device
-// (shipped in the APK, no network fetch), and gives the AI-generate
-// endpoint a safe whitelist to validate against.
-const List<String> kFlyerFontFamilies = [
-  'SpaceGrotesk',
-  'Inter',
-  'PlayfairDisplay',
-  'Lato',
-  'Poppins',
-  'Roboto',
-  'Montserrat',
-  'OpenSans',
-];
+// The bundled font list itself lives in flyer_fonts.dart (kFlyerFontOptions
+// / kFlyerFontFamilies) — it also needs to know each font's server-side
+// registered name for GenerateLogoScreen's template pipeline, which
+// doesn't belong in this file's plain element-model concerns.
 
 /// Shape kinds available on the Shape tool. 'rect' and 'circle' render via
 /// a plain BoxDecoration (cheap, and cornerRadius applies); everything

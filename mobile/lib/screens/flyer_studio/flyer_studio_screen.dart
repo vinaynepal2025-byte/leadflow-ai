@@ -36,6 +36,7 @@ import '../../widgets/color_picker_dialog.dart';
 import '../../widgets/glass_widgets.dart';
 import 'flyer_element.dart';
 import 'flyer_canvas_element_widget.dart';
+import 'flyer_fonts.dart';
 import 'svg_sanitizer.dart';
 
 class FlyerStudioScreen extends StatefulWidget {

@@ -4,19 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../services/api_service.dart';
 import '../../widgets/color_picker_dialog.dart';
-
-// Must stay in sync with backend/services/fontSetup.js's AVAILABLE_FONTS --
-// same reasoning as flyer_studio's own font picker: these are the fonts
-// actually bundled and registered on the server, so offering anything
-// else here would silently fail server-side validation.
-const List<String> kLogoFontOptions = [
-  'Space Grotesk',
-  'Playfair Display',
-  'Poppins',
-  'Lato',
-  'Montserrat',
-  'Open Sans',
-];
+import 'flyer_fonts.dart';
 
 const Map<String, String> kIconShapeLabels = {
   'circle': 'Circle',
@@ -45,7 +33,7 @@ class _GenerateLogoScreenState extends State<GenerateLogoScreen> {
   final _initialsCtrl = TextEditingController();
   Color _primaryColor = const Color(0xFF1B2A4A);
   Color _accentColor = const Color(0xFFE8A33D);
-  String _fontFamily = kLogoFontOptions.first;
+  String _fontFamily = kBackendFontOptions.first.backendFamily!;
   String _iconShape = 'circle';
 
   String? _previewDataUri;
@@ -257,7 +245,11 @@ class _GenerateLogoScreenState extends State<GenerateLogoScreen> {
                   DropdownButtonFormField<String>(
                     value: _fontFamily,
                     decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
-                    items: kLogoFontOptions.map((f) => DropdownMenuItem(value: f, child: Text(f))).toList(),
+                    items: kBackendFontOptions
+                        .map((f) => DropdownMenuItem(
+                            value: f.backendFamily!,
+                            child: Text(f.label, style: TextStyle(fontFamily: f.flutterFamily))))
+                        .toList(),
                     onChanged: (v) => setState(() => _fontFamily = v ?? _fontFamily),
                   ),
                   const SizedBox(height: 20),
