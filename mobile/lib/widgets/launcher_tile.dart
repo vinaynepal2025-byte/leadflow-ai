@@ -39,6 +39,11 @@ class LauncherTile extends StatelessWidget {
   final Color? gradientEnd;
   final String styleVariant;
   final Map<String, dynamic>? styleJson;
+  // A user-uploaded image icon (via the Asset Library) overrides the
+  // built-in Material [icon] glyph entirely when set -- "icon upload ka
+  // option" -- rendered at the same slot/size, tinted by nothing (a
+  // photo/logo keeps its own colours) unlike the vector Icon it replaces.
+  final String? iconImageUrl;
   final VoidCallback onTap;
   final VoidCallback? onEditTap;
 
@@ -50,6 +55,7 @@ class LauncherTile extends StatelessWidget {
     this.gradientEnd,
     this.styleVariant = 'flat',
     this.styleJson,
+    this.iconImageUrl,
     required this.onTap,
     this.onEditTap,
   });
@@ -157,7 +163,18 @@ class LauncherTile extends StatelessWidget {
           Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 26 * scale, color: onGradient ? Colors.white : color),
+              iconImageUrl != null
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Image.network(
+                        iconImageUrl!,
+                        width: 30 * scale,
+                        height: 30 * scale,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Icon(icon, size: 26 * scale, color: onGradient ? Colors.white : color),
+                      ),
+                    )
+                  : Icon(icon, size: 26 * scale, color: onGradient ? Colors.white : color),
               SizedBox(height: 8 * scale),
               Text(
                 label,
@@ -213,6 +230,14 @@ const Map<String, String> kTileTextureLabels = {
   'diagonal_lines': 'Diagonal lines',
   'grid': 'Grid',
   'noise': 'Noise',
+  'crosshatch': 'Crosshatch',
+  'waves': 'Waves',
+  'chevron': 'Chevron',
+  'brick': 'Brick',
+  'honeycomb': 'Honeycomb',
+  'checkerboard': 'Checkerboard',
+  'stars': 'Stars',
+  'confetti': 'Confetti',
 };
 
 /// Draws one of [kTileTextureLabels]'s patterns, clipped to the tile's
@@ -268,7 +293,151 @@ class TileTexturePainter extends CustomPainter {
           canvas.drawCircle(Offset(dx, dy), 0.6 + rnd.nextDouble() * 0.6, dotPaint);
         }
         break;
+      case 'crosshatch':
+        final linePaint = Paint()
+          ..color = color
+          ..strokeWidth = 1.0;
+        const spacing = 10.0;
+        for (double x = -size.height; x < size.width; x += spacing) {
+          canvas.drawLine(Offset(x, size.height), Offset(x + size.height, 0), linePaint);
+          canvas.drawLine(Offset(x, 0), Offset(x + size.height, size.height), linePaint);
+        }
+        break;
+      case 'waves':
+        final wavePaint = Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2;
+        const rowSpacing = 11.0;
+        const waveLength = 16.0;
+        const amplitude = 3.0;
+        for (double y = rowSpacing; y < size.height; y += rowSpacing) {
+          final path = Path()..moveTo(0, y);
+          for (double x = 0; x <= size.width; x += waveLength / 2) {
+            final crest = ((x / (waveLength / 2)).round().isEven) ? y - amplitude : y + amplitude;
+            path.lineTo(x, crest);
+          }
+          canvas.drawPath(path, wavePaint);
+        }
+        break;
+      case 'chevron':
+        final chevPaint = Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.3;
+        const step = 10.0;
+        for (double y = -step; y < size.height + step; y += step) {
+          final path = Path()..moveTo(0, y);
+          for (double x = 0; x <= size.width; x += step) {
+            path.lineTo(x + step / 2, y + (((x / step).round().isEven) ? step / 2 : -step / 2));
+          }
+          canvas.drawPath(path, chevPaint);
+        }
+        break;
+      case 'brick':
+        final brickPaint = Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0;
+        const brickW = 20.0;
+        const brickH = 9.0;
+        var row = 0;
+        for (double y = 0; y < size.height; y += brickH) {
+          canvas.drawLine(Offset(0, y), Offset(size.width, y), brickPaint);
+          final offset = (row.isOdd) ? brickW / 2 : 0.0;
+          for (double x = -offset; x < size.width; x += brickW) {
+            canvas.drawLine(Offset(x, y), Offset(x, y + brickH), brickPaint);
+          }
+          row++;
+        }
+        break;
+      case 'honeycomb':
+        final hexPaint = Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0;
+        const hexRadius = 7.0;
+        const hexHeight = hexRadius * 1.732;
+        var hexRow = 0;
+        for (double cy = 0; cy < size.height + hexHeight; cy += hexHeight * 0.75) {
+          final offsetX = (hexRow.isOdd) ? hexRadius * 1.5 : 0.0;
+          for (double cx = offsetX; cx < size.width + hexRadius * 3; cx += hexRadius * 3) {
+            final path = Path();
+            for (var i = 0; i < 6; i++) {
+              final angle = math.pi / 3 * i;
+              final px = cx + hexRadius * math.cos(angle);
+              final py = cy + hexRadius * math.sin(angle);
+              if (i == 0) {
+                path.moveTo(px, py);
+              } else {
+                path.lineTo(px, py);
+              }
+            }
+            path.close();
+            canvas.drawPath(path, hexPaint);
+          }
+          hexRow++;
+        }
+        break;
+      case 'checkerboard':
+        const cell = 9.0;
+        var checkRow = 0;
+        for (double y = 0; y < size.height; y += cell) {
+          var col = 0;
+          for (double x = 0; x < size.width; x += cell) {
+            if ((checkRow + col).isEven) {
+              canvas.drawRect(Rect.fromLTWH(x, y, cell, cell), paint);
+            }
+            col++;
+          }
+          checkRow++;
+        }
+        break;
+      case 'stars':
+        final rnd = math.Random(7);
+        const spacing = 22.0;
+        for (double y = spacing / 2; y < size.height; y += spacing) {
+          for (double x = spacing / 2; x < size.width; x += spacing) {
+            final jitterX = x + (rnd.nextDouble() - 0.5) * 6;
+            final jitterY = y + (rnd.nextDouble() - 0.5) * 6;
+            _drawStar(canvas, Offset(jitterX, jitterY), 3.0, paint);
+          }
+        }
+        break;
+      case 'confetti':
+        final rnd = math.Random(13); // fixed seed -- deterministic
+        final confettiPaint = Paint()..color = color;
+        final count = (size.width * size.height / 90).round();
+        for (var i = 0; i < count; i++) {
+          final cx = rnd.nextDouble() * size.width;
+          final cy = rnd.nextDouble() * size.height;
+          final angle = rnd.nextDouble() * math.pi;
+          canvas.save();
+          canvas.translate(cx, cy);
+          canvas.rotate(angle);
+          canvas.drawRect(const Rect.fromLTWH(-2, -1, 4, 2), confettiPaint);
+          canvas.restore();
+        }
+        break;
     }
+  }
+
+  void _drawStar(Canvas canvas, Offset center, double radius, Paint paint) {
+    final path = Path();
+    for (var i = 0; i < 4; i++) {
+      final angle = math.pi / 2 * i;
+      final outer = center + Offset(math.cos(angle), math.sin(angle)) * radius;
+      final innerAngle = angle + math.pi / 4;
+      final inner = center + Offset(math.cos(innerAngle), math.sin(innerAngle)) * (radius * 0.4);
+      if (i == 0) {
+        path.moveTo(outer.dx, outer.dy);
+      } else {
+        path.lineTo(outer.dx, outer.dy);
+      }
+      path.lineTo(inner.dx, inner.dy);
+    }
+    path.close();
+    canvas.drawPath(path, paint);
   }
 
   @override

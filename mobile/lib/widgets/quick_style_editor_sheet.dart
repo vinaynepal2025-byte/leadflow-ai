@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../screens/customize_registry.dart';
 import '../services/api_service.dart';
 import 'color_picker_dialog.dart';
@@ -39,6 +40,7 @@ class QuickStyleEditorSheet extends StatefulWidget {
   final String currentStyleVariant;
   final String? currentGradientEndHex;
   final Map<String, dynamic>? currentStyleJson;
+  final String? currentIconImageUrl;
 
   const QuickStyleEditorSheet({
     super.key,
@@ -47,6 +49,7 @@ class QuickStyleEditorSheet extends StatefulWidget {
     this.currentStyleVariant = 'flat',
     this.currentGradientEndHex,
     this.currentStyleJson,
+    this.currentIconImageUrl,
   });
 
   @override
@@ -72,6 +75,15 @@ class _QuickStyleEditorSheetState extends State<QuickStyleEditorSheet> {
   bool _glowEnabled = false;
   late Color _glowColor;
   late double _glowIntensity;
+  // Free-form size -- null means "use the grid's own default cell size",
+  // same as before this control existed. Once set, the tile keeps that
+  // exact width/height regardless of what any other tile is doing --
+  // genuinely independent sizing, not another shared preset.
+  double? _widthFraction;
+  double? _tileHeight;
+
+  String? _iconImageUrl;
+  bool _uploadingIcon = false;
 
   @override
   void initState() {
@@ -79,6 +91,7 @@ class _QuickStyleEditorSheetState extends State<QuickStyleEditorSheet> {
     _color = _hexToColor(widget.currentColorHex);
     _styleVariant = widget.currentStyleVariant;
     _gradientEnd = widget.currentGradientEndHex != null ? _hexToColor(widget.currentGradientEndHex!) : null;
+    _iconImageUrl = widget.currentIconImageUrl;
 
     final sj = widget.currentStyleJson ?? const {};
     _cornerRadius = ((sj['cornerRadius'] as num?)?.toDouble() ?? 16).clamp(0, 40);
@@ -93,6 +106,8 @@ class _QuickStyleEditorSheetState extends State<QuickStyleEditorSheet> {
     _glowEnabled = glowHex != null;
     _glowColor = glowHex != null ? _hexToColor(glowHex) : _color;
     _glowIntensity = ((sj['glowIntensity'] as num?)?.toDouble() ?? 0.5).clamp(0, 1);
+    _widthFraction = (sj['widthFraction'] as num?)?.toDouble();
+    _tileHeight = (sj['tileHeight'] as num?)?.toDouble();
   }
 
   Map<String, dynamic> get _styleJson => {
@@ -104,7 +119,40 @@ class _QuickStyleEditorSheetState extends State<QuickStyleEditorSheet> {
         if (_borderEnabled) 'borderWidth': _borderWidth,
         if (_glowEnabled) 'glowColor': _colorToHex(_glowColor),
         if (_glowEnabled) 'glowIntensity': _glowIntensity,
+        if (_widthFraction != null) 'widthFraction': _widthFraction,
+        if (_tileHeight != null) 'tileHeight': _tileHeight,
       };
+
+  Future<void> _pickIconImage() async {
+    if (widget.item.source != CustomizeSource.moreMenu) return; // upload endpoint only exists for More Menu items so far
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 90);
+    if (picked == null) return;
+    setState(() => _uploadingIcon = true);
+    try {
+      final result = await _api.uploadMoreMenuItemIcon(widget.item.key, picked.path);
+      setState(() {
+        _iconImageUrl = result['icon_image_url'] as String?;
+        _uploadingIcon = false;
+      });
+    } catch (e) {
+      setState(() => _uploadingIcon = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Icon upload failed: $e')));
+      }
+    }
+  }
+
+  Future<void> _removeIconImage() async {
+    if (widget.item.source != CustomizeSource.moreMenu) return;
+    setState(() => _iconImageUrl = null);
+    try {
+      await _api.updateMoreMenuItem(widget.item.key, {'icon_image_path': null});
+    } catch (_) {
+      // Non-fatal -- the local state already reflects the removal; a
+      // failed clear just means the next full reload shows the old icon
+      // again, which the user can retry.
+    }
+  }
 
   Future<void> _pickColor({required String target}) async {
     final current = switch (target) {
@@ -163,6 +211,7 @@ class _QuickStyleEditorSheetState extends State<QuickStyleEditorSheet> {
           'styleVariant': _styleVariant,
           'gradientEnd': gradientHex,
           'styleJson': styleJson,
+          'iconImageUrl': _iconImageUrl,
         });
       }
     } catch (e) {
@@ -172,6 +221,9 @@ class _QuickStyleEditorSheetState extends State<QuickStyleEditorSheet> {
       });
     }
   }
+
+  double get _previewWidth =>
+      _widthFraction != null ? (280.0 * _widthFraction!).clamp(70.0, 280.0) : 140.0;
 
   Widget _sectionLabel(String text) =>
       Padding(padding: const EdgeInsets.only(top: 16, bottom: 8), child: Text(text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)));
@@ -233,11 +285,12 @@ class _QuickStyleEditorSheetState extends State<QuickStyleEditorSheet> {
             // exactly what the actual tile will look like.
             Center(
               child: SizedBox(
-                width: 140,
-                height: 120,
+                width: _previewWidth,
+                height: _tileHeight ?? 120,
                 child: LauncherTile(
                   label: widget.item.label,
                   icon: widget.item.icon,
+                  iconImageUrl: _iconImageUrl,
                   color: _color,
                   gradientEnd: _gradientEnd,
                   styleVariant: _styleVariant,
@@ -246,6 +299,28 @@ class _QuickStyleEditorSheetState extends State<QuickStyleEditorSheet> {
                 ),
               ),
             ),
+            if (widget.item.source == CustomizeSource.moreMenu) ...[
+              _sectionLabel('Icon'),
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _uploadingIcon ? null : _pickIconImage,
+                    icon: _uploadingIcon
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.upload, size: 16),
+                    label: Text(_iconImageUrl == null ? 'Upload custom icon' : 'Replace icon'),
+                  ),
+                  if (_iconImageUrl != null) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      tooltip: 'Remove custom icon',
+                      onPressed: _removeIconImage,
+                    ),
+                  ],
+                ],
+              ),
+            ],
             _sectionLabel('Style'),
             Wrap(
               spacing: 8,
@@ -287,7 +362,7 @@ class _QuickStyleEditorSheetState extends State<QuickStyleEditorSheet> {
               onChanged: (v) => setState(() => _cornerRadius = v),
             ),
 
-            _sectionLabel('Size'),
+            _sectionLabel('Icon/text scale'),
             _sliderRow(
               label: 'Scale',
               value: _contentScale,
@@ -296,6 +371,46 @@ class _QuickStyleEditorSheetState extends State<QuickStyleEditorSheet> {
               format: (v) => '${(v * 100).round()}%',
               onChanged: (v) => setState(() => _contentScale = v),
             ),
+
+            _sectionLabel('Tile size (free-form)'),
+            Row(
+              children: [
+                const Text('Custom size', style: TextStyle(fontSize: 12)),
+                const Spacer(),
+                Switch(
+                  value: _widthFraction != null,
+                  onChanged: (v) => setState(() {
+                    _widthFraction = v ? 0.32 : null;
+                    _tileHeight = v ? 130 : null;
+                  }),
+                ),
+              ],
+            ),
+            if (_widthFraction != null) ...[
+              _sliderRow(
+                label: 'Width',
+                value: _widthFraction!,
+                min: 0.2,
+                max: 1.0,
+                format: (v) => '${(v * 100).round()}%',
+                onChanged: (v) => setState(() => _widthFraction = v),
+              ),
+              _sliderRow(
+                label: 'Height',
+                value: _tileHeight!,
+                min: 70,
+                max: 280,
+                format: (v) => '${v.round()}px',
+                onChanged: (v) => setState(() => _tileHeight = v),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text(
+                  'Width is a % of the row; height is exact. Turn this off to go back to the grid\'s automatic size.',
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              ),
+            ],
 
             _sectionLabel('Edge / border'),
             Row(

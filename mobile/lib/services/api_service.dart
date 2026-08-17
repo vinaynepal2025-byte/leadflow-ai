@@ -2542,6 +2542,19 @@ class ApiService {
     return jsonDecode(res.body);
   }
 
+  /// Uploads a custom icon image for a More Menu tile, replacing its
+  /// built-in Material glyph -- "icon upload ka bhi option do".
+  Future<Map<String, dynamic>> uploadMoreMenuItemIcon(String itemKey, String filePath) async {
+    final uri = Uri.parse('$baseUrl/more-menu-items/$itemKey/icon-image');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll(_multipartHeaders)
+      ..files.add(await http.MultipartFile.fromPath('file', filePath));
+    final streamed = await request.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 200) throw Exception('Icon upload failed: $body');
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> createMoreMenuItem({
     required String customLabel,
     required String actionValue,

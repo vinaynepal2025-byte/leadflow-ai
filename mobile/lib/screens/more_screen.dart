@@ -187,6 +187,7 @@ class _MoreScreenState extends State<MoreScreen> {
         currentStyleVariant: (item['style_variant'] as String?) ?? 'flat',
         currentGradientEndHex: item['gradient_override'] as String?,
         currentStyleJson: (item['style_json'] as Map?)?.cast<String, dynamic>(),
+        currentIconImageUrl: item['icon_image_url'] as String?,
       ),
     );
     if (result == null) return;
@@ -200,6 +201,7 @@ class _MoreScreenState extends State<MoreScreen> {
           'style_variant': result['styleVariant'],
           'gradient_override': result['gradientEnd'],
           'style_json': result['styleJson'],
+          'icon_image_url': result['iconImageUrl'],
         };
       }
     });
@@ -263,53 +265,84 @@ class _MoreScreenState extends State<MoreScreen> {
     );
   }
 
+  // A Wrap, not GridView.count -- a fixed 3-column grid forces every tile
+  // to the same cell size, which is exactly the "sirf width control diya
+  // hai" limitation reported: no way to make one tile full-width, another
+  // a tall square, another short and wide. Wrap lets each tile pick its
+  // own [widthFraction] (of the available row width) and [tileHeight] (in
+  // logical pixels) independently via style_json, flowing left-to-right
+  // and wrapping naturally -- genuinely free per-tile sizing, not another
+  // fixed preset. When neither override is set, the computed default here
+  // reproduces the exact width/height the old GridView.count(crossAxisCount:
+  // 3, childAspectRatio: 0.92) produced, so nothing visually changes for a
+  // tile until the user actually resizes it.
   Widget _buildGrid(List<Map<String, dynamic>> visibleItems) {
-    return GridView.count(
-        padding: const EdgeInsets.all(14),
-        crossAxisCount: 3,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: 0.92,
-        children: visibleItems.map((item) {
-          final key = item['item_key'] as String;
-          final def = kMoreMenuDefaults[key];
-          final isCustom = item['is_custom'] == true;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(14),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const spacing = 12.0;
+          final defaultCellWidth = (constraints.maxWidth - 2 * spacing) / 3;
 
-          final label = item['custom_label'] ?? def?.label ?? key;
-          final iconKey = item['icon_override'] ?? def?.icon ?? 'star';
-          final icon = kMoreMenuIconOptions[iconKey] ?? Icons.star;
-          final colorHex = item['color_override'] as String?;
-          final color = colorHex != null ? _hexToColor(colorHex) : (kMoreMenuDefaultColors[key] ?? Theme.of(context).colorScheme.primary);
-          final gradientHex = item['gradient_override'] as String?;
-          final gradientEnd = gradientHex != null ? _hexToColor(gradientHex) : null;
-          final styleVariant = item['style_variant'] as String? ?? 'flat';
-          final styleJson = (item['style_json'] as Map?)?.cast<String, dynamic>();
+          return Wrap(
+            spacing: spacing,
+            runSpacing: spacing,
+            children: visibleItems.map((item) {
+              final key = item['item_key'] as String;
+              final def = kMoreMenuDefaults[key];
+              final isCustom = item['is_custom'] == true;
 
-          return LauncherTile(
-            label: label,
-            icon: icon,
-            color: color,
-            gradientEnd: gradientEnd,
-            styleVariant: styleVariant,
-            styleJson: styleJson,
-            onEditTap: isCustom ? null : () => _openQuickEditor(item),
-            onTap: () {
-              if (isCustom) {
-                // Custom items are URL-only for now (matches backend
-                // validation) -- opening them in-app via a simple
-                // screen is a later slice; for now this is a
-                // clearly-scoped no-op rather than a silent failure.
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Custom link items will open in a later update')),
-                );
-                return;
-              }
-              if (def != null) {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => def.screenBuilder()));
-              }
-            },
+              final label = item['custom_label'] ?? def?.label ?? key;
+              final iconKey = item['icon_override'] ?? def?.icon ?? 'star';
+              final icon = kMoreMenuIconOptions[iconKey] ?? Icons.star;
+              final iconImageUrl = item['icon_image_url'] as String?;
+              final colorHex = item['color_override'] as String?;
+              final color = colorHex != null ? _hexToColor(colorHex) : (kMoreMenuDefaultColors[key] ?? Theme.of(context).colorScheme.primary);
+              final gradientHex = item['gradient_override'] as String?;
+              final gradientEnd = gradientHex != null ? _hexToColor(gradientHex) : null;
+              final styleVariant = item['style_variant'] as String? ?? 'flat';
+              final styleJson = (item['style_json'] as Map?)?.cast<String, dynamic>();
+
+              final widthFraction = (styleJson?['widthFraction'] as num?)?.toDouble();
+              final tileWidth = widthFraction != null
+                  ? (constraints.maxWidth * widthFraction).clamp(60.0, constraints.maxWidth)
+                  : defaultCellWidth;
+              final explicitHeight = (styleJson?['tileHeight'] as num?)?.toDouble();
+              final tileHeight = explicitHeight ?? (tileWidth / 0.92);
+
+              return SizedBox(
+                width: tileWidth,
+                height: tileHeight,
+                child: LauncherTile(
+                  label: label,
+                  icon: icon,
+                  iconImageUrl: iconImageUrl,
+                  color: color,
+                  gradientEnd: gradientEnd,
+                  styleVariant: styleVariant,
+                  styleJson: styleJson,
+                  onEditTap: isCustom ? null : () => _openQuickEditor(item),
+                  onTap: () {
+                    if (isCustom) {
+                      // Custom items are URL-only for now (matches backend
+                      // validation) -- opening them in-app via a simple
+                      // screen is a later slice; for now this is a
+                      // clearly-scoped no-op rather than a silent failure.
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Custom link items will open in a later update')),
+                      );
+                      return;
+                    }
+                    if (def != null) {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => def.screenBuilder()));
+                    }
+                  },
+                ),
+              );
+            }).toList(),
           );
-        }).toList(),
+        },
+      ),
     );
   }
 }
