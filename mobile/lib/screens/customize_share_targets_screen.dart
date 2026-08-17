@@ -41,7 +41,10 @@ const Map<String, String> kShareTargetDefaultIcons = {
 };
 
 class CustomizeShareTargetsScreen extends StatefulWidget {
-  const CustomizeShareTargetsScreen({super.key});
+  // Set when arriving from Settings Studio's search -- see the matching
+  // comment on CustomizeMoreMenuScreen.initialEditKey for why.
+  final String? initialEditKey;
+  const CustomizeShareTargetsScreen({super.key, this.initialEditKey});
 
   @override
   State<CustomizeShareTargetsScreen> createState() => _CustomizeShareTargetsScreenState();
@@ -66,6 +69,14 @@ class _CustomizeShareTargetsScreenState extends State<CustomizeShareTargetsScree
       _targets = targets;
       _loading = false;
     });
+    if (widget.initialEditKey != null) {
+      for (final target in _targets) {
+        if (target['target_key'] == widget.initialEditKey) {
+          _openEditor(target);
+          break;
+        }
+      }
+    }
   }
 
   Future<void> _toggleEnabled(Map<String, dynamic> target, bool value) async {

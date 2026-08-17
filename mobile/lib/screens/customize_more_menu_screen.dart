@@ -5,7 +5,13 @@ import 'more_screen.dart' show kMoreMenuIconOptions, kMoreMenuDefaults;
 import '../widgets/styled_icon_badge.dart';
 
 class CustomizeMoreMenuScreen extends StatefulWidget {
-  const CustomizeMoreMenuScreen({super.key});
+  // Set when arriving from Settings Studio's search -- opens that one
+  // item's editor sheet automatically as soon as the list loads, so
+  // "search for a button, land straight on its style editor" is a real
+  // one-tap jump rather than "land on the right screen, then still have
+  // to find and tap the row yourself."
+  final String? initialEditKey;
+  const CustomizeMoreMenuScreen({super.key, this.initialEditKey});
 
   @override
   State<CustomizeMoreMenuScreen> createState() => _CustomizeMoreMenuScreenState();
@@ -30,6 +36,14 @@ class _CustomizeMoreMenuScreenState extends State<CustomizeMoreMenuScreen> {
       _items = items;
       _loading = false;
     });
+    if (widget.initialEditKey != null) {
+      for (final item in _items) {
+        if (item['item_key'] == widget.initialEditKey) {
+          _openEditor(item);
+          break;
+        }
+      }
+    }
   }
 
   Future<void> _toggleEnabled(Map<String, dynamic> item, bool value) async {

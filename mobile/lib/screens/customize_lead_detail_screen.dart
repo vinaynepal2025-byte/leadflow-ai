@@ -67,7 +67,10 @@ const Map<String, String> kLeadDetailDefaultIcons = {
 };
 
 class CustomizeLeadDetailScreen extends StatefulWidget {
-  const CustomizeLeadDetailScreen({super.key});
+  // Set when arriving from Settings Studio's search -- see the matching
+  // comment on CustomizeMoreMenuScreen.initialEditKey for why.
+  final String? initialEditKey;
+  const CustomizeLeadDetailScreen({super.key, this.initialEditKey});
 
   @override
   State<CustomizeLeadDetailScreen> createState() => _CustomizeLeadDetailScreenState();
@@ -92,6 +95,14 @@ class _CustomizeLeadDetailScreenState extends State<CustomizeLeadDetailScreen> {
       _sections = sections;
       _loading = false;
     });
+    if (widget.initialEditKey != null) {
+      for (final section in _sections) {
+        if (section['section_key'] == widget.initialEditKey) {
+          _openEditor(section);
+          break;
+        }
+      }
+    }
   }
 
   Future<void> _toggleEnabled(Map<String, dynamic> section, bool value) async {

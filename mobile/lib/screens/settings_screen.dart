@@ -9,6 +9,7 @@ import 'customize_lead_detail_screen.dart';
 import 'customize_leads_list_screen.dart';
 import 'customize_share_targets_screen.dart';
 import 'flyer_studio/logo_library_screen.dart';
+import 'settings_studio_screen.dart';
 import '../widgets/launcher_tile.dart';
 
 class _SettingsDestination {
@@ -102,6 +103,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Settings Studio -- search any customizable button/section by
+          // name across the whole app (More Menu, Lead Detail, Share
+          // Targets, Dashboard, Leads List) and jump straight to its
+          // editor, instead of having to remember which of the Customize
+          // screens below it lives under.
+          Card(
+            color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.35),
+            child: ListTile(
+              leading: const Icon(Icons.search),
+              title: const Text('Settings Studio', style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text('Search any button in the app and customize it directly'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsStudioScreen())),
+            ),
+          ),
+          const SizedBox(height: 20),
           const Text('Consultancy Branding', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 12),
           TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Consultancy Name', border: OutlineInputBorder())),
