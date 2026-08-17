@@ -2150,6 +2150,19 @@ class ApiService {
     _checkOk(res);
   }
 
+  /// LeadFlow integration (Logo Studio master spec §20): sends a saved
+  /// brand logo straight to a specific lead's WhatsApp chat -- mirrors
+  /// getFlyerShareLink's shape exactly.
+  Future<Map<String, dynamic>> getLogoShareLink(String logoId, {required String leadId, String? message}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/tenant-logos/$logoId/share-link'),
+      headers: _headers,
+      body: jsonEncode({'lead_id': leadId, if (message != null) 'message': message}),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> getTenantAssets({String? kind, String? search}) async {
     final qp = <String, String>{};
     if (kind != null) qp['kind'] = kind;

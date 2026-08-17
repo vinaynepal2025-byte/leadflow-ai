@@ -32,6 +32,7 @@ const Map<String, IconData> _kIconOptions = {
   'bolt': Icons.bolt,
   'chat': Icons.chat,
   'folder_outlined': Icons.folder_outlined,
+  'workspace_premium': Icons.workspace_premium,
   'school_outlined': Icons.school_outlined,
   'phone_in_talk_outlined': Icons.phone_in_talk_outlined,
   'event_available_outlined': Icons.event_available_outlined,
@@ -64,6 +65,7 @@ const Map<String, String> _kDefaultLabels = {
   'lead_notes': 'Notes',
   'flyer_studio': 'Make a Flyer',
   'activity_timeline': 'Activity Timeline',
+  'share_logo': 'Share Logo',
 };
 
 const Map<String, String> _kDefaultIcons = {
@@ -80,6 +82,7 @@ const Map<String, String> _kDefaultIcons = {
   'lead_notes': 'description_outlined',
   'flyer_studio': 'auto_awesome_mosaic_outlined',
   'activity_timeline': 'history',
+  'share_logo': 'workspace_premium',
 };
 
 class LeadDetailScreen extends StatefulWidget {
@@ -329,6 +332,11 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
           color: Colors.blueGrey,
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => LeadTimelineScreen(leadId: lead.id, leadName: lead.fullName))),
         );
+      case 'share_logo':
+        return (
+          color: Colors.indigo,
+          onTap: () => _shareLogoWithLead(lead),
+        );
       default:
         final config = _configFor(key);
         if (config == null || config['is_custom'] != true) return null;
@@ -336,6 +344,84 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
         final actionValue = config['custom_action_value'] as String?;
         if (actionType == null || actionValue == null) return null;
         return (color: Colors.blueGrey, onTap: () => _launchCustomAction(actionType, actionValue));
+    }
+  }
+
+  /// LeadFlow integration (Logo Studio master spec §20: "Lead Detail ->
+  /// Attach Logo", "Communication Hub -> Share Logo") -- picks one of the
+  /// tenant's saved brand logos and opens this lead's WhatsApp chat with
+  /// it, the same wa.me-link pattern every other WhatsApp send on this
+  /// screen already uses.
+  Future<void> _shareLogoWithLead(Lead lead) async {
+    List<Map<String, dynamic>> logos;
+    try {
+      logos = await _api.getTenantLogos();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not load logos: $e')));
+      }
+      return;
+    }
+    if (logos.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No saved logos yet — add one in Settings > Brand Logos')));
+      }
+      return;
+    }
+    if (!mounted) return;
+
+    final chosenId = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Share which logo with ${lead.fullName}?',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            ...logos.map((logo) {
+              final url = logo['image_url']?.toString();
+              return ListTile(
+                leading: url == null
+                    ? const Icon(Icons.workspace_premium)
+                    : Image.network(url, width: 36, height: 36, fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.workspace_premium)),
+                title: Text(logo['label']?.toString() ?? 'Logo'),
+                onTap: () => Navigator.pop(ctx, logo['id']?.toString()),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+    if (chosenId == null || !mounted) return;
+
+    try {
+      final share = await _api.getLogoShareLink(
+        chosenId,
+        leadId: lead.id,
+        message: 'Hi ${lead.fullName}, here is our logo.',
+      );
+      final link = share['whatsapp_link']?.toString();
+      if (link == null || link.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(share['warning']?.toString() ?? 'This lead has no phone number on file')));
+        }
+        return;
+      }
+      final launched = await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
+      if (!launched) return;
+      final message = share['message']?.toString() ?? 'Shared our logo';
+      await _api.confirmWhatsAppSent(lead.id, message, 'Counselor');
+      _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not share logo: $e')));
+      }
     }
   }
 
