@@ -20,13 +20,18 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/api_service.dart';
+import '../../theme/appearance_settings.dart';
+import '../../theme/glass_settings.dart';
 import '../../widgets/color_picker_dialog.dart';
+import '../../widgets/glass_widgets.dart';
 import 'flyer_element.dart';
 import 'flyer_canvas_element_widget.dart';
 
@@ -61,11 +66,29 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   bool _dirty = false;
   String? _error;
   List<FlyerSnapGuide> _snapGuides = const [];
+  bool _showGrid = false;
+  final Set<String> _multiSelectedIds = {};
+
+  // Canvas-level multi-select: a distinct mode from the normal single
+  // selection above (which drives the per-element handle panel) -- while
+  // active, taps toggle group membership and dragging any selected element
+  // (or the group's own bounding box) moves the whole group together.
+  bool _groupSelectMode = false;
+  final Set<String> _groupSelectedIds = {};
+  double? _groupRotateStartAngle;
 
   Timer? _autosaveTimer;
   final List<String> _undoStack = [];
   final List<String> _redoStack = [];
   static const int _maxHistory = 40;
+
+  // Inline WYSIWYG text editing -- typing directly onto the canvas instead
+  // of through a dialog. Only used for unrotated text (see _beginInlineEdit);
+  // rotated text falls back to the dialog since a rotated TextField's
+  // touch/caret geometry doesn't match its visual position.
+  String? _editingTextId;
+  TextEditingController? _inlineController;
+  FocusNode? _inlineFocusNode;
 
   @override
   void initState() {
@@ -76,6 +99,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   @override
   void dispose() {
     _autosaveTimer?.cancel();
+    _inlineController?.dispose();
+    _inlineFocusNode?.dispose();
     super.dispose();
   }
 
@@ -228,10 +253,166 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   // Element operations
   // ------------------------------------------------------------------
 
-  void _selectElement(String? id) => setState(() => _selectedId = id);
+  void _selectElement(String? id) {
+    if (id != _selectedId && context.read<AppearanceSettings>().haptics) {
+      HapticFeedback.selectionClick();
+    }
+    setState(() => _selectedId = id);
+  }
 
   void _onElementChanged(FlyerElement el) {
     setState(() {});
+    _markDirty();
+  }
+
+  void _toggleGroupSelectMode() {
+    if (context.read<AppearanceSettings>().haptics) HapticFeedback.selectionClick();
+    setState(() {
+      _groupSelectMode = !_groupSelectMode;
+      _groupSelectedIds.clear();
+      if (_groupSelectMode) _selectedId = null;
+    });
+  }
+
+  void _toggleGroupMember(String id) {
+    if (context.read<AppearanceSettings>().haptics) HapticFeedback.selectionClick();
+    setState(() {
+      if (_groupSelectedIds.contains(id)) {
+        _groupSelectedIds.remove(id);
+      } else {
+        _groupSelectedIds.add(id);
+      }
+    });
+  }
+
+  /// Union bounding box (canvas units) of every selected group member, or
+  /// null when nothing is selected -- drives both the dashed group outline
+  /// and the drag handle that moves everything together.
+  Rect? _groupBoundsRect() {
+    double? minX, minY, maxX, maxY;
+    for (final el in _elements) {
+      if (!_groupSelectedIds.contains(el.id)) continue;
+      minX = minX == null ? el.x : math.min(minX, el.x);
+      minY = minY == null ? el.y : math.min(minY, el.y);
+      maxX = maxX == null ? el.x + el.width : math.max(maxX, el.x + el.width);
+      maxY = maxY == null ? el.y + el.height : math.max(maxY, el.y + el.height);
+    }
+    if (minX == null) return null;
+    return Rect.fromLTRB(minX, minY!, maxX!, maxY!);
+  }
+
+  void _groupDrag(Offset rawDelta) {
+    final dx = rawDelta.dx;
+    final dy = rawDelta.dy;
+    setState(() {
+      for (final el in _elements) {
+        if (_groupSelectedIds.contains(el.id) && !el.locked) {
+          el.x += dx;
+          el.y += dy;
+        }
+      }
+    });
+    _markDirty();
+  }
+
+  /// Scales the whole group together from its top-left corner, the same
+  /// proportional-rescale math _changeCanvasSize already uses for the
+  /// whole canvas, just anchored on the group's own bounds instead of the
+  /// page. Bounds are recomputed fresh each tick so the scale factor is
+  /// always relative to the group's current (not original) size, matching
+  /// how a single element's own resize handle accumulates incrementally.
+  void _groupResize(Offset rawDelta) {
+    final bounds = _groupBoundsRect();
+    if (bounds == null || bounds.width <= 0 || bounds.height <= 0) return;
+    final newWidth = (bounds.width + rawDelta.dx).clamp(40.0, 8000.0);
+    final newHeight = (bounds.height + rawDelta.dy).clamp(40.0, 8000.0);
+    final scaleX = newWidth / bounds.width;
+    final scaleY = newHeight / bounds.height;
+    setState(() {
+      for (final el in _elements) {
+        if (!_groupSelectedIds.contains(el.id) || el.locked) continue;
+        el.x = bounds.left + (el.x - bounds.left) * scaleX;
+        el.y = bounds.top + (el.y - bounds.top) * scaleY;
+        el.width *= scaleX;
+        el.height *= scaleY;
+        if (el.type == FlyerElementType.text) el.fontSize *= scaleX;
+      }
+    });
+    _markDirty();
+  }
+
+  /// Spins the whole group as one rigid body around its own bounding-box
+  /// centre: every element's own rotation advances by the same delta, and
+  /// each element's position revolves around the shared pivot so the
+  /// cluster visually rotates together rather than each element spinning
+  /// in place. The pivot is recomputed each tick from the elements'
+  /// axis-aligned bounds (not their true rotated footprint), so a long
+  /// continuous rotate can drift slightly -- an accepted simplification
+  /// matching how the align feature already treats bounds.
+  void _groupRotate(double deltaRad) {
+    final bounds = _groupBoundsRect();
+    if (bounds == null) return;
+    final pivotX = bounds.left + bounds.width / 2;
+    final pivotY = bounds.top + bounds.height / 2;
+    final cosT = math.cos(deltaRad);
+    final sinT = math.sin(deltaRad);
+    final deltaDeg = deltaRad * 180 / math.pi;
+    setState(() {
+      for (final el in _elements) {
+        if (!_groupSelectedIds.contains(el.id) || el.locked) continue;
+        final cx = el.x + el.width / 2;
+        final cy = el.y + el.height / 2;
+        final vx = cx - pivotX;
+        final vy = cy - pivotY;
+        final nvx = vx * cosT - vy * sinT;
+        final nvy = vx * sinT + vy * cosT;
+        el.x = pivotX + nvx - el.width / 2;
+        el.y = pivotY + nvy - el.height / 2;
+        el.rotation += deltaDeg;
+      }
+    });
+    _markDirty();
+  }
+
+  void _groupDuplicate() => _bulkDuplicateSelected(Set<String>.from(_groupSelectedIds));
+
+  void _groupDelete() {
+    _bulkDeleteSelected(Set<String>.from(_groupSelectedIds));
+    setState(() => _groupSelectedIds.clear());
+  }
+
+  /// Aligns every selected element to one edge/centre of the group's own
+  /// bounding box -- the Canva/Figma "align selection" toolset, not
+  /// alignment against the page.
+  void _groupAlign(String edge) {
+    final bounds = _groupBoundsRect();
+    if (bounds == null) return;
+    _pushUndo();
+    setState(() {
+      for (final el in _elements) {
+        if (!_groupSelectedIds.contains(el.id) || el.locked) continue;
+        switch (edge) {
+          case 'left':
+            el.x = bounds.left;
+            break;
+          case 'centerH':
+            el.x = bounds.left + bounds.width / 2 - el.width / 2;
+            break;
+          case 'right':
+            el.x = bounds.right - el.width;
+            break;
+          case 'top':
+            el.y = bounds.top;
+            break;
+          case 'centerV':
+            el.y = bounds.top + bounds.height / 2 - el.height / 2;
+            break;
+          case 'bottom':
+            el.y = bounds.bottom - el.height;
+            break;
+        }
+      }
+    });
     _markDirty();
   }
 
@@ -251,7 +432,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   String _newId() => DateTime.now().microsecondsSinceEpoch.toString();
 
   void _addTextElement() {
-    _addElement(FlyerElement(
+    final el = FlyerElement(
       id: _newId(),
       type: FlyerElementType.text,
       x: _canvasWidth * 0.1,
@@ -264,7 +445,12 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       fontWeight: 'bold',
       textAlign: 'center',
       zIndex: _nextZIndex(),
-    ));
+    );
+    _addElement(el);
+    // Jump straight into editing -- Canva's "add text" behaviour is to put
+    // the caret in immediately, not leave the placeholder sitting there
+    // waiting for a second tap.
+    _beginInlineEdit(el);
   }
 
   void _addShapeElement() {
@@ -362,6 +548,37 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     _markDirty();
   }
 
+  /// True WYSIWYG editing: a real TextField sits exactly over the element
+  /// on the canvas, matching its font/size/color/alignment, so typing shows
+  /// up in place instead of in a separate dialog. Only safe for unrotated
+  /// text -- a rotated TextField's caret/selection hit-testing doesn't
+  /// track its visually rotated glyphs, so rotated text keeps the dialog.
+  void _beginInlineEdit(FlyerElement el) {
+    if (el.type != FlyerElementType.text) return;
+    if (el.rotation != 0) {
+      _editTextElement(el);
+      return;
+    }
+    _pushUndo();
+    _inlineController?.dispose();
+    _inlineFocusNode?.dispose();
+    _inlineController = TextEditingController(text: el.text ?? '');
+    _inlineFocusNode = FocusNode();
+    setState(() {
+      _selectedId = el.id;
+      _editingTextId = el.id;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _inlineFocusNode?.requestFocus();
+    });
+  }
+
+  void _endInlineEdit() {
+    if (_editingTextId == null) return;
+    setState(() => _editingTextId = null);
+    _markDirty();
+  }
+
   Future<void> _replaceElementImage(FlyerElement el) async {
     final picked =
         await _imagePicker.pickImage(source: ImageSource.gallery, imageQuality: 90);
@@ -418,10 +635,16 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
     await showModalBottomSheet(
       context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
       builder: (ctx) => SafeArea(
         child: ListView(
           shrinkWrap: true,
-          children: logos.map((l) {
+          children: [
+            _sheetDragHandle(),
+            ...logos.map((l) {
             final logo = Map<String, dynamic>.from(l);
             return ListTile(
               leading: logo['image_url'] != null
@@ -447,7 +670,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 ));
               },
             );
-          }).toList(),
+            }),
+          ],
         ),
       ),
     );
@@ -487,12 +711,18 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   }
 
   Future<void> _changeCanvasSize() async {
+    final primaryColor = context.read<AppearanceSettings>().primaryColor;
     final preset = await showModalBottomSheet<FlyerCanvasPreset>(
       context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
       builder: (ctx) => SafeArea(
         child: ListView(
           shrinkWrap: true,
           children: [
+            _sheetDragHandle(),
             const Padding(
               padding: EdgeInsets.all(16),
               child: Text('Canvas Size',
@@ -503,7 +733,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               return ListTile(
                 leading: Icon(
                   isCurrent ? Icons.check_circle : Icons.crop_original,
-                  color: isCurrent ? const Color(0xFF4C6FFF) : null,
+                  color: isCurrent ? primaryColor : null,
                 ),
                 title: Text(p.name),
                 subtitle: Text('${p.note}  ·  ${p.width.toInt()}×${p.height.toInt()}'),
@@ -581,57 +811,93 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   }
 
   void _showBackgroundSheet() {
+    final appearance = context.read<AppearanceSettings>();
     showModalBottomSheet(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              leading: Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: flyerHexToColor(_backgroundColor),
-                  border: Border.all(color: Colors.grey.shade400),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              title: const Text('Background colour'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _changeBackgroundColor();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.wallpaper),
-              title: const Text('Background photo'),
-              subtitle: Text(_backgroundImageUrl == null ? 'None' : 'Tap to replace'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _changeBackgroundImage();
-              },
-            ),
-            if (_backgroundImageUrl != null)
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(appearance.cornerRadius.clamp(0, 24))),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              _sheetDragHandle(),
               ListTile(
-                leading: const Icon(Icons.hide_image_outlined),
-                title: const Text('Remove background photo'),
+                leading: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: flyerHexToColor(_backgroundColor),
+                    border: Border.all(color: Colors.grey.shade400),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                title: const Text('Background colour'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  setState(() => _backgroundImageUrl = null);
-                  _showSnack('Removed from view — re-open to restore from server');
+                  _changeBackgroundColor();
                 },
               ),
-            ListTile(
-              leading: const Icon(Icons.aspect_ratio),
-              title: const Text('Canvas size'),
-              subtitle: Text('${_canvasWidth.toInt()}×${_canvasHeight.toInt()}'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _changeCanvasSize();
-              },
-            ),
-          ],
+              ListTile(
+                leading: const Icon(Icons.wallpaper),
+                title: const Text('Background photo'),
+                subtitle: Text(_backgroundImageUrl == null ? 'None' : 'Tap to replace'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _changeBackgroundImage();
+                },
+              ),
+              if (_backgroundImageUrl != null)
+                ListTile(
+                  leading: const Icon(Icons.hide_image_outlined),
+                  title: const Text('Remove background photo'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() => _backgroundImageUrl = null);
+                    _showSnack('Removed from view — re-open to restore from server');
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.aspect_ratio),
+                title: const Text('Canvas size'),
+                subtitle: Text('${_canvasWidth.toInt()}×${_canvasHeight.toInt()}'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _changeCanvasSize();
+                },
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.grid_on),
+                title: const Text('Grid & rulers'),
+                subtitle: const Text('A 10x10 guide overlay plus numbered edge rulers'),
+                value: _showGrid,
+                onChanged: (v) {
+                  setState(() => _showGrid = v);
+                  setSheetState(() {});
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The small rounded handle bar every bottom sheet in Flyer Studio opens
+  /// with -- a lightweight, reusable stand-in for a proper sheet theme, so
+  /// every sheet reads as one designed surface instead of a bare ListView.
+  Widget _sheetDragHandle() {
+    final appearance = context.read<AppearanceSettings>();
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.only(top: 10, bottom: 4),
+        width: 36,
+        height: 4,
+        decoration: BoxDecoration(
+          color: appearance.primaryColor.withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(4),
         ),
       ),
     );
@@ -718,6 +984,29 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
   }
 
+  /// Captures the on-screen canvas RepaintBoundary at full canvas resolution
+  /// (not screen resolution), regardless of what phone this was designed on.
+  /// Caller is responsible for setting `_exporting = true` and waiting a
+  /// frame first, so editor chrome (handles/borders/guides) never ends up
+  /// baked into the PNG.
+  Future<Uint8List?> _captureCanvasBytes() async {
+    final boundary =
+        _canvasRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null) return null;
+    final onScreenWidth = boundary.size.width;
+    final pixelRatio = (_canvasWidth / onScreenWidth).clamp(1.0, 4.0);
+    final image = await boundary.toImage(pixelRatio: pixelRatio);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  }
+
+  Future<File> _writeCanvasPngFile(Uint8List bytes, {String? suffix}) async {
+    final dir = await getTemporaryDirectory();
+    final safeTitle = _title.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-');
+    final tag = suffix == null ? '' : '-$suffix';
+    return File('${dir.path}/$safeTitle$tag-${DateTime.now().millisecondsSinceEpoch}.png');
+  }
+
   Future<void> _exportAndShare() async {
     if (_projectId == null) return;
     // Deselect and drop editor chrome so handles/borders don't end up
@@ -729,25 +1018,12 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     await Future.delayed(const Duration(milliseconds: 120));
 
     try {
-      final boundary =
-          _canvasRepaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) return;
-
-      // Render at full canvas resolution regardless of screen size, so a
-      // flyer designed on a 6-inch phone still exports at 1080px+.
-      final onScreenWidth = boundary.size.width;
-      final pixelRatio = (_canvasWidth / onScreenWidth).clamp(1.0, 4.0);
-      final image = await boundary.toImage(pixelRatio: pixelRatio);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) return;
-      final bytes = byteData.buffer.asUint8List();
+      final bytes = await _captureCanvasBytes();
+      if (bytes == null) return;
 
       // Write to a temp file first: the OS share sheet (and WhatsApp /
       // Instagram specifically) need a real file, not raw bytes.
-      final dir = await getTemporaryDirectory();
-      final safeTitle = _title.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-');
-      final file = File(
-          '${dir.path}/$safeTitle-${DateTime.now().millisecondsSinceEpoch}.png');
+      final file = await _writeCanvasPngFile(bytes);
       await file.writeAsBytes(bytes);
 
       // Archive to storage too, so the flyer shows a thumbnail in history
@@ -767,6 +1043,74 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
   }
 
+  /// Renders the current design at every canvas preset in one pass and
+  /// shares them together -- Canva's "Download all sizes". Elements are
+  /// rescaled the same proportional way manual size-switching already does
+  /// (see _changeCanvasSize), one preset at a time, then the original size
+  /// and every element's original geometry are restored exactly at the end
+  /// -- this is a one-shot export, not a standing size change.
+  Future<void> _exportAllSizes() async {
+    if (_projectId == null || _elements.isEmpty) return;
+
+    final originalWidth = _canvasWidth;
+    final originalHeight = _canvasHeight;
+    final originalElements = _elements.map((e) => e.clone()).toList();
+
+    setState(() {
+      _selectedId = null;
+      _exporting = true;
+    });
+
+    final files = <File>[];
+    try {
+      for (final preset in kFlyerCanvasPresets) {
+        final scaleX = preset.width / _canvasWidth;
+        final scaleY = preset.height / _canvasHeight;
+        setState(() {
+          for (final el in _elements) {
+            el.x *= scaleX;
+            el.y *= scaleY;
+            el.width *= scaleX;
+            el.height *= scaleY;
+            if (el.type == FlyerElementType.text) el.fontSize *= scaleX;
+          }
+          _canvasWidth = preset.width;
+          _canvasHeight = preset.height;
+        });
+        // Let the resized frame actually paint before capturing it.
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        final bytes = await _captureCanvasBytes();
+        if (bytes == null) continue;
+        final file = await _writeCanvasPngFile(bytes, suffix: preset.id);
+        await file.writeAsBytes(bytes);
+        files.add(file);
+      }
+
+      if (files.isEmpty) {
+        _showSnack('Export failed: nothing captured');
+        return;
+      }
+      await Share.shareXFiles(
+        files.map((f) => XFile(f.path)).toList(),
+        text: '$_title -- all sizes',
+      );
+    } catch (e) {
+      _showSnack('Export failed: $e');
+    } finally {
+      // Restore the design exactly as the counsellor left it -- this was a
+      // one-shot export, never a standing size change.
+      if (mounted) {
+        setState(() {
+          _elements = originalElements;
+          _canvasWidth = originalWidth;
+          _canvasHeight = originalHeight;
+          _exporting = false;
+        });
+      }
+    }
+  }
+
   /// Share options. Sending straight to the lead is listed first and framed
   /// by name, because that is the actual job to be done -- the generic share
   /// sheet costs three extra taps (pick app, search contact, pick contact) at
@@ -778,10 +1122,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
     await showModalBottomSheet(
       context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _sheetDragHandle(),
             ListTile(
               leading: const Icon(Icons.send, color: Color(0xFF25D366)),
               title: const Text('Send to this lead on WhatsApp'),
@@ -917,12 +1266,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 if (v == 'background') _showBackgroundSheet();
                 if (v == 'save') _save();
                 if (v == 'rename') _renameFlyer();
+                if (v == 'exportAll') _exportAllSizes();
               },
               itemBuilder: (ctx) => const [
                 PopupMenuItem(value: 'layers', child: Text('Layers')),
                 PopupMenuItem(value: 'background', child: Text('Background & size')),
                 PopupMenuItem(value: 'rename', child: Text('Rename')),
                 PopupMenuItem(value: 'save', child: Text('Save now')),
+                PopupMenuItem(
+                    value: 'exportAll', child: Text('Export all sizes (Story/Post/A4...)')),
               ],
             ),
           ],
@@ -947,7 +1299,18 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 : Column(
                     children: [
                       Expanded(child: _buildCanvasArea()),
-                      if (selected != null) _buildStylePanel(selected),
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOut,
+                        alignment: Alignment.bottomCenter,
+                        child: _groupSelectMode
+                            ? (_groupSelectedIds.isNotEmpty
+                                ? _buildGroupActionBar()
+                                : const SizedBox(width: double.infinity, height: 0))
+                            : (selected != null
+                                ? _buildStylePanel(selected)
+                                : const SizedBox(width: double.infinity, height: 0)),
+                      ),
                       _buildToolbar(),
                     ],
                   ),
@@ -956,6 +1319,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   }
 
   Widget _buildCanvasArea() {
+    final appearance = context.watch<AppearanceSettings>();
     return LayoutBuilder(
       builder: (context, constraints) {
         final availableW = constraints.maxWidth - 24;
@@ -976,14 +1340,34 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               key: _canvasRepaintKey,
               child: GestureDetector(
                 onTap: () => _selectElement(null),
-                child: Container(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
                   width: displayW,
                   height: displayH,
                   decoration: BoxDecoration(
                     color: flyerHexToColor(_backgroundColor),
                     boxShadow: _exporting
                         ? null
-                        : const [BoxShadow(color: Colors.black26, blurRadius: 8)],
+                        : [
+                            BoxShadow(
+                              color: appearance.glowEnabled
+                                  ? appearance.glowColor
+                                      .withValues(alpha: 0.4 * appearance.glowIntensity)
+                                  : Colors.black.withValues(alpha: 0.18),
+                              blurRadius: appearance.glowEnabled
+                                  ? 22 + 22 * appearance.glowIntensity
+                                  : 10,
+                              spreadRadius: appearance.glowEnabled ? 1 : 0,
+                            ),
+                            if (appearance.glowEnabled)
+                              BoxShadow(
+                                color: appearance.glowColor
+                                    .withValues(alpha: 0.2 * appearance.glowIntensity),
+                                blurRadius: 44 + 30 * appearance.glowIntensity,
+                                spreadRadius: 2,
+                              ),
+                          ],
                   ),
                   child: ClipRect(
                     child: Stack(
@@ -997,19 +1381,51 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                             ),
                           ),
-                        ..._elements.map((el) => FlyerCanvasElementWidget(
+                        if (_showGrid && !_exporting)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: FlyerGridPainter(
+                                  scale: scale,
+                                  canvasWidth: _canvasWidth,
+                                  canvasHeight: _canvasHeight,
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (_showGrid && !_exporting)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: FlyerRulerPainter(
+                                  scale: scale,
+                                  canvasWidth: _canvasWidth,
+                                  canvasHeight: _canvasHeight,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ..._elements
+                            .where((el) => el.id != _editingTextId)
+                            .map((el) => FlyerCanvasElementWidget(
                               key: ValueKey(el.id),
                               element: el,
                               scale: scale,
-                              selected: !_exporting && el.id == _selectedId,
+                              selected: !_exporting && !_groupSelectMode && el.id == _selectedId,
                               exporting: _exporting,
                               canvasWidth: _canvasWidth,
                               canvasHeight: _canvasHeight,
-                              onTap: () => _selectElement(el.id),
+                              groupMode: _groupSelectMode,
+                              groupSelected: _groupSelectedIds.contains(el.id),
+                              siblings: _exporting
+                                  ? const []
+                                  : _elements.where((e) => e.id != el.id).toList(),
+                              onTap: () => _groupSelectMode
+                                  ? _toggleGroupMember(el.id)
+                                  : _selectElement(el.id),
                               onDoubleTap: () {
                                 if (el.type == FlyerElementType.text) {
-                                  _selectElement(el.id);
-                                  _editTextElement(el);
+                                  _beginInlineEdit(el);
                                 } else {
                                   _selectElement(el.id);
                                   _replaceElementImage(el);
@@ -1028,10 +1444,18 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               },
                               onSnapGuides: (guides) {
                                 if (guides.length != _snapGuides.length) {
+                                  if (guides.isNotEmpty &&
+                                      _snapGuides.isEmpty &&
+                                      context.read<AppearanceSettings>().haptics) {
+                                    HapticFeedback.selectionClick();
+                                  }
                                   setState(() => _snapGuides = guides);
                                 }
                               },
                             )),
+                        if (_editingTextId != null) _buildInlineTextEditor(scale),
+                        if (_groupSelectMode && _groupSelectedIds.isNotEmpty && !_exporting)
+                          _buildGroupBoundsOverlay(scale),
                         if (_snapGuides.isNotEmpty && !_exporting)
                           Positioned.fill(
                             child: IgnorePointer(
@@ -1053,107 +1477,454 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     );
   }
 
-  Widget _buildToolbar() {
-    final hasSelection = _selectedId != null;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.grey.shade300)),
-      ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
+  static const Color _groupHighlightColor = Color(0xFF9C6ADE);
+
+  /// The dashed-style bounding box around every group-selected element,
+  /// draggable to move the whole group together in one gesture, with a
+  /// floating rotate handle above it (same stalk pattern as a single
+  /// element's own rotate handle) that spins the whole cluster around its
+  /// shared centre -- the piece that makes group-select an actual editing
+  /// tool rather than just a bulk-delete picker.
+  Widget _buildGroupBoundsOverlay(double scale) {
+    final bounds = _groupBoundsRect();
+    if (bounds == null) return const SizedBox.shrink();
+    const pad = 8.0;
+    final boxWidth = bounds.width * scale + pad * 2;
+    final boxHeight = bounds.height * scale + pad * 2;
+    return Positioned(
+      left: bounds.left * scale - pad,
+      top: bounds.top * scale - pad,
+      width: boxWidth,
+      height: boxHeight,
+      child: Builder(
+        builder: (boxContext) => Stack(
+          clipBehavior: Clip.none,
           children: [
-            _toolbarButton(Icons.text_fields, 'Text', _addTextElement),
-            _toolbarButton(Icons.add_photo_alternate, 'Photo', _addImageElement),
-            _toolbarButton(Icons.workspace_premium, 'Logo', _addLogoElement),
-            _toolbarButton(Icons.rectangle, 'Shape', _addShapeElement),
-            _toolbarButton(Icons.wallpaper, 'Background', _showBackgroundSheet),
-            _toolbarButton(Icons.layers, 'Layers', _showLayersSheet),
-            _toolbarButton(
-                Icons.copy, 'Duplicate', hasSelection ? _duplicateSelected : null),
-            _toolbarButton(
-                Icons.delete_outline, 'Delete', hasSelection ? _deleteSelected : null),
+            GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onPanStart: (_) => _pushUndo(),
+              onPanUpdate: (details) => _groupDrag(details.delta / scale),
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: _groupHighlightColor, width: 2),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: const BoxDecoration(
+                      color: _groupHighlightColor,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.open_with, size: 16, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: boxWidth / 2 - 1,
+              top: -22,
+              child: Container(
+                  width: 2, height: 22, color: _groupHighlightColor.withValues(alpha: 0.6)),
+            ),
+            Positioned(
+              left: boxWidth / 2 - 18,
+              top: -46,
+              child: GestureDetector(
+                onPanStart: (_) {
+                  _pushUndo();
+                  _groupRotateStartAngle = null;
+                },
+                onPanUpdate: (details) {
+                  final box = boxContext.findRenderObject() as RenderBox?;
+                  if (box == null) return;
+                  final centre =
+                      box.localToGlobal(Offset(box.size.width / 2, box.size.height / 2));
+                  final angle = math.atan2(
+                    details.globalPosition.dy - centre.dy,
+                    details.globalPosition.dx - centre.dx,
+                  );
+                  if (_groupRotateStartAngle != null) {
+                    _groupRotate(angle - _groupRotateStartAngle!);
+                  }
+                  _groupRotateStartAngle = angle;
+                },
+                onPanEnd: (_) => _groupRotateStartAngle = null,
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: _groupHighlightColor,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)],
+                    ),
+                    child: const Icon(Icons.rotate_right, size: 14, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: GestureDetector(
+                onPanStart: (_) => _pushUndo(),
+                onPanUpdate: (details) => _groupResize(details.delta / scale),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: context.watch<AppearanceSettings>().primaryColor,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3)],
+                    ),
+                    child: const Icon(Icons.open_in_full, size: 14, color: Colors.white),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _toolbarButton(IconData icon, String label, VoidCallback? onTap) {
-    final disabled = onTap == null;
-    return InkWell(
-      onTap: onTap,
+  /// The live overlay for inline WYSIWYG editing -- a real TextField sized,
+  /// positioned, and styled to exactly match the FlyerElement it's replacing
+  /// while `_editingTextId` is set (see _beginInlineEdit). Falls back to
+  /// nothing if the element vanished mid-edit (e.g. deleted from Layers).
+  Widget _buildInlineTextEditor(double scale) {
+    FlyerElement? el;
+    for (final e in _elements) {
+      if (e.id == _editingTextId) {
+        el = e;
+        break;
+      }
+    }
+    if (el == null || _inlineController == null) return const SizedBox.shrink();
+
+    final textAlign = el.textAlign == 'center'
+        ? TextAlign.center
+        : el.textAlign == 'right'
+            ? TextAlign.right
+            : TextAlign.left;
+
+    return Positioned(
+      left: el.x * scale,
+      top: el.y * scale,
+      width: math.max(el.width * scale, 6.0),
+      height: math.max(el.height * scale, 6.0),
       child: Container(
-        width: 72,
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 22, color: disabled ? Colors.grey.shade400 : null),
-            const SizedBox(height: 2),
-            Text(label,
-                style: TextStyle(
-                    fontSize: 10, color: disabled ? Colors.grey.shade400 : null)),
-          ],
+        color: el.backgroundColor != null
+            ? flyerHexToColor(el.backgroundColor!)
+            : Colors.transparent,
+        child: TextField(
+          controller: _inlineController,
+          focusNode: _inlineFocusNode,
+          maxLines: null,
+          minLines: null,
+          expands: true,
+          textAlign: textAlign,
+          textCapitalization: TextCapitalization.sentences,
+          cursorColor: flyerHexToColor(el.color),
+          style: TextStyle(
+            fontSize: el.fontSize * scale,
+            fontFamily: el.fontFamily,
+            color: flyerHexToColor(el.color),
+            fontWeight: el.fontWeight == 'bold' ? FontWeight.bold : FontWeight.normal,
+            fontStyle: el.italic ? FontStyle.italic : FontStyle.normal,
+            height: el.lineHeight,
+            letterSpacing: el.letterSpacing * scale,
+            decoration: el.underline ? TextDecoration.underline : TextDecoration.none,
+          ),
+          decoration: const InputDecoration(
+            border: InputBorder.none,
+            isDense: true,
+            contentPadding: EdgeInsets.all(4),
+          ),
+          onChanged: (v) {
+            el!.text = v;
+            _markDirty();
+          },
+          onTapOutside: (_) => _endInlineEdit(),
+          onEditingComplete: _endInlineEdit,
         ),
+      ),
+    );
+  }
+
+  Widget _buildToolbar() {
+    final appearance = context.watch<AppearanceSettings>();
+    final glass = context.watch<GlassSettings>();
+    final hasSelection = _selectedId != null;
+    final radius = BorderRadius.only(
+      topLeft: Radius.circular(appearance.cornerRadius.clamp(0, 24)),
+      topRight: Radius.circular(appearance.cornerRadius.clamp(0, 24)),
+    );
+    final glowShadow = navBarGlowShadow(appearance);
+
+    Widget bar = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      decoration: BoxDecoration(
+        color: glass.enabled
+            ? Colors.white.withValues(alpha: appearance.darkMode ? 0.06 : 0.55)
+            : Theme.of(context).navigationBarTheme.backgroundColor ??
+                Theme.of(context).colorScheme.surface,
+        borderRadius: radius,
+        border: Border(
+          top: BorderSide(color: appearance.primaryColor.withValues(alpha: 0.1)),
+        ),
+        boxShadow: [
+          glowShadow ??
+              const BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -2)),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _toolbarButton(Icons.text_fields, 'Text', _addTextElement, appearance),
+              _toolbarButton(
+                  Icons.add_photo_alternate, 'Photo', _addImageElement, appearance),
+              _toolbarButton(Icons.workspace_premium, 'Logo', _addLogoElement, appearance),
+              _toolbarButton(Icons.rectangle, 'Shape', _addShapeElement, appearance),
+              _toolbarButton(
+                  Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
+              _toolbarButton(Icons.layers, 'Layers', _showLayersSheet, appearance),
+              _toolbarToggleButton(
+                  Icons.select_all, 'Group', _groupSelectMode, _toggleGroupSelectMode, appearance),
+              _toolbarButton(Icons.copy, 'Duplicate',
+                  hasSelection ? _duplicateSelected : null, appearance),
+              _toolbarButton(Icons.delete_outline, 'Delete',
+                  hasSelection ? _deleteSelected : null, appearance),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (!glass.enabled) return bar;
+    return ClipRRect(
+      borderRadius: radius,
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: glass.blur * 0.5, sigmaY: glass.blur * 0.5),
+        child: bar,
+      ),
+    );
+  }
+
+  Widget _toolbarToggleButton(IconData icon, String label, bool active, VoidCallback onTap,
+      AppearanceSettings appearance) {
+    final color = active ? appearance.primaryColor : null;
+    return TouchFeedbackWrapper(
+      appearance: appearance,
+      radius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () {
+          if (appearance.haptics) HapticFeedback.selectionClick();
+          onTap();
+        },
+        child: Container(
+          width: 72,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            color: active ? appearance.primaryColor.withValues(alpha: 0.12) : null,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 22, color: color),
+              const SizedBox(height: 2),
+              Text(label,
+                  style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _toolbarButton(
+      IconData icon, String label, VoidCallback? onTap, AppearanceSettings appearance) {
+    final disabled = onTap == null;
+    final color = disabled ? Colors.grey.shade400 : appearance.primaryColor;
+    return TouchFeedbackWrapper(
+      appearance: appearance,
+      radius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap == null
+            ? null
+            : () {
+                if (appearance.haptics) HapticFeedback.selectionClick();
+                onTap();
+              },
+        child: Container(
+          width: 72,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 22, color: color),
+              const SizedBox(height: 2),
+              Text(label,
+                  style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupActionBar() {
+    final appearance = context.watch<AppearanceSettings>();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: appearance.primaryColor.withValues(alpha: 0.12)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Text('${_groupSelectedIds.length} selected',
+              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          const Spacer(),
+          PopupMenuButton<String>(
+            tooltip: 'Align selection',
+            icon: const Icon(Icons.align_horizontal_left, size: 20),
+            onSelected: _groupAlign,
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(value: 'left', child: Text('Align left')),
+              PopupMenuItem(value: 'centerH', child: Text('Align centre (horizontal)')),
+              PopupMenuItem(value: 'right', child: Text('Align right')),
+              PopupMenuItem(value: 'top', child: Text('Align top')),
+              PopupMenuItem(value: 'centerV', child: Text('Align middle (vertical)')),
+              PopupMenuItem(value: 'bottom', child: Text('Align bottom')),
+            ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.copy, size: 20),
+            tooltip: 'Duplicate group',
+            onPressed: _groupDuplicate,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, size: 20),
+            tooltip: 'Delete group',
+            onPressed: _groupDelete,
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildStylePanel(FlyerElement el) {
+    final appearance = context.watch<AppearanceSettings>();
     return Container(
-      constraints: const BoxConstraints(maxHeight: 190),
-      decoration:
-          BoxDecoration(border: Border(top: BorderSide(color: Colors.grey.shade200))),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildNudgeRow(el),
-            if (el.type == FlyerElementType.text) ..._textControls(el),
-            if (el.type == FlyerElementType.image || el.type == FlyerElementType.logo)
-              ..._imageControls(el),
-            if (el.type == FlyerElementType.shape) ..._shapeControls(el),
-          ],
+      constraints: const BoxConstraints(maxHeight: 200),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: appearance.primaryColor.withValues(alpha: 0.12)),
         ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 6),
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(
+              color: appearance.primaryColor.withValues(alpha: 0.25),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          Expanded(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 160),
+              child: SingleChildScrollView(
+                key: ValueKey('${el.id}-${el.type}'),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildNudgeRow(el),
+                    if (el.type == FlyerElementType.text) ..._textControls(el),
+                    if (el.type == FlyerElementType.image ||
+                        el.type == FlyerElementType.logo)
+                      ..._imageControls(el),
+                    if (el.type == FlyerElementType.shape) ..._shapeControls(el),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildNudgeRow(FlyerElement el) {
     final step = _canvasWidth * 0.01;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Text('Nudge', style: TextStyle(fontSize: 11, color: Colors.grey)),
-        IconButton(
-            icon: const Icon(Icons.keyboard_arrow_left, size: 20),
-            onPressed: () => _nudge(-step, 0)),
-        IconButton(
-            icon: const Icon(Icons.keyboard_arrow_up, size: 20),
-            onPressed: () => _nudge(0, -step)),
-        IconButton(
-            icon: const Icon(Icons.keyboard_arrow_down, size: 20),
-            onPressed: () => _nudge(0, step)),
-        IconButton(
-            icon: const Icon(Icons.keyboard_arrow_right, size: 20),
-            onPressed: () => _nudge(step, 0)),
-        const SizedBox(width: 8),
-        IconButton(
-          icon: const Icon(Icons.center_focus_strong, size: 20),
-          tooltip: 'Centre horizontally',
-          onPressed: () {
-            setState(() => el.x = _canvasWidth / 2 - el.width / 2);
-            _markDirty();
-          },
-        ),
-      ],
+    final appearance = context.watch<AppearanceSettings>();
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text('Nudge', style: TextStyle(fontSize: 11, color: Colors.grey)),
+          IconButton(
+              icon: const Icon(Icons.keyboard_arrow_left, size: 20),
+              onPressed: () => _nudge(-step, 0)),
+          IconButton(
+              icon: const Icon(Icons.keyboard_arrow_up, size: 20),
+              onPressed: () => _nudge(0, -step)),
+          IconButton(
+              icon: const Icon(Icons.keyboard_arrow_down, size: 20),
+              onPressed: () => _nudge(0, step)),
+          IconButton(
+              icon: const Icon(Icons.keyboard_arrow_right, size: 20),
+              onPressed: () => _nudge(step, 0)),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.center_focus_strong, size: 20),
+            tooltip: 'Centre horizontally',
+            onPressed: () {
+              setState(() => el.x = _canvasWidth / 2 - el.width / 2);
+              _markDirty();
+            },
+          ),
+          IconButton(
+            icon: Icon(el.aspectLocked ? Icons.link : Icons.link_off,
+                size: 20, color: el.aspectLocked ? appearance.primaryColor : null),
+            tooltip: el.aspectLocked ? 'Aspect ratio locked' : 'Lock aspect ratio',
+            onPressed: () {
+              setState(() => el.aspectLocked = !el.aspectLocked);
+              _markDirty();
+            },
+          ),
+        ],
+      ),
     );
   }
 
   List<Widget> _textControls(FlyerElement el) {
+    final activeColor = context.watch<AppearanceSettings>().primaryColor;
     return [
       Row(
         children: [
@@ -1177,7 +1948,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           IconButton(
             icon: const Icon(Icons.edit_note),
             tooltip: 'Edit text',
-            onPressed: () => _editTextElement(el),
+            onPressed: () => _beginInlineEdit(el),
           ),
         ],
       ),
@@ -1185,7 +1956,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         children: [
           IconButton(
             icon: Icon(Icons.format_bold,
-                color: el.fontWeight == 'bold' ? const Color(0xFF4C6FFF) : null),
+                color: el.fontWeight == 'bold' ? activeColor : null),
             onPressed: () {
               setState(() =>
                   el.fontWeight = el.fontWeight == 'bold' ? 'normal' : 'bold');
@@ -1193,16 +1964,14 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             },
           ),
           IconButton(
-            icon: Icon(Icons.format_italic,
-                color: el.italic ? const Color(0xFF4C6FFF) : null),
+            icon: Icon(Icons.format_italic, color: el.italic ? activeColor : null),
             onPressed: () {
               setState(() => el.italic = !el.italic);
               _markDirty();
             },
           ),
           IconButton(
-            icon: Icon(Icons.format_underlined,
-                color: el.underline ? const Color(0xFF4C6FFF) : null),
+            icon: Icon(Icons.format_underlined, color: el.underline ? activeColor : null),
             onPressed: () {
               setState(() => el.underline = !el.underline);
               _markDirty();
@@ -1216,7 +1985,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                     : a == 'center'
                         ? Icons.format_align_center
                         : Icons.format_align_right,
-                color: el.textAlign == a ? const Color(0xFF4C6FFF) : null,
+                color: el.textAlign == a ? activeColor : null,
               ),
               onPressed: () {
                 setState(() => el.textAlign = a);
@@ -1245,6 +2014,14 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               }
             },
           ),
+          IconButton(
+            icon: Icon(Icons.blur_on, color: el.textShadow ? activeColor : null),
+            tooltip: 'Drop shadow',
+            onPressed: () {
+              setState(() => el.textShadow = !el.textShadow);
+              _markDirty();
+            },
+          ),
         ],
       ),
       _sliderRow(
@@ -1264,6 +2041,26 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         max: 1.0,
         onChanged: (v) {
           setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.space_bar,
+        value: el.letterSpacing.clamp(-2.0, 20.0),
+        min: -2.0,
+        max: 20.0,
+        onChanged: (v) {
+          setState(() => el.letterSpacing = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.format_line_spacing,
+        value: el.lineHeight.clamp(0.8, 2.5),
+        min: 0.8,
+        max: 2.5,
+        onChanged: (v) {
+          setState(() => el.lineHeight = v);
           _markDirty();
         },
       ),
@@ -1337,13 +2134,80 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               }
             },
           ),
-          TextButton(
-            onPressed: () {
-              setState(
-                  () => el.shapeKind = el.shapeKind == 'circle' ? 'rect' : 'circle');
+          PopupMenuButton<String>(
+            tooltip: 'Shape kind',
+            initialValue: el.shapeKind,
+            onSelected: (kind) {
+              setState(() => el.shapeKind = kind);
               _markDirty();
             },
-            child: Text(el.shapeKind == 'circle' ? 'Circle' : 'Rectangle'),
+            itemBuilder: (ctx) => kFlyerShapeKindLabels.entries
+                .map((e) => PopupMenuItem(value: e.key, child: Text(e.value)))
+                .toList(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(kFlyerShapeKindLabels[el.shapeKind] ?? 'Rectangle'),
+                  const Icon(Icons.arrow_drop_down, size: 18),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.gradient,
+                color: el.shapeGradientEnd != null
+                    ? context.watch<AppearanceSettings>().primaryColor
+                    : null),
+            tooltip: el.shapeGradientEnd != null ? 'Remove gradient' : 'Add gradient',
+            onPressed: () async {
+              if (el.shapeGradientEnd != null) {
+                setState(() => el.shapeGradientEnd = null);
+                _markDirty();
+                return;
+              }
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(
+                    initial: flyerHexToColor(el.shapeColor), title: 'Gradient End Colour'),
+              );
+              if (picked != null) {
+                setState(() => el.shapeGradientEnd = flyerColorToHex(picked));
+                _markDirty();
+              }
+            },
+          ),
+          IconButton(
+            icon: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: el.strokeColor != null
+                    ? flyerHexToColor(el.strokeColor!)
+                    : Colors.transparent,
+                border: Border.all(
+                    color: Colors.grey.shade400,
+                    width: el.strokeColor != null ? 3 : 1),
+                shape: BoxShape.circle,
+              ),
+            ),
+            tooltip: 'Stroke colour',
+            onPressed: () async {
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(
+                    initial: flyerHexToColor(el.strokeColor ?? '#000000'),
+                    title: 'Stroke Colour'),
+              );
+              if (picked != null) {
+                setState(() {
+                  el.strokeColor = flyerColorToHex(picked);
+                  if (el.strokeWidth <= 0) el.strokeWidth = 4;
+                });
+                _markDirty();
+              }
+            },
           ),
         ],
       ),
@@ -1357,7 +2221,17 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           _markDirty();
         },
       ),
-      if (el.shapeKind != 'circle')
+      _sliderRow(
+        icon: Icons.border_outer,
+        value: el.strokeWidth.clamp(0.0, 20.0),
+        min: 0.0,
+        max: 20.0,
+        onChanged: (v) {
+          setState(() => el.strokeWidth = v);
+          _markDirty();
+        },
+      ),
+      if (el.shapeKind == 'rect')
         _sliderRow(
           icon: Icons.rounded_corner,
           value: el.cornerRadius.clamp(0, 200),
@@ -1388,10 +2262,90 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     );
   }
 
+  void _bulkDeleteSelected(Set<String> ids) {
+    if (ids.isEmpty) return;
+    _pushUndo();
+    setState(() {
+      _elements.removeWhere((e) => ids.contains(e.id));
+      if (_selectedId != null && ids.contains(_selectedId)) _selectedId = null;
+    });
+    _markDirty();
+  }
+
+  void _bulkDuplicateSelected(Set<String> ids) {
+    if (ids.isEmpty) return;
+    _pushUndo();
+    setState(() {
+      for (final id in ids.toList()) {
+        FlyerElement? found;
+        for (final e in _elements) {
+          if (e.id == id) {
+            found = e;
+            break;
+          }
+        }
+        if (found == null) continue;
+        final copy = found.clone();
+        copy.id = _newId();
+        copy.x += _canvasWidth * 0.03;
+        copy.y += _canvasHeight * 0.02;
+        copy.zIndex = _nextZIndex();
+        copy.locked = false;
+        _elements.add(copy);
+      }
+      _sortElements();
+    });
+    _markDirty();
+  }
+
+  Widget _layerThumbnail(FlyerElement el) {
+    Widget content;
+    switch (el.type) {
+      case FlyerElementType.text:
+        content = Container(
+          color: flyerHexToColor(el.color).withValues(alpha: 0.15),
+          alignment: Alignment.center,
+          child: Text('T',
+              style: TextStyle(color: flyerHexToColor(el.color), fontWeight: FontWeight.bold)),
+        );
+        break;
+      case FlyerElementType.image:
+      case FlyerElementType.logo:
+        content = (el.url != null && el.url!.isNotEmpty)
+            ? Image.network(el.url!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    Icon(_iconFor(el.type), size: 18, color: Colors.grey))
+            : Icon(_iconFor(el.type), size: 18, color: Colors.grey);
+        break;
+      case FlyerElementType.shape:
+        content = Container(
+          margin: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: flyerHexToColor(el.shapeColor),
+            shape: el.shapeKind == 'circle' ? BoxShape.circle : BoxShape.rectangle,
+            borderRadius: el.shapeKind == 'circle' ? null : BorderRadius.circular(4),
+          ),
+        );
+        break;
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Container(width: 36, height: 36, color: Colors.grey.shade200, child: content),
+    );
+  }
+
   void _showLayersSheet() {
+    final appearance = context.read<AppearanceSettings>();
+    bool multiSelect = false;
+    _multiSelectedIds.clear();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(appearance.cornerRadius.clamp(0, 24))),
+      ),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
@@ -1399,13 +2353,29 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               ..sort((a, b) => b.zIndex.compareTo(a.zIndex));
             return SafeArea(
               child: SizedBox(
-                height: MediaQuery.of(ctx).size.height * 0.55,
+                height: MediaQuery.of(ctx).size.height * 0.6,
                 child: Column(
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: Text('Layers  ·  top to bottom',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
+                    _sheetDragHandle(),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      child: Row(
+                        children: [
+                          const Expanded(
+                            child: Text('Layers  ·  top to bottom',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                          TextButton(
+                            onPressed: sorted.isEmpty
+                                ? null
+                                : () => setSheetState(() {
+                                      multiSelect = !multiSelect;
+                                      _multiSelectedIds.clear();
+                                    }),
+                            child: Text(multiSelect ? 'Done' : 'Select'),
+                          ),
+                        ],
+                      ),
                     ),
                     Expanded(
                       child: sorted.isEmpty
@@ -1414,66 +2384,116 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               itemCount: sorted.length,
                               itemBuilder: (ctx, i) {
                                 final el = sorted[i];
+                                final checked = _multiSelectedIds.contains(el.id);
                                 return ListTile(
                                   dense: true,
-                                  leading: Icon(_iconFor(el.type), size: 20),
+                                  leading: multiSelect
+                                      ? Checkbox(
+                                          value: checked,
+                                          onChanged: (_) => setSheetState(() {
+                                            checked
+                                                ? _multiSelectedIds.remove(el.id)
+                                                : _multiSelectedIds.add(el.id);
+                                          }),
+                                        )
+                                      : _layerThumbnail(el),
                                   title: Text(_labelFor(el),
                                       maxLines: 1, overflow: TextOverflow.ellipsis),
-                                  selected: el.id == _selectedId,
+                                  selected: !multiSelect && el.id == _selectedId,
                                   onTap: () {
+                                    if (multiSelect) {
+                                      setSheetState(() {
+                                        checked
+                                            ? _multiSelectedIds.remove(el.id)
+                                            : _multiSelectedIds.add(el.id);
+                                      });
+                                      return;
+                                    }
                                     _selectElement(el.id);
                                     Navigator.pop(ctx);
                                   },
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: Icon(
-                                            el.locked ? Icons.lock : Icons.lock_open,
-                                            size: 17),
-                                        onPressed: () {
-                                          setState(() => el.locked = !el.locked);
-                                          setSheetState(() {});
-                                          _markDirty();
-                                        },
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.arrow_upward, size: 17),
-                                        onPressed: () {
-                                          _reorderLayer(el.id, 1);
-                                          setSheetState(() {});
-                                        },
-                                      ),
-                                      IconButton(
-                                        icon:
-                                            const Icon(Icons.arrow_downward, size: 17),
-                                        onPressed: () {
-                                          _reorderLayer(el.id, -1);
-                                          setSheetState(() {});
-                                        },
-                                      ),
-                                      IconButton(
-                                        icon:
-                                            const Icon(Icons.delete_outline, size: 17),
-                                        onPressed: () {
-                                          _pushUndo();
-                                          setState(() {
-                                            _elements
-                                                .removeWhere((e) => e.id == el.id);
-                                            if (_selectedId == el.id) {
-                                              _selectedId = null;
-                                            }
-                                          });
-                                          setSheetState(() {});
-                                          _markDirty();
-                                        },
-                                      ),
-                                    ],
-                                  ),
+                                  trailing: multiSelect
+                                      ? null
+                                      : Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            IconButton(
+                                              icon: Icon(
+                                                  el.locked ? Icons.lock : Icons.lock_open,
+                                                  size: 17),
+                                              onPressed: () {
+                                                setState(() => el.locked = !el.locked);
+                                                setSheetState(() {});
+                                                _markDirty();
+                                              },
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(Icons.arrow_upward, size: 17),
+                                              onPressed: () {
+                                                _reorderLayer(el.id, 1);
+                                                setSheetState(() {});
+                                              },
+                                            ),
+                                            IconButton(
+                                              icon:
+                                                  const Icon(Icons.arrow_downward, size: 17),
+                                              onPressed: () {
+                                                _reorderLayer(el.id, -1);
+                                                setSheetState(() {});
+                                              },
+                                            ),
+                                            IconButton(
+                                              icon:
+                                                  const Icon(Icons.delete_outline, size: 17),
+                                              onPressed: () {
+                                                _pushUndo();
+                                                setState(() {
+                                                  _elements
+                                                      .removeWhere((e) => e.id == el.id);
+                                                  if (_selectedId == el.id) {
+                                                    _selectedId = null;
+                                                  }
+                                                });
+                                                setSheetState(() {});
+                                                _markDirty();
+                                              },
+                                            ),
+                                          ],
+                                        ),
                                 );
                               },
                             ),
                     ),
+                    if (multiSelect && _multiSelectedIds.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text('${_multiSelectedIds.length} selected',
+                                  style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                            ),
+                            TextButton.icon(
+                              icon: const Icon(Icons.copy, size: 18),
+                              label: const Text('Duplicate'),
+                              onPressed: () {
+                                final ids = Set<String>.from(_multiSelectedIds);
+                                _bulkDuplicateSelected(ids);
+                                setSheetState(() => _multiSelectedIds.clear());
+                              },
+                            ),
+                            TextButton.icon(
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                              label: const Text('Delete'),
+                              onPressed: () {
+                                final ids = Set<String>.from(_multiSelectedIds);
+                                _bulkDeleteSelected(ids);
+                                setSheetState(() => _multiSelectedIds.clear());
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ),

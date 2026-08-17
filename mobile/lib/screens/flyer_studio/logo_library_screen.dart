@@ -11,11 +11,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import '../../services/api_service.dart';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../theme/appearance_settings.dart';
 import '../../widgets/share_targets_sheet.dart';
 import 'generate_logo_screen.dart';
 
@@ -320,7 +322,7 @@ class _LogoLibraryScreenState extends State<LogoLibraryScreen> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF4C6FFF),
+                        color: context.watch<AppearanceSettings>().primaryColor,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: const Text('Default',

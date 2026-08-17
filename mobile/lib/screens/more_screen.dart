@@ -18,7 +18,6 @@ import 'triage_test_screen.dart';
 import 'insights_overview_screen.dart';
 import 'customize_more_menu_screen.dart';
 import '../services/api_service.dart';
-import '../widgets/styled_icon_badge.dart';
 
 // Curated icon set for icon_override -- same string-key-to-IconData
 // pattern as kLeadDetailIconOptions/kShareTargetIconOptions.
@@ -82,6 +81,32 @@ Color _hexToColor(String hex) {
   if (h.length == 6) h = 'FF$h';
   return Color(int.parse(h, radix: 16));
 }
+
+// Default per-item accent colours -- same idea as Lead Detail's
+// _navActionFor default colours (Colors.green for WhatsApp, Colors.teal
+// for Calls & Voice Notes, etc.): every built-in item gets its own
+// distinct hue so the grid reads by colour+icon at a glance instead of
+// every tile being an identical shade of the single global accent
+// colour. A tenant's color_override still wins when set.
+const Map<String, Color> kMoreMenuDefaultColors = {
+  'flyer_studio': Colors.deepPurple,
+  'parent_crm': Colors.pink,
+  'team': Colors.blue,
+  'colleges': Colors.indigo,
+  'calendar': Colors.orange,
+  'performance': Colors.green,
+  'audit_timeline': Colors.blueGrey,
+  'knowledge_base': Colors.brown,
+  'automation_hub': Color(0xFFB8860B),
+  'insights_records': Colors.teal,
+  'smart_triage': Colors.cyan,
+  'lead_scoring': Colors.redAccent,
+  'lead_capture_forms': Color(0xFF0288D1),
+  'social_media_links': Colors.purple,
+  'pipeline_builder': Colors.deepOrange,
+  'custom_fields': Color(0xFF558B2F),
+  'settings': Colors.grey,
+};
 
 /// The More screen now reads its own tile list from the tenant's
 /// /more-menu-items config -- enable/disable, reorder, rename, re-icon,
@@ -155,47 +180,138 @@ class _MoreScreenState extends State<MoreScreen> {
           ),
         ],
       ),
-      body: ListView(
-        children: [
-          ...visibleItems.map((item) {
-            final key = item['item_key'] as String;
-            final def = kMoreMenuDefaults[key];
-            final isCustom = item['is_custom'] == true;
+      // Colourful card grid -- previously a plain single-colour ListTile
+      // list, which read as noticeably flatter/less premium than the
+      // Lead Detail screen's Modules grid right next to it in the same
+      // app. Now built on the exact same tile-card visual language
+      // (tinted/gradient/glow/glass background + colour-matched icon)
+      // so every "grid of destinations" screen in the app looks like
+      // one consistent, premium design system rather than two.
+      body: GridView.count(
+        padding: const EdgeInsets.all(14),
+        crossAxisCount: 3,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        childAspectRatio: 0.92,
+        children: visibleItems.map((item) {
+          final key = item['item_key'] as String;
+          final def = kMoreMenuDefaults[key];
+          final isCustom = item['is_custom'] == true;
 
-            final label = item['custom_label'] ?? def?.label ?? key;
-            final subtitle = def?.subtitle ?? '';
-            final iconKey = item['icon_override'] ?? def?.icon ?? 'star';
-            final icon = kMoreMenuIconOptions[iconKey] ?? Icons.star;
-            final colorHex = item['color_override'] as String?;
-            final color = colorHex != null ? _hexToColor(colorHex) : null;
+          final label = item['custom_label'] ?? def?.label ?? key;
+          final iconKey = item['icon_override'] ?? def?.icon ?? 'star';
+          final icon = kMoreMenuIconOptions[iconKey] ?? Icons.star;
+          final colorHex = item['color_override'] as String?;
+          final color = colorHex != null ? _hexToColor(colorHex) : (kMoreMenuDefaultColors[key] ?? Theme.of(context).colorScheme.primary);
+          final gradientHex = item['gradient_override'] as String?;
+          final gradientEnd = gradientHex != null ? _hexToColor(gradientHex) : null;
+          final styleVariant = item['style_variant'] as String? ?? 'flat';
 
-            return ListTile(
-              leading: styledIconBadge(
-                icon: icon,
-                color: color ?? Theme.of(context).colorScheme.primary,
-                gradientEnd: item['gradient_override'] != null ? _hexToColor(item['gradient_override']) : null,
-                styleVariant: item['style_variant'] ?? 'flat',
-              ),
-              title: Text(label),
-              subtitle: subtitle.isNotEmpty ? Text(subtitle) : null,
-              onTap: () {
-                if (isCustom) {
-                  // Custom items are URL-only for now (matches
-                  // backend validation) -- opening them in-app via a
-                  // simple screen is a later slice; for now this is a
-                  // clearly-scoped no-op rather than a silent failure.
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Custom link items will open in a later update')),
-                  );
-                  return;
-                }
-                if (def != null) {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => def.screenBuilder()));
-                }
-              },
-            );
-          }),
-        ],
+          return _MoreMenuTile(
+            label: label,
+            icon: icon,
+            color: color,
+            gradientEnd: gradientEnd,
+            styleVariant: styleVariant,
+            onTap: () {
+              if (isCustom) {
+                // Custom items are URL-only for now (matches backend
+                // validation) -- opening them in-app via a simple
+                // screen is a later slice; for now this is a
+                // clearly-scoped no-op rather than a silent failure.
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Custom link items will open in a later update')),
+                );
+                return;
+              }
+              if (def != null) {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => def.screenBuilder()));
+              }
+            },
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+/// A single More-menu destination tile -- tinted/gradient/glow/glass
+/// card background (per the item's style_variant) with a centred icon
+/// and label. Mirrors lead_detail_screen.dart's private _navTile/
+/// _tileDecoration pattern exactly, so both grids share one visual
+/// language; kept as its own widget here since that one is private to
+/// _LeadDetailScreenState.
+class _MoreMenuTile extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final Color? gradientEnd;
+  final String styleVariant;
+  final VoidCallback onTap;
+
+  const _MoreMenuTile({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.gradientEnd,
+    required this.styleVariant,
+    required this.onTap,
+  });
+
+  BoxDecoration _decoration(BorderRadius radius) {
+    switch (styleVariant) {
+      case 'gradient_badge':
+        return BoxDecoration(
+          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [color, gradientEnd ?? color.withValues(alpha: 0.6)]),
+          borderRadius: radius,
+          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4))],
+        );
+      case 'glow':
+        return BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: radius,
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.45), blurRadius: 14, spreadRadius: 1)],
+        );
+      case 'glass':
+        return BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.18),
+          borderRadius: radius,
+          border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+        );
+      default:
+        return BoxDecoration(
+          color: color.withValues(alpha: 0.09),
+          borderRadius: radius,
+          border: Border.all(color: color.withValues(alpha: 0.28)),
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(16);
+    final onGradient = styleVariant == 'gradient_badge';
+    return InkWell(
+      onTap: onTap,
+      borderRadius: radius,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        decoration: _decoration(radius),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 26, color: onGradient ? Colors.white : color),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, height: 1.2, color: onGradient ? Colors.white : null),
+            ),
+          ],
+        ),
       ),
     );
   }

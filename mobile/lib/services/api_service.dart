@@ -2161,6 +2161,66 @@ class ApiService {
     return data.cast<Map<String, dynamic>>();
   }
 
+  // ---------- Dashboard Customization ----------
+
+  Future<List<Map<String, dynamic>>> getDashboardSections() async {
+    final res = await http.get(Uri.parse('$baseUrl/dashboard-sections'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> updateDashboardSection(String sectionKey, Map<String, dynamic> updates) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/dashboard-sections/$sectionKey'),
+      headers: _headers,
+      body: jsonEncode(updates),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body);
+  }
+
+  Future<List<Map<String, dynamic>>> reorderDashboardSections(List<String> order) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/dashboard-sections/reorder'),
+      headers: _headers,
+      body: jsonEncode({'order': order}),
+    );
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  // ---------- Leads List Customization ----------
+
+  Future<List<Map<String, dynamic>>> getLeadListFields() async {
+    final res = await http.get(Uri.parse('$baseUrl/lead-list-fields'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> updateLeadListField(String fieldKey, Map<String, dynamic> updates) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/lead-list-fields/$fieldKey'),
+      headers: _headers,
+      body: jsonEncode(updates),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body);
+  }
+
+  Future<List<Map<String, dynamic>>> reorderLeadListFields(List<String> order) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/lead-list-fields/reorder'),
+      headers: _headers,
+      body: jsonEncode({'order': order}),
+    );
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
   // ---------- Share Targets ----------
   Future<List<Map<String, dynamic>>> getShareTargets() async {
     final res = await http.get(Uri.parse('$baseUrl/share-targets'), headers: _headers);

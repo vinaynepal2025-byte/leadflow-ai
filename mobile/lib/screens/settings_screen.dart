@@ -4,8 +4,9 @@ import 'emoji_generator_screen.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 import 'customize_appearance_screen.dart';
+import 'customize_dashboard_screen.dart';
 import 'customize_lead_detail_screen.dart';
-import 'customize_share_targets_screen.dart';
+import 'customize_leads_list_screen.dart';
 import 'customize_share_targets_screen.dart';
 import 'flyer_studio/logo_library_screen.dart';
 
@@ -115,6 +116,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: const Text('Colors, fonts, corners, dark mode, glass effect'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeAppearanceScreen())),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.space_dashboard_outlined),
+              title: const Text('Customize Dashboard'),
+              subtitle: const Text('Show, hide, reorder, and recolour your Dashboard widgets'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeDashboardScreen())),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.view_list_outlined),
+              title: const Text('Customize Leads List'),
+              subtitle: const Text('Show, hide, and reorder the fields on every lead row'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeLeadsListScreen())),
             ),
           ),
           const SizedBox(height: 8),
