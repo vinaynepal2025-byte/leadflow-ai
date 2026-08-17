@@ -1860,8 +1860,9 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   /// shapeColor, and an SVG element's recolour tint (turning svgRecolor on
   /// if it wasn't already, since an un-recoloured multi-colour SVG can't
   /// meaningfully participate in a one-colour monochrome variant).
-  /// Images/logos are left untouched -- there's no single "colour" to
-  /// force on a photo.
+  /// Images/logos/QR codes are left untouched -- there's no single
+  /// "colour" to force on a photo, and forcing a QR's colours here would
+  /// silently desync it from the fg/bg it was actually generated with.
   List<FlyerElement> _recolorAllElements(List<FlyerElement> source, String hex) {
     return source.map((e) {
       final copy = e.clone();
@@ -1879,6 +1880,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           break;
         case FlyerElementType.image:
         case FlyerElementType.logo:
+        case FlyerElementType.qrcode:
           break;
       }
       return copy;
@@ -2217,6 +2219,9 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               onDoubleTap: () {
                                 if (el.type == FlyerElementType.text) {
                                   _beginInlineEdit(el);
+                                } else if (el.type == FlyerElementType.qrcode) {
+                                  _selectElement(el.id);
+                                  _editQrCodeData(el);
                                 } else {
                                   _selectElement(el.id);
                                   _replaceElementImage(el);
@@ -2517,6 +2522,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _toolbarButton(Icons.rectangle, 'Shape', _addShapeElement, appearance),
               _toolbarButton(Icons.emoji_symbols_outlined, 'Icon', _openIconPicker, appearance),
               _toolbarButton(Icons.polyline, 'SVG', _importSvgElement, appearance),
+              _toolbarButton(Icons.qr_code, 'QR Code', _addQrCodeElement, appearance),
               _toolbarButton(Icons.perm_media_outlined, 'Assets', _openAssetLibrary, appearance),
               _toolbarButton(
                   Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
@@ -2690,6 +2696,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                     if (el.type == FlyerElementType.shape) ..._shapeControls(el),
                     if (el.type == FlyerElementType.icon) ..._iconControls(el),
                     if (el.type == FlyerElementType.svg) ..._svgControls(el),
+                    if (el.type == FlyerElementType.qrcode) ..._qrCodeControls(el),
                   ],
                 ),
               ),
@@ -3276,6 +3283,169 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     ];
   }
 
+  // Canva-parity Phase G -- a QR code element renders through the same
+  // image codepath as a photo/logo (see FlyerCanvasElementWidget), but its
+  // controls edit the encoded data + colours and regenerate the PNG
+  // server-side rather than letting the user pick a replacement photo.
+  List<Widget> _qrCodeControls(FlyerElement el) {
+    return [
+      Row(
+        children: [
+          TextButton.icon(
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: const Text('Edit QR data'),
+            onPressed: () => _editQrCodeData(el),
+          ),
+          const Spacer(),
+          IconButton(
+            icon: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: flyerHexToColor(el.color),
+                border: Border.all(color: Colors.grey.shade400),
+                shape: BoxShape.circle,
+              ),
+            ),
+            tooltip: 'Foreground colour',
+            onPressed: () async {
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(
+                    initial: flyerHexToColor(el.color), title: 'QR Foreground'),
+              );
+              if (picked == null) return;
+              setState(() => el.color = flyerColorToHex(picked));
+              await _regenerateQrCode(el);
+            },
+          ),
+          IconButton(
+            icon: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: flyerHexToColor(el.backgroundColor ?? '#FFFFFF'),
+                border: Border.all(color: Colors.grey.shade400),
+                shape: BoxShape.circle,
+              ),
+            ),
+            tooltip: 'Background colour',
+            onPressed: () async {
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(
+                    initial: flyerHexToColor(el.backgroundColor ?? '#FFFFFF'),
+                    title: 'QR Background'),
+              );
+              if (picked == null) return;
+              setState(() => el.backgroundColor = flyerColorToHex(picked));
+              await _regenerateQrCode(el);
+            },
+          ),
+        ],
+      ),
+      _sliderRow(
+        icon: Icons.rounded_corner,
+        value: el.cornerRadius.clamp(0.0, 60.0),
+        min: 0,
+        max: 60,
+        onChanged: (v) {
+          setState(() => el.cornerRadius = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.opacity,
+        value: el.opacity.clamp(0.1, 1.0),
+        min: 0.1,
+        max: 1.0,
+        onChanged: (v) {
+          setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+    ];
+  }
+
+  Future<String?> _promptQrData({String initial = ''}) {
+    final controller = TextEditingController(text: initial);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('QR code data'),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'URL or text to encode'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Generate'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _addQrCodeElement() async {
+    if (_projectId == null) return;
+    final data = await _promptQrData();
+    if (data == null || data.isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      final result = await _api.generateFlyerQrCode(_projectId!, data);
+      _addElement(FlyerElement(
+        id: _newId(),
+        type: FlyerElementType.qrcode,
+        x: _canvasWidth * 0.3,
+        y: _canvasHeight * 0.3,
+        width: _canvasWidth * 0.4,
+        height: _canvasWidth * 0.4,
+        text: data,
+        url: result['image_url']?.toString(),
+        fit: 'contain',
+        color: '#000000',
+        backgroundColor: '#FFFFFF',
+        zIndex: _nextZIndex(),
+      ));
+    } catch (e) {
+      _showSnack('QR code generation failed: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _editQrCodeData(FlyerElement el) async {
+    if (_projectId == null) return;
+    final data = await _promptQrData(initial: el.text ?? '');
+    if (data == null || data.isEmpty) return;
+    _pushUndo();
+    setState(() => el.text = data);
+    await _regenerateQrCode(el);
+  }
+
+  Future<void> _regenerateQrCode(FlyerElement el) async {
+    if (_projectId == null || el.text == null || el.text!.isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      final result = await _api.generateFlyerQrCode(
+        _projectId!,
+        el.text!,
+        fg: el.color,
+        bg: el.backgroundColor,
+      );
+      setState(() => el.url = result['image_url']?.toString());
+      _markDirty();
+    } catch (e) {
+      _showSnack('QR code generation failed: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Widget _sliderRow({
     required IconData icon,
     required double value,
@@ -3342,6 +3512,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         break;
       case FlyerElementType.image:
       case FlyerElementType.logo:
+      case FlyerElementType.qrcode:
         content = (el.url != null && el.url!.isNotEmpty)
             ? Image.network(el.url!,
                 fit: BoxFit.cover,
@@ -3564,6 +3735,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         return Icons.emoji_symbols_outlined;
       case FlyerElementType.svg:
         return Icons.polyline;
+      case FlyerElementType.qrcode:
+        return Icons.qr_code;
     }
   }
 

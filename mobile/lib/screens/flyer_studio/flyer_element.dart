@@ -11,7 +11,7 @@
 
 import 'package:flutter/material.dart' show IconData, Icons;
 
-enum FlyerElementType { text, image, logo, shape, icon, svg }
+enum FlyerElementType { text, image, logo, shape, icon, svg, qrcode }
 
 FlyerElementType flyerElementTypeFromString(String? s) {
   switch (s) {
@@ -25,6 +25,8 @@ FlyerElementType flyerElementTypeFromString(String? s) {
       return FlyerElementType.icon;
     case 'svg':
       return FlyerElementType.svg;
+    case 'qrcode':
+      return FlyerElementType.qrcode;
     case 'text':
     default:
       return FlyerElementType.text;
@@ -43,6 +45,8 @@ String flyerElementTypeToString(FlyerElementType t) {
       return 'icon';
     case FlyerElementType.svg:
       return 'svg';
+    case FlyerElementType.qrcode:
+      return 'qrcode';
     case FlyerElementType.text:
       return 'text';
   }
@@ -380,6 +384,17 @@ class FlyerElement {
       map['brightness'] = brightness;
       map['contrast'] = contrast;
       map['saturation'] = saturation;
+    } else if (type == FlyerElementType.qrcode) {
+      // Renders through the same image codepath as image/logo (url/fit/
+      // cornerRadius), but also keeps the raw encoded text and the
+      // fg/bg colours used to generate it, so "Edit QR data" can
+      // regenerate the PNG without the user retyping anything.
+      map['text'] = text ?? '';
+      map['url'] = url ?? '';
+      map['fit'] = 'contain';
+      map['cornerRadius'] = cornerRadius;
+      map['color'] = color;
+      if (backgroundColor != null) map['backgroundColor'] = backgroundColor;
     } else if (type == FlyerElementType.shape) {
       map['shapeColor'] = shapeColor;
       map['shapeKind'] = shapeKind;

@@ -900,6 +900,7 @@ class FlyerCanvasElementWidget extends StatelessWidget {
         );
       case FlyerElementType.image:
       case FlyerElementType.logo:
+      case FlyerElementType.qrcode:
         if (element.url == null || element.url!.isEmpty) {
           if (exporting) return const SizedBox.shrink();
           return Container(
@@ -916,14 +917,19 @@ class FlyerCanvasElementWidget extends StatelessWidget {
                 Icon(
                   element.type == FlyerElementType.logo
                       ? Icons.workspace_premium
-                      : Icons.image,
+                      : element.type == FlyerElementType.qrcode
+                          ? Icons.qr_code
+                          : Icons.image,
                   color: Colors.grey,
                 ),
                 if (h > 64)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 4),
-                    child: Text('Tap, then Replace',
-                        style: TextStyle(fontSize: 9, color: Colors.grey)),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                        element.type == FlyerElementType.qrcode
+                            ? 'Tap, then Edit QR data'
+                            : 'Tap, then Replace',
+                        style: const TextStyle(fontSize: 9, color: Colors.grey)),
                   ),
               ],
             ),

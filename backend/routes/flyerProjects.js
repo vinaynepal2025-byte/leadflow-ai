@@ -1,10 +1,13 @@
 const express = require('express');
 const multer = require('multer');
 const { randomUUID } = require('crypto');
+const QRCode = require('qrcode');
 const db = require('../db');
 const { uploadFile, getSignedUrl } = require('../services/supabaseStorage');
 const { generateJson } = require('../services/aiProvider');
 const { buildWhatsAppLink } = require('../services/phone');
+
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -195,6 +198,49 @@ router.post('/:id/element-image', upload.single('file'), async (req, res) => {
   const storagePath = `flyer-elements/${tid}/${req.params.id}-${randomUUID()}-${req.file.originalname}`;
   try {
     await uploadFile(req.file.buffer, storagePath, req.file.mimetype);
+  } catch (err) {
+    return res.status(502).json({ error: `Upload failed: ${err.message}` });
+  }
+
+  const imageUrl = await getSignedUrl(storagePath, 3600);
+  res.status(201).json({ storage_path: storagePath, image_url: imageUrl });
+});
+
+// POST /flyer-projects/:id/qrcode  { data, fg?, bg? }
+// A QR code as a real, scannable, resizable canvas element (Canva-parity
+// Phase G) -- generated server-side with the `qrcode` package (already a
+// backend dependency, used for tracked-link QR codes in routes/social.js),
+// uploaded to storage, and returned the same shape as element-image above
+// so the client adds it to canvas_json exactly like any other image
+// element. Re-called whenever the user edits the encoded text/colours to
+// regenerate the PNG in place.
+router.post('/:id/qrcode', async (req, res) => {
+  const tid = tenantId(req);
+  const existing = await db.prepare('SELECT id FROM flyer_projects WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Flyer project not found' });
+
+  const data = (req.body.data || '').toString().trim();
+  if (!data) return res.status(400).json({ error: 'data is required' });
+  if (data.length > 2000) return res.status(400).json({ error: 'data is too long for a scannable QR code' });
+
+  const fg = HEX_COLOR_RE.test(req.body.fg) ? req.body.fg : '#000000';
+  const bg = HEX_COLOR_RE.test(req.body.bg) ? req.body.bg : '#FFFFFF';
+
+  let png;
+  try {
+    png = await QRCode.toBuffer(data, {
+      width: 600,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: fg, light: bg },
+    });
+  } catch (err) {
+    return res.status(400).json({ error: `Could not generate QR code: ${err.message}` });
+  }
+
+  const storagePath = `flyer-elements/${tid}/${req.params.id}-qr-${randomUUID()}.png`;
+  try {
+    await uploadFile(png, storagePath, 'image/png');
   } catch (err) {
     return res.status(502).json({ error: `Upload failed: ${err.message}` });
   }

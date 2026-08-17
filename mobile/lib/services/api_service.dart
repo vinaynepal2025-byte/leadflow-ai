@@ -1992,6 +1992,25 @@ class ApiService {
     return jsonDecode(body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> generateFlyerQrCode(
+    String projectId,
+    String data, {
+    String? fg,
+    String? bg,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/flyer-projects/$projectId/qrcode'),
+      headers: _headers,
+      body: jsonEncode({
+        'data': data,
+        if (fg != null) 'fg': fg,
+        if (bg != null) 'bg': bg,
+      }),
+    );
+    if (res.statusCode != 201) throw Exception('QR code generation failed: ${res.body}');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<void> uploadFlyerRender(String projectId, List<int> pngBytes) async {
     final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/render');
     final request = http.MultipartRequest('POST', uri)

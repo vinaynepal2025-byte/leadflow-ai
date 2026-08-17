@@ -43,7 +43,7 @@ Bar/line/pie chart elements built from a small data table the user types in.
 ## Phase G — QR code element
 
 A QR code as a placeable, resizable canvas element (encoding a URL/lead-capture-form link, brand social link, etc.).
-**Status: 📋** — the backend's `qrcode` npm package is already a dependency (used elsewhere in the app for lead capture); exposing it as a Flyer Studio element is mostly wiring, not new capability.
+**Status: ✅ shipped** — `POST /flyer-projects/:id/qrcode` generates a real, scannable PNG server-side with the `qrcode` package (same one already used for tracked-link QR codes in `routes/social.js`), uploaded to storage like any other element image. The new `FlyerElementType.qrcode` renders through the existing image codepath (url/fit/cornerRadius, even photo-adjustment filters all work on it for free) rather than a new renderer, and has its own controls: "Edit QR data" to change the encoded text, plus foreground/background colour pickers that regenerate the PNG in place.
 
 ## Phase H — Multi-page designs
 
@@ -92,7 +92,7 @@ Canva's AI suite: generate a whole design from a prompt, AI copywriting, text-to
 | D — Frames & grids | 📋 |
 | E — Draw tool | 📋 |
 | F — Charts | 📋 |
-| G — QR code element | 📋 |
+| G — QR code element | ✅ shipped |
 | H — Multi-page designs | 📋 |
 | I — Magic Resize | ✅ baseline |
 | J — Background remover | ⚠️ classical-CV version buildable; AI-quality needs a paid API |
