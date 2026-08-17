@@ -466,7 +466,10 @@ class _LeadsListScreenState extends State<LeadsListScreen> {
       final key = f['field_key'] as String;
       if (f['enabled'] == false || !isLeadListBadge(key)) continue;
       if (key == 'badge_stage') {
-        widgets.add(StageChip(stage: lead.stage));
+        widgets.add(StageChip(
+          stage: lead.stage,
+          styleJson: (f['style_json'] as Map?)?.cast<String, dynamic>(),
+        ));
         widgets.add(const SizedBox(height: 4));
       } else if (key == 'badge_score' && _scores[lead.id] != null) {
         widgets.add(ScoreBadgeCompact(

@@ -6,6 +6,7 @@
 // badges, not standalone colourable widgets.
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../widgets/stage_chip.dart';
 
 const Map<String, String> kLeadListFieldLabels = {
   'field_phone': 'Phone number',
@@ -97,6 +98,100 @@ class _CustomizeLeadsListScreenState extends State<CustomizeLeadsListScreen> {
     }
   }
 
+  /// Style editor for the Stage chip specifically -- the only "boxed"
+  /// element among these 7 fields (the rest are plain subtitle text or,
+  /// for the Score badge, unboxed icon+number). Deliberately doesn't
+  /// offer a colour override: StageChip's colour is stage-coded
+  /// information, not decoration, so only the structural controls
+  /// (corner radius/border/glow/blur/size) are exposed, same reasoning
+  /// as the widget itself.
+  Future<void> _editStageChipStyle(Map<String, dynamic> field) async {
+    final sj = Map<String, dynamic>.from((field['style_json'] as Map?) ?? {});
+    double cornerRadius = ((sj['cornerRadius'] as num?)?.toDouble() ?? 20).clamp(0, 40);
+    double borderWidth = ((sj['borderWidth'] as num?)?.toDouble() ?? 1.0).clamp(0, 6);
+    double glowIntensity = ((sj['glowIntensity'] as num?)?.toDouble() ?? 0).clamp(0, 1);
+    double blurAmount = ((sj['blurAmount'] as num?)?.toDouble() ?? 0).clamp(0, 12);
+    double contentScale = ((sj['contentScale'] as num?)?.toDouble() ?? 1.0).clamp(0.8, 1.4);
+
+    Widget sliderRow(String label, double value, double min, double max, ValueChanged<double> onChanged,
+        {String Function(double)? format}) {
+      return Row(
+        children: [
+          SizedBox(width: 70, child: Text(label, style: const TextStyle(fontSize: 12))),
+          Expanded(child: Slider(value: value, min: min, max: max, onChanged: onChanged)),
+          SizedBox(
+            width: 36,
+            child: Text(format != null ? format(value) : value.toStringAsFixed(1),
+                style: const TextStyle(fontSize: 11, color: Colors.grey), textAlign: TextAlign.right),
+          ),
+        ],
+      );
+    }
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(ctx).viewInsets.bottom + 16),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Stage chip style', style: Theme.of(ctx).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                Center(
+                  child: StageChip(
+                    stage: 'Enrolled',
+                    styleJson: {
+                      'cornerRadius': cornerRadius,
+                      'borderWidth': borderWidth,
+                      'glowIntensity': glowIntensity,
+                      'blurAmount': blurAmount,
+                      'contentScale': contentScale,
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+                sliderRow('Sharpness', cornerRadius, 0, 40, (v) => setSheetState(() => cornerRadius = v)),
+                sliderRow('Edge width', borderWidth, 0, 6, (v) => setSheetState(() => borderWidth = v)),
+                sliderRow('Glow', glowIntensity, 0, 1, (v) => setSheetState(() => glowIntensity = v),
+                    format: (v) => '${(v * 100).round()}%'),
+                sliderRow('Blur', blurAmount, 0, 12, (v) => setSheetState(() => blurAmount = v)),
+                sliderRow('Size', contentScale, 0.8, 1.4, (v) => setSheetState(() => contentScale = v),
+                    format: (v) => '${(v * 100).round()}%'),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel'))),
+                    const SizedBox(width: 12),
+                    Expanded(child: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Apply'))),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (saved != true) return;
+
+    final newStyle = {
+      'cornerRadius': cornerRadius,
+      'borderWidth': borderWidth,
+      'glowIntensity': glowIntensity,
+      'blurAmount': blurAmount,
+      'contentScale': contentScale,
+    };
+    setState(() => field['style_json'] = newStyle);
+    try {
+      await _api.updateLeadListField(field['field_key'], {'style_json': newStyle});
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save style: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -150,6 +245,12 @@ class _CustomizeLeadsListScreenState extends State<CustomizeLeadsListScreen> {
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
+                                if (key == 'badge_stage')
+                                  IconButton(
+                                    icon: const Icon(Icons.brush_outlined, size: 20),
+                                    tooltip: 'Style this chip',
+                                    onPressed: () => _editStageChipStyle(field),
+                                  ),
                                 IconButton(
                                   icon: const Icon(Icons.keyboard_arrow_up, size: 20),
                                   onPressed: index == 0 ? null : () => _move(index, -1),
