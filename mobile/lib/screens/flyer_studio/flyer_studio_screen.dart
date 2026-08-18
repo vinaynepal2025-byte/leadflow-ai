@@ -647,14 +647,20 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     _beginInlineEdit(el);
   }
 
-  void _addShapeElement() {
+  void _addShapeElement([String kind = 'rect']) {
+    // A line/arrow reads better wide and short; everything else (rect/
+    // circle/triangle/star) reads better closer to square -- matches
+    // what each shape actually looks like at the old fixed size rather
+    // than forcing all 6 kinds into one aspect ratio.
+    final wide = kind == 'line' || kind == 'arrow';
     _addElement(FlyerElement(
       id: _newId(),
       type: FlyerElementType.shape,
-      x: _canvasWidth * 0.15,
-      y: _canvasHeight * 0.4,
-      width: _canvasWidth * 0.7,
-      height: _canvasHeight * 0.12,
+      x: _canvasWidth * (wide ? 0.15 : 0.3),
+      y: _canvasHeight * (wide ? 0.4 : 0.3),
+      width: _canvasWidth * (wide ? 0.7 : 0.4),
+      height: wide ? _canvasHeight * 0.12 : _canvasWidth * 0.4,
+      shapeKind: kind,
       shapeColor: '#1B2A4A',
       zIndex: _nextZIndex(),
     ));
@@ -853,23 +859,39 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     );
   }
 
-  /// The Asset Library -- a tenant-wide pool of saved SVGs/images/logos
-  /// that any project can pull from, instead of every project re-picking
-  /// or re-generating the same graphic (Phase 1 audit: "no generic asset
-  /// library concept exists"). Always inserts a new element; there's no
-  /// [replaceTarget] variant here since the toolbar entry point is the
-  /// only caller and always adds fresh.
-  Future<void> _openAssetLibrary() async {
-    List<Map<String, dynamic>> assets;
-    try {
-      assets = await _api.getTenantAssets();
-    } catch (e) {
-      _showSnack('Could not load assets: $e');
-      return;
+  static IconData _shapePreviewIcon(String kind) {
+    switch (kind) {
+      case 'circle':
+        return Icons.circle_outlined;
+      case 'triangle':
+        return Icons.change_history;
+      case 'line':
+        return Icons.horizontal_rule;
+      case 'arrow':
+        return Icons.arrow_forward;
+      case 'star':
+        return Icons.star_border;
+      case 'rect':
+      default:
+        return Icons.crop_square;
     }
-    if (!mounted) return;
+  }
 
-    String? kindFilter;
+  // Canva-parity Phase A -- one searchable "Elements" panel replacing the
+  // 4 separate Shape/Icon/SVG/Assets toolbar entry points, tabbed rather
+  // than 4 different bottom sheets a user had to already know to look
+  // for individually. Each tab reuses the exact same underlying add/
+  // insert logic those 4 buttons always called (_applyIconChoice/
+  // _addShapeElement/_importSvgElement/_insertAsset) -- this is a UI
+  // consolidation, not a rewrite of any of them, so none of their
+  // existing behaviour (AI icon search's replaceTarget variant, SVG
+  // sanitization, asset upload/delete) changes.
+  Future<void> _openElementsPanel() async {
+    var search = '';
+    List<Map<String, dynamic>> assets = [];
+    var assetsLoading = true;
+    String? assetsError;
+    Timer? debounce;
 
     await showModalBottomSheet(
       context: context,
@@ -878,140 +900,250 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         borderRadius: BorderRadius.vertical(
             top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
       ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) {
-          final items = kindFilter == null
-              ? assets
-              : assets.where((a) => a['kind'] == kindFilter).toList();
-          return Padding(
-            padding: EdgeInsets.only(
-              left: 16, right: 16, top: 16,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-            ),
-            child: SizedBox(
-              height: MediaQuery.of(ctx).size.height * 0.7,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _sheetDragHandle(),
-                  Row(
-                    children: [
-                      Text('Asset Library', style: Theme.of(ctx).textTheme.titleMedium),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.add_photo_alternate_outlined),
-                        tooltip: 'Upload image',
-                        onPressed: () async {
-                          final picked = await _imagePicker.pickImage(
-                              source: ImageSource.gallery, imageQuality: 90);
-                          if (picked == null) return;
-                          try {
-                            final created = await _api.uploadTenantAsset(
-                                filePath: picked.path, kind: 'image');
-                            setSheetState(() => assets = [created, ...assets]);
-                          } catch (e) {
-                            _showSnack('Upload failed: $e');
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
+      builder: (ctx) => DefaultTabController(
+        length: 4,
+        child: StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            Future<void> loadAssets() async {
+              try {
+                final result =
+                    await _api.getTenantAssets(search: search.isEmpty ? null : search);
+                if (!ctx.mounted) return;
+                setSheetState(() {
+                  assets = result;
+                  assetsLoading = false;
+                  assetsError = null;
+                });
+              } catch (e) {
+                if (!ctx.mounted) return;
+                setSheetState(() {
+                  assetsLoading = false;
+                  assetsError = e.toString();
+                });
+              }
+            }
+
+            if (assetsLoading && assetsError == null && assets.isEmpty) {
+              // Kick off the initial load exactly once -- this builder
+              // re-runs on every setSheetState, so this guard (not
+              // initState, since StatefulBuilder has none) is what keeps
+              // it from re-fetching every rebuild.
+              loadAssets();
+            }
+
+            final searchLower = search.toLowerCase();
+            final filteredIcons = kFlyerIconLibrary.entries
+                .where((e) => searchLower.isEmpty || e.key.toLowerCase().contains(searchLower))
+                .toList();
+            final filteredShapes = kFlyerShapeKindLabels.entries
+                .where((e) => searchLower.isEmpty || e.value.toLowerCase().contains(searchLower))
+                .toList();
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16, right: 16, top: 16,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+              ),
+              child: SizedBox(
+                height: MediaQuery.of(ctx).size.height * 0.78,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _sheetDragHandle(),
+                    Row(
                       children: [
-                        _assetKindChip('All', null, kindFilter,
-                            (v) => setSheetState(() => kindFilter = v)),
-                        _assetKindChip('SVG', 'svg', kindFilter,
-                            (v) => setSheetState(() => kindFilter = v)),
-                        _assetKindChip('Images', 'image', kindFilter,
-                            (v) => setSheetState(() => kindFilter = v)),
-                        _assetKindChip('Logos', 'logo', kindFilter,
-                            (v) => setSheetState(() => kindFilter = v)),
-                        _assetKindChip('Icons', 'icon', kindFilter,
-                            (v) => setSheetState(() => kindFilter = v)),
+                        Text('Elements', style: Theme.of(ctx).textTheme.titleMedium),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.add_photo_alternate_outlined),
+                          tooltip: 'Upload image to My Assets',
+                          onPressed: () async {
+                            final picked = await _imagePicker.pickImage(
+                                source: ImageSource.gallery, imageQuality: 90);
+                            if (picked == null) return;
+                            try {
+                              final created = await _api.uploadTenantAsset(
+                                  filePath: picked.path, kind: 'image');
+                              setSheetState(() => assets = [created, ...assets]);
+                            } catch (e) {
+                              _showSnack('Upload failed: $e');
+                            }
+                          },
+                        ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: items.isEmpty
-                        ? Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(24),
-                              child: Text(
-                                'No saved assets yet — save an SVG from its properties panel, or upload an image here.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: Colors.grey.shade600),
-                              ),
-                            ),
-                          )
-                        : GridView.builder(
-                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 4,
-                              mainAxisSpacing: 8,
-                              crossAxisSpacing: 8,
-                            ),
-                            itemCount: items.length,
-                            itemBuilder: (gridCtx, i) {
-                              final asset = items[i];
+                    const SizedBox(height: 10),
+                    TextField(
+                      decoration: const InputDecoration(
+                        hintText: 'Search icons, shapes, assets...',
+                        prefixIcon: Icon(Icons.search, size: 20),
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (v) {
+                        setSheetState(() => search = v);
+                        debounce?.cancel();
+                        debounce = Timer(const Duration(milliseconds: 350), () {
+                          setSheetState(() => assetsLoading = true);
+                          loadAssets();
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    const TabBar(tabs: [
+                      Tab(text: 'Icons'),
+                      Tab(text: 'Shapes'),
+                      Tab(text: 'SVG'),
+                      Tab(text: 'My Assets'),
+                    ]),
+                    Expanded(
+                      child: TabBarView(
+                        children: [
+                          filteredIcons.isEmpty
+                              ? const Center(child: Text('No matching icons'))
+                              : GridView.count(
+                                  crossAxisCount: 6,
+                                  mainAxisSpacing: 8,
+                                  crossAxisSpacing: 8,
+                                  children: filteredIcons.map((e) {
+                                    return InkWell(
+                                      borderRadius: BorderRadius.circular(8),
+                                      onTap: () {
+                                        Navigator.pop(ctx);
+                                        _applyIconChoice(null, e.key);
+                                      },
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.withValues(alpha: 0.08),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Icon(e.value, size: 22),
+                                      ),
+                                    );
+                                  }).toList(),
+                                ),
+                          GridView.count(
+                            crossAxisCount: 3,
+                            mainAxisSpacing: 12,
+                            crossAxisSpacing: 12,
+                            childAspectRatio: 1.3,
+                            children: filteredShapes.map((e) {
                               return InkWell(
                                 borderRadius: BorderRadius.circular(8),
                                 onTap: () {
                                   Navigator.pop(ctx);
-                                  _insertAsset(asset);
+                                  _addShapeElement(e.key);
                                 },
-                                onLongPress: () async {
-                                  final confirm = await showDialog<bool>(
-                                    context: context,
-                                    builder: (dctx) => AlertDialog(
-                                      title: const Text('Remove asset?'),
-                                      content: const Text('This only removes it from your Asset Library.'),
-                                      actions: [
-                                        TextButton(
-                                            onPressed: () => Navigator.pop(dctx, false),
-                                            child: const Text('Cancel')),
-                                        FilledButton(
-                                            onPressed: () => Navigator.pop(dctx, true),
-                                            child: const Text('Remove')),
-                                      ],
-                                    ),
-                                  );
-                                  if (confirm == true) {
-                                    try {
-                                      await _api.deleteTenantAsset(asset['id'].toString());
-                                      setSheetState(
-                                          () => assets = assets.where((a) => a['id'] != asset['id']).toList());
-                                    } catch (e) {
-                                      _showSnack('Could not remove: $e');
-                                    }
-                                  }
-                                },
-                                child: _assetThumbnail(asset),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(_shapePreviewIcon(e.key), size: 26),
+                                      const SizedBox(height: 4),
+                                      Text(e.value, style: const TextStyle(fontSize: 11)),
+                                    ],
+                                  ),
+                                ),
                               );
-                            },
+                            }).toList(),
                           ),
-                  ),
-                ],
+                          Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.polyline, size: 40, color: Colors.grey),
+                                const SizedBox(height: 12),
+                                Text('Import a vector SVG file', style: TextStyle(color: Colors.grey.shade600)),
+                                const SizedBox(height: 12),
+                                FilledButton.icon(
+                                  icon: const Icon(Icons.upload_file),
+                                  label: const Text('Import SVG'),
+                                  onPressed: () {
+                                    Navigator.pop(ctx);
+                                    _importSvgElement();
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                          assetsLoading
+                              ? const Center(child: CircularProgressIndicator())
+                              : assetsError != null
+                                  ? Center(child: Text('Could not load assets: $assetsError'))
+                                  : assets.isEmpty
+                                      ? Center(
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(24),
+                                            child: Text(
+                                              'No saved assets yet — save an SVG from its properties panel, or upload an image from the Asset Library.',
+                                              textAlign: TextAlign.center,
+                                              style: TextStyle(color: Colors.grey.shade600),
+                                            ),
+                                          ),
+                                        )
+                                      : GridView.builder(
+                                          gridDelegate:
+                                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                            crossAxisCount: 4,
+                                            mainAxisSpacing: 8,
+                                            crossAxisSpacing: 8,
+                                          ),
+                                          itemCount: assets.length,
+                                          itemBuilder: (gridCtx, i) {
+                                            final asset = assets[i];
+                                            return InkWell(
+                                              borderRadius: BorderRadius.circular(8),
+                                              onTap: () {
+                                                Navigator.pop(ctx);
+                                                _insertAsset(asset);
+                                              },
+                                              onLongPress: () async {
+                                                final confirm = await showDialog<bool>(
+                                                  context: context,
+                                                  builder: (dctx) => AlertDialog(
+                                                    title: const Text('Remove asset?'),
+                                                    content: const Text(
+                                                        'This only removes it from your Asset Library.'),
+                                                    actions: [
+                                                      TextButton(
+                                                          onPressed: () => Navigator.pop(dctx, false),
+                                                          child: const Text('Cancel')),
+                                                      FilledButton(
+                                                          onPressed: () => Navigator.pop(dctx, true),
+                                                          child: const Text('Remove')),
+                                                    ],
+                                                  ),
+                                                );
+                                                if (confirm == true) {
+                                                  try {
+                                                    await _api.deleteTenantAsset(asset['id'].toString());
+                                                    setSheetState(() => assets =
+                                                        assets.where((a) => a['id'] != asset['id']).toList());
+                                                  } catch (e) {
+                                                    _showSnack('Could not remove: $e');
+                                                  }
+                                                }
+                                              },
+                                              child: _assetThumbnail(asset),
+                                            );
+                                          },
+                                        ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
-  }
-
-  Widget _assetKindChip(
-      String label, String? value, String? current, ValueChanged<String?> onTap) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: ChoiceChip(
-        label: Text(label, style: const TextStyle(fontSize: 12)),
-        selected: current == value,
-        onSelected: (_) => onTap(value),
-      ),
-    );
+    debounce?.cancel();
   }
 
   Widget _assetThumbnail(Map<String, dynamic> asset) {
@@ -2734,14 +2866,16 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _toolbarButton(
                   Icons.add_photo_alternate, 'Photo', _addImageElement, appearance),
               _toolbarButton(Icons.workspace_premium, 'Logo', _addLogoElement, appearance),
-              _toolbarButton(Icons.rectangle, 'Shape', _addShapeElement, appearance),
-              _toolbarButton(Icons.emoji_symbols_outlined, 'Icon', _openIconPicker, appearance),
-              _toolbarButton(Icons.polyline, 'SVG', _importSvgElement, appearance),
+              // Canva-parity Phase A -- Shape/Icon/SVG/Assets used to be
+              // 4 separate toolbar buttons, each opening its own bottom
+              // sheet with no idea the other 3 existed. One "Elements"
+              // button now opens a single searchable, tabbed panel
+              // covering all 4 (see _openElementsPanel).
+              _toolbarButton(Icons.category_outlined, 'Elements', _openElementsPanel, appearance),
               _toolbarButton(Icons.qr_code, 'QR Code', _addQrCodeElement, appearance),
               _toolbarButton(Icons.bar_chart, 'Chart', _addChartElement, appearance),
               _toolbarToggleButton(Icons.gesture, 'Draw', _drawMode, _toggleDrawMode, appearance),
               _toolbarButton(Icons.grid_view_outlined, 'Grid', _addPhotoGrid, appearance),
-              _toolbarButton(Icons.perm_media_outlined, 'Assets', _openAssetLibrary, appearance),
               _toolbarButton(
                   Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
               _toolbarButton(Icons.layers, 'Layers', _showLayersSheet, appearance),

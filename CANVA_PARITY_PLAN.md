@@ -13,7 +13,7 @@ Full-scope roadmap for bringing Flyer Studio/Logo Studio up to Canva's feature b
 ## Phase A — Unified Elements panel
 
 Today: icon picker, SVG import, and Asset Library are three separate entry points. Canva has one searchable "Elements" panel across everything.
-**Status: 📋** — merge the three into one search-driven panel (tabs or filter chips for Icons/Shapes/SVG/My Uploads), reusing `buildCustomizeRegistry`-style unification already proven elsewhere in this app.
+**Status: ✅ shipped** — the 4 separate Shape/Icon/SVG/Assets toolbar buttons are now one "Elements" button opening a single tabbed, searchable panel (`_openElementsPanel`). Each tab reuses the exact same underlying add/insert logic those 4 buttons always called (`_applyIconChoice`/`_addShapeElement`/`_importSvgElement`/`_insertAsset`) -- a UI consolidation, not a rewrite, so none of the existing behaviour changed (AI icon search's replace-in-place variant, SVG sanitization, asset upload/delete-with-confirmation all still work exactly as before). Icons and Shapes filter live client-side as you type; My Assets re-queries the server (debounced) via the same `search` param `getTenantAssets` already supported. The old `_openAssetLibrary`/`_assetKindChip` methods were fully superseded and removed rather than left as dead code.
 
 ## Phase B — Text effects
 
@@ -86,7 +86,7 @@ Canva's AI suite: generate a whole design from a prompt, AI copywriting, text-to
 
 | Phase | Status |
 |---|---|
-| A — Unified Elements panel | 📋 |
+| A — Unified Elements panel | ✅ shipped |
 | B — Text effects (outline/curved) | ✅ outline + curve shipped; hollow/lift not yet |
 | C — Photo adjustments/filters | ✅ brightness/contrast/saturation shipped; duotone not yet |
 | D — Frames & grids | ✅ shipped |
