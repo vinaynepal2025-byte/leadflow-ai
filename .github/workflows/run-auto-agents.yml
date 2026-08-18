@@ -1,0 +1,26 @@
+name: Run Auto-Mode Agents
+
+# Leads Ecosystem redesign, Phase 6 (MANUAL/AUTO mode). Same reasoning
+# and same x-cron-secret pattern as process-scheduled-messages.yml and
+# process-orchestrator-jobs.yml: Render's free tier has no reliable
+# background worker/cron of its own. This scan is a no-op for any tenant
+# that hasn't explicitly set automation_mode to 'auto' in Settings --
+# see backend/services/agentScheduler.js.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call run-auto-agents endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -sf -X POST "https://leadflow-ai-backend-e50r.onrender.com/orchestrator/run-auto-agents" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            --max-time 120 \
+            || echo "Backend may be cold-starting (Render free tier) — will retry next scheduled run"

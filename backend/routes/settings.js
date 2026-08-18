@@ -48,7 +48,16 @@ router.patch('/', async (req, res) => {
   const existing = await db.prepare('SELECT id FROM tenants WHERE id = ?').get(tid);
   if (!existing) return res.status(404).json({ error: 'Tenant not found' });
 
-  const allowed = ['name', 'logo_url', 'theme_color', 'contact_email', 'contact_phone', 'email_reply_to'];
+  // automation_mode: Leads Ecosystem Phase 6 (MANUAL/AUTO toggle). Kept
+  // in this same generic allowed-fields loop as everything else, but
+  // validated separately since it's the one field here with only two
+  // legal values -- see services/agentScheduler.js for what 'auto'
+  // actually turns on.
+  if (req.body.automation_mode !== undefined && !['manual', 'auto'].includes(req.body.automation_mode)) {
+    return res.status(400).json({ error: "automation_mode must be 'manual' or 'auto'" });
+  }
+
+  const allowed = ['name', 'logo_url', 'theme_color', 'contact_email', 'contact_phone', 'email_reply_to', 'automation_mode'];
   const updates = [];
   const values = [];
   for (const field of allowed) {

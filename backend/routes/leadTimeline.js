@@ -65,10 +65,21 @@ router.get('/:id/timeline', async (req, res) => {
 
   const events = [];
 
-  const push = (type, at, title, subtitle, meta) => {
+  // source: MANUAL | AI | AUTOMATION | SYSTEM -- Leads Ecosystem redesign
+  // Phase 6. Defaults to MANUAL for every pre-existing event type below,
+  // since every one of them was created by a human action before this
+  // phase existed; a webhook-created row is the one exception this file
+  // already had enough information to detect (created_by ===
+  // 'system-webhook', see whatsappWebhook.js) and is labeled SYSTEM
+  // instead. The lifecycle-transition source below is the first event
+  // type with a REAL, recorded initiated_by to draw from (Phase 2's
+  // lead_lifecycle_transitions table) -- it's the one the app's own
+  // agents (Phase 5) and future AUTO-mode scheduler (Phase 6) actually
+  // write AI/AUTOMATION rows into.
+  const push = (type, at, title, subtitle, meta, source) => {
     const t = normaliseTime(at);
     if (!t) return;
-    events.push({ type, at: t, title, subtitle: subtitle || null, meta: meta || null });
+    events.push({ type, at: t, title, subtitle: subtitle || null, meta: meta || null, source: source || 'MANUAL' });
   };
 
   // --- Communications (WhatsApp / email / link sends) ---
@@ -79,7 +90,8 @@ router.get('/:id/timeline', async (req, res) => {
     push('communication', r.created_at,
       `${r.direction === 'inbound' ? 'Received' : 'Sent'} · ${r.channel || 'message'}`,
       r.body ? String(r.body).slice(0, 300) : null,
-      { id: r.id, channel: r.channel, direction: r.direction, by: r.created_by });
+      { id: r.id, channel: r.channel, direction: r.direction, by: r.created_by },
+      r.created_by === 'system-webhook' ? 'SYSTEM' : 'MANUAL');
   }
 
   // --- Calls ---
@@ -160,6 +172,22 @@ router.get('/:id/timeline', async (req, res) => {
   )) {
     push('reminder', r.created_at, `Follow-up ${r.status === 'done' ? 'completed' : 'set'}`,
       r.title || null, { id: r.id, due_at: r.due_at, status: r.status });
+  }
+
+  // --- Lifecycle status changes (Phase 2's state machine + Phase 5's
+  // agents + Phase 6's AUTO-mode scheduler all write here via
+  // lead.update_lifecycle_status) -- the first event type in this feed
+  // with a real, recorded initiated_by to source from.
+  const SOURCE_BY_INITIATOR = { manual: 'MANUAL', ai: 'AI', automation: 'AUTOMATION', system: 'SYSTEM' };
+  for (const r of await safeQuery(
+    'SELECT id, from_status, to_status, initiated_by, reason, created_at FROM lead_lifecycle_transitions WHERE tenant_id = ? AND lead_id = ? ORDER BY created_at DESC LIMIT 100',
+    [tid, leadId],
+  )) {
+    push('lifecycle_change', r.created_at,
+      `Status: ${r.from_status} → ${r.to_status}`,
+      r.reason ? String(r.reason).slice(0, 300) : null,
+      { id: r.id, from_status: r.from_status, to_status: r.to_status },
+      SOURCE_BY_INITIATOR[r.initiated_by] || 'MANUAL');
   }
 
   // --- The lead itself ---

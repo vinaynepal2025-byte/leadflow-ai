@@ -110,6 +110,7 @@ const PUBLIC_PREFIXES = [
   '/whatsapp/process-scheduled',
   '/lead-ads/webhook',
   '/orchestrator/process-due-jobs',
+  '/orchestrator/run-auto-agents',
   '/s/',
 ];
 

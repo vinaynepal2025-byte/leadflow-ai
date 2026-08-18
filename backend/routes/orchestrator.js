@@ -6,6 +6,7 @@
 const express = require('express');
 const db = require('../db');
 const { processDueJobs, approveJob, retryDeadLetterJob } = require('../services/orchestrator');
+const { runAutoModeAgents } = require('../services/agentScheduler');
 
 const router = express.Router();
 
@@ -71,6 +72,20 @@ router.post('/process-due-jobs', async (req, res) => {
   }
   const limit = Number(req.query.limit) || 20;
   const result = await processDueJobs(limit);
+  res.json(result);
+});
+
+// POST /orchestrator/run-auto-agents — external cron trigger for
+// Phase 6's AUTO-mode scheduler (services/agentScheduler.js). Same
+// x-cron-secret pattern as /orchestrator/process-due-jobs and
+// /whatsapp/process-scheduled. A no-op in practice for any tenant that
+// hasn't explicitly flipped automation_mode to 'auto' in Settings.
+router.post('/run-auto-agents', async (req, res) => {
+  const expectedSecret = process.env.CRON_SECRET;
+  if (expectedSecret && req.header('x-cron-secret') !== expectedSecret) {
+    return res.status(401).json({ error: 'Invalid or missing cron secret' });
+  }
+  const result = await runAutoModeAgents();
   res.json(result);
 });
 
