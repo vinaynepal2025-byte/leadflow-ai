@@ -48,6 +48,7 @@ const leadDetailSectionsRouter = require('./routes/leadDetailSections');
 const dashboardSectionsRouter = require('./routes/dashboardSections');
 const leadListFieldsRouter = require('./routes/leadListFields');
 const leadNotesRouter = require('./routes/leadNotes');
+const leadLifecycleRouter = require('./routes/leadLifecycle');
 const db = require('./db');
 
 const app = express();
@@ -161,6 +162,7 @@ app.use('/flyer-projects', require('./routes/flyerProjects'));
 app.use('/share-targets', require('./routes/shareTargets'));
 app.use('/call-prep', require('./routes/callPrep'));
 app.use('/leads', require('./routes/leadTimeline'));
+app.use('/leads', leadLifecycleRouter);
 app.use('/lead360', require('./routes/lead360'));
 
 const PORT = process.env.PORT || 3000;

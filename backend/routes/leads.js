@@ -71,10 +71,13 @@ router.get('/trash', async (req, res) => {
 // this is the single choke point that guarantees that.
 router.get('/', async (req, res) => {
   const tid = tenantId(req);
-  const { stage, has_parent } = req.query;
+  const { stage, has_parent, lifecycle_status } = req.query;
   let rows;
   if (has_parent === 'true') {
     rows = await db.prepare("SELECT * FROM leads WHERE tenant_id = ? AND deleted_at IS NULL AND parent_name IS NOT NULL ORDER BY created_at DESC").all(tid);
+  } else if (lifecycle_status) {
+    rows = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND deleted_at IS NULL AND lifecycle_status = ? ORDER BY created_at DESC')
+      .all(tid, lifecycle_status);
   } else if (stage) {
     rows = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND deleted_at IS NULL AND stage = ? ORDER BY created_at DESC')
       .all(tid, stage);
