@@ -120,6 +120,12 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
   bool _lead360Loading = false;
   String? _lead360Error;
 
+  // Lifecycle status (Leads Ecosystem Phase 2 state machine) -- fetched
+  // separately, same non-blocking pattern as Lead 360, since it's a
+  // second round-trip and shouldn't hold up the rest of the screen.
+  Map<String, dynamic>? _lifecycle; // {lifecycle_status, allowed_next}
+  bool _lifecycleLoading = false;
+
   @override
   void initState() {
     super.initState();
@@ -138,6 +144,7 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
       _score = null; // non-critical — screen still works without it
     }
     unawaited(_loadLead360());
+    unawaited(_loadLifecycle());
 
     List<Map<String, dynamic>> sections;
     try {
@@ -173,6 +180,94 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
   Future<void> _changeStage(String newStage) async {
     await _api.updateLeadStage(widget.leadId, newStage);
     _load();
+  }
+
+  Future<void> _loadLifecycle() async {
+    setState(() => _lifecycleLoading = true);
+    try {
+      final result = await _api.getLeadLifecycleStatus(widget.leadId);
+      if (mounted) setState(() => _lifecycle = result);
+    } catch (_) {
+      if (mounted) setState(() => _lifecycle = null); // non-critical -- screen still works without it
+    } finally {
+      if (mounted) setState(() => _lifecycleLoading = false);
+    }
+  }
+
+  Future<void> _pickLifecycleStatus() async {
+    final allowedNext = (_lifecycle?['allowed_next'] as List?)?.cast<String>() ?? [];
+    if (allowedNext.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No further status moves are available from here.')),
+      );
+      return;
+    }
+
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Move lifecycle status to...', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+            ...allowedNext.map((s) => ListTile(
+                  leading: Icon(_lifecycleIcon(s), color: _lifecycleColor(s)),
+                  title: Text(s.replaceAll('_', ' ')),
+                  onTap: () => Navigator.pop(context, s),
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
+
+    final reasonCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Move to ${chosen.replaceAll('_', ' ')}?'),
+        content: TextField(
+          controller: reasonCtrl,
+          decoration: const InputDecoration(labelText: 'Reason (optional)'),
+          maxLines: 2,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Move')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await _api.updateLeadLifecycleStatus(widget.leadId, chosen, reason: reasonCtrl.text.trim());
+      await _loadLifecycle();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not move status: $e')));
+    }
+  }
+
+  static const Map<String, Color> _lifecycleColors = {
+    'NOT_INTERESTED': Colors.grey,
+    'LOST': Colors.redAccent,
+    'DORMANT': Colors.blueGrey,
+    'REACTIVATION': Colors.amber,
+    'ON_HOLD': Colors.orange,
+    'ADMISSION_CONFIRMED': Colors.green,
+    'NEEDS_REVIEW': Colors.deepOrange,
+  };
+  Color _lifecycleColor(String status) => _lifecycleColors[status] ?? Colors.indigo;
+  IconData _lifecycleIcon(String status) {
+    if (status == 'ADMISSION_CONFIRMED') return Icons.emoji_events_outlined;
+    if (status == 'LOST' || status == 'NOT_INTERESTED') return Icons.cancel_outlined;
+    if (status == 'DORMANT') return Icons.bedtime_outlined;
+    if (status == 'REACTIVATION') return Icons.refresh;
+    if (status == 'ON_HOLD') return Icons.pause_circle_outline;
+    return Icons.arrow_forward;
   }
 
   Future<void> _loadLead360() async {
@@ -604,6 +699,45 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 8),
+            if (_lifecycleLoading && _lifecycle == null)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4),
+                child: SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+              )
+            else if (_lifecycle != null)
+              InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: _pickLifecycleStatus,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _lifecycleColor(_lifecycle!['lifecycle_status'].toString()).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(_lifecycleIcon(_lifecycle!['lifecycle_status'].toString()), size: 14, color: _lifecycleColor(_lifecycle!['lifecycle_status'].toString())),
+                            const SizedBox(width: 6),
+                            Text(
+                              _lifecycle!['lifecycle_status'].toString().replaceAll('_', ' '),
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _lifecycleColor(_lifecycle!['lifecycle_status'].toString())),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(Icons.expand_more, size: 16, color: Colors.grey.shade600),
+                    ],
+                  ),
+                ),
+              ),
             const SizedBox(height: 16),
             Lead360Panel(
               data: _lead360,

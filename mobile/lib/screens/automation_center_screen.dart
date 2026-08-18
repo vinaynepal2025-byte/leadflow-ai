@@ -29,10 +29,16 @@ class _AutomationCenterScreenState extends State<AutomationCenterScreen> {
   List<Map<String, dynamic>> _agents = [];
   bool _agentsLoading = true;
 
-  String _jobStatusFilter = 'awaiting_approval';
+  // Defaults to 'pending' rather than 'awaiting_approval' -- every
+  // built-in tool today is LOW/MEDIUM risk (see builtinTools.js), so
+  // requires_approval never becomes true for anything the 10 agents
+  // currently do. Landing on "Needs Approval" first would show "Nothing
+  // here right now" for every tenant, every time, which reads as broken
+  // even though it's technically correct.
+  String _jobStatusFilter = 'pending';
   late Future<List<Map<String, dynamic>>> _jobsFuture;
 
-  static const _jobStatusFilters = ['awaiting_approval', 'pending', 'dead_letter', 'succeeded'];
+  static const _jobStatusFilters = ['pending', 'awaiting_approval', 'dead_letter', 'succeeded'];
   static const _jobStatusLabels = {
     'awaiting_approval': 'Needs Approval',
     'pending': 'Pending',
