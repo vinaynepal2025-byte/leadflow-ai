@@ -255,6 +255,36 @@ class ApiService {
     return Lead.fromJson(jsonDecode(res.body));
   }
 
+  // ---------- Lifecycle Status (Leads Ecosystem Phase 2) ----------
+  // Deliberately separate from stage/pipeline_stages above -- see
+  // backend/services/leadLifecycle.js. Both fields exist on a lead
+  // side-by-side; this is the newer, state-machine-enforced one.
+
+  Future<Map<String, dynamic>> getLeadLifecycleStatus(String leadId) async {
+    final res = await http.get(Uri.parse('$baseUrl/leads/$leadId/lifecycle-status'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> getLeadLifecycleHistory(String leadId) async {
+    final res = await http.get(Uri.parse('$baseUrl/leads/$leadId/lifecycle-history'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  /// Throws with the backend's error message (including allowed_next) if
+  /// toStatus isn't a legal move from the lead's current status.
+  Future<Map<String, dynamic>> updateLeadLifecycleStatus(String leadId, String toStatus, {String? reason}) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/leads/$leadId/lifecycle-status'),
+      headers: _headers,
+      body: jsonEncode({'to_status': toStatus, if (reason != null && reason.isNotEmpty) 'reason': reason}),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   // ---------- Communications ----------
 
   Future<List<Communication>> getCommunications(String leadId) async {

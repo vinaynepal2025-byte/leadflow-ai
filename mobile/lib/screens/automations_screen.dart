@@ -12,7 +12,7 @@ class _AutomationsScreenState extends State<AutomationsScreen> {
   final _api = ApiService();
   late Future<List<Map<String, dynamic>>> _future;
 
-  static const triggers = ['lead.created', 'lead.stage_changed', 'document.rejected'];
+  static const triggers = ['lead.created', 'lead.stage_changed', 'lead.lifecycle_status_changed', 'document.rejected'];
 
   @override
   void initState() {
