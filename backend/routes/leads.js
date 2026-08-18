@@ -115,11 +115,11 @@ router.post('/', async (req, res) => {
   const id = randomUUID();
   await db.prepare(`
     INSERT INTO leads (id, tenant_id, full_name, phone, phone_country_code, email, source, assigned_to, notes, parent_name, parent_phone, parent_relation,
-                       referred_by_lead_id, referrer_name, referrer_type)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       referred_by_lead_id, referrer_name, referrer_type, lifecycle_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, tid, full_name, phone || null, countryCode, email || null, source || null, assigned_to || null, notes || null,
          parent_name || null, parent_phone || null, parent_relation || null,
-         referred_by_lead_id || null, referrer_name || null, referrer_type || null);
+         referred_by_lead_id || null, referrer_name || null, referrer_type || null, 'NEW');
 
   const created = await db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
   await fireEvent('lead.created', { tenant_id: tid, lead_id: id });

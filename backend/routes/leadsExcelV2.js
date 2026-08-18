@@ -166,13 +166,14 @@ router.post('/import/commit', upload.single('file'), async (req, res) => {
 
     const id = randomUUID();
     await db.prepare(`
-      INSERT INTO leads (id, tenant_id, full_name, phone, email, source, notes, stage, parent_name, parent_phone, custom_fields)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO leads (id, tenant_id, full_name, phone, email, source, notes, stage, parent_name, parent_phone, custom_fields, lifecycle_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, tid, record.full_name, record.phone || null, record.email || null,
       record.source || 'Excel Import', record.notes || null, record.stage || 'New',
       record.parent_name || null, record.parent_phone || null,
       Object.keys(record.custom_fields).length > 0 ? JSON.stringify(record.custom_fields) : null,
+      'NEW',
     );
     results.created++;
   }

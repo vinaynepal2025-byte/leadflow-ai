@@ -19,6 +19,7 @@
 
 const db = require('../../db');
 const { computeEngagementTrend } = require('../engagementTrend');
+const { EXIT_STATES, TERMINAL_STATUSES } = require('../leadLifecycle');
 const { safeAiJson, enqueueAgentAction } = require('./agentKit');
 
 const AGENT_NAME = 'follow_up';
@@ -38,8 +39,15 @@ async function analyze(tenantId, leadId) {
     ? Math.floor((Date.now() - new Date(lead.last_contacted_at).getTime()) / 86400000)
     : null;
 
+  // A lead that's NOT_INTERESTED/LOST/DORMANT/ADMISSION_CONFIRMED isn't
+  // "gone quiet and needs a nudge" -- it's closed, one way or the other.
+  // Without this guard, AUTO mode would re-propose "follow up" on a dead
+  // lead every single day forever (Lead Recovery Agent already owns the
+  // deliberate, cooldown-respecting win-back decision for exited leads).
+  const isClosed = EXIT_STATES.has(lead.lifecycle_status) || TERMINAL_STATUSES.has(lead.lifecycle_status);
+
   const isStale = daysSinceContact === null || daysSinceContact >= STALE_DAYS_THRESHOLD;
-  const needsFollowUp = isStale || trend.trend === 'cooling' || trend.trend === 'cold';
+  const needsFollowUp = !isClosed && (isStale || trend.trend === 'cooling' || trend.trend === 'cold');
 
   let suggestedMessage = null;
   if (needsFollowUp) {

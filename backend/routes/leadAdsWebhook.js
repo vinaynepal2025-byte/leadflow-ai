@@ -60,8 +60,8 @@ router.post('/webhook', async (req, res) => {
 
       const id = randomUUID();
       await db.prepare(`
-        INSERT INTO leads (id, tenant_id, full_name, phone, email, source, source_category, stage, notes)
-        VALUES (?, ?, ?, ?, ?, 'Facebook/Instagram Lead Ad', 'lead_ads', 'New', ?)
+        INSERT INTO leads (id, tenant_id, full_name, phone, email, source, source_category, stage, notes, lifecycle_status)
+        VALUES (?, ?, ?, ?, ?, 'Facebook/Instagram Lead Ad', 'lead_ads', 'New', ?, 'NEW')
       `).run(id, tid, fullName, phone, email, JSON.stringify(fields));
 
       await createNotification(tid, {

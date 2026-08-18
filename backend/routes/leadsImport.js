@@ -88,9 +88,9 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     const id = randomUUID();
     await db.prepare(`
-      INSERT INTO leads (id, tenant_id, full_name, phone, email, source, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, tid, fullName, phone, email, source, notes);
+      INSERT INTO leads (id, tenant_id, full_name, phone, email, source, notes, lifecycle_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, tid, fullName, phone, email, source, notes, 'NEW');
     results.created++;
   }
 

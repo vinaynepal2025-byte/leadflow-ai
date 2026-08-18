@@ -18,6 +18,7 @@
 // change lifecycle_status.
 
 const db = require('../../db');
+const { EXIT_STATES, TERMINAL_STATUSES } = require('../leadLifecycle');
 const { enqueueAgentAction } = require('./agentKit');
 
 const AGENT_NAME = 'calling_intelligence';
@@ -77,12 +78,19 @@ async function analyze(tenantId, leadId) {
   // no_answer/busy/switched_off/callback_requested) and that follow-up is
   // now due, no newer call has happened since by definition -- the
   // promised retry never actually took place.
+  // A lead that's NOT_INTERESTED/LOST/DORMANT/ADMISSION_CONFIRMED doesn't
+  // need another call attempt -- it's closed. Without this guard, a
+  // dead lead with a years-old overdue follow_up_at, or one that was
+  // never called before being marked NOT_INTERESTED some other way,
+  // would get "Call X" reminders forever under AUTO mode.
+  const isClosed = EXIT_STATES.has(lead.lifecycle_status) || TERMINAL_STATUSES.has(lead.lifecycle_status);
+
   const mostRecent = calls[0];
   const overdueFollowUp = Boolean(mostRecent?.follow_up_at && new Date(mostRecent.follow_up_at) <= new Date());
   const neverCalled = totalAttempts === 0 && EARLY_FUNNEL_STATUSES.has(lead.lifecycle_status);
   const zeroConnectsAfterSeveralAttempts = totalAttempts >= 3 && connectedCalls.length === 0;
 
-  const needsCallAttempt = Boolean(overdueFollowUp) || neverCalled || zeroConnectsAfterSeveralAttempts;
+  const needsCallAttempt = !isClosed && (Boolean(overdueFollowUp) || neverCalled || zeroConnectsAfterSeveralAttempts);
 
   let recommendedAction = null;
   let situation = 'no_action_needed';

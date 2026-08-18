@@ -21,7 +21,7 @@
 // deliberately stops there.
 
 const db = require('../../db');
-const { isValidTransition } = require('../leadLifecycle');
+const { isValidTransition, NEEDS_REVIEW } = require('../leadLifecycle');
 const { enqueueAgentAction } = require('./agentKit');
 
 const AGENT_NAME = 'admission';
@@ -37,7 +37,15 @@ async function analyze(tenantId, leadId) {
     'SELECT * FROM admission_applications WHERE tenant_id = ? AND lead_id = ? ORDER BY updated_at DESC'
   ).all(tenantId, leadId);
 
-  const currentStatus = lead.lifecycle_status;
+  // A lead created before the lifecycle-status backfill migration ran
+  // (or by any ingestion path that doesn't set it -- see
+  // LEADS_AUTOMATION_AUDIT.md-driven fixes) has NULL here, not
+  // NEEDS_REVIEW. isValidTransition(null, 'OFFER') is always false, so
+  // without this fallback a fresh lead with a real offer on file would
+  // be silently misreported as offer_received_but_status_blocked
+  // instead of getting the recommendation it actually qualifies for --
+  // same fallback every other agent that reads lifecycle_status uses.
+  const currentStatus = lead.lifecycle_status || NEEDS_REVIEW;
   const offerApplications = applications.filter((a) => OFFER_STATUSES.has(a.application_status));
 
   let situation = 'no_action_needed';
