@@ -2948,6 +2948,12 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           scrollDirection: Axis.horizontal,
           child: Row(
             children: [
+              // Grouped into "insert content" / "canvas tools" /
+              // "selection actions" with a thin divider between each --
+              // a flat, undifferentiated row of 15 icons read as generic/
+              // cheap; grouping mirrors how Canva's own toolbar clusters
+              // by purpose, and gives the eye a scan pattern instead of
+              // one long strip.
               _toolbarButton(Icons.text_fields, 'Text', _addTextElement, appearance),
               _toolbarButton(
                   Icons.add_photo_alternate, 'Photo', _addImageElement, appearance),
@@ -2960,6 +2966,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _toolbarButton(Icons.category_outlined, 'Elements', _openElementsPanel, appearance),
               _toolbarButton(Icons.qr_code, 'QR Code', _addQrCodeElement, appearance),
               _toolbarButton(Icons.bar_chart, 'Chart', _addChartElement, appearance),
+              _toolbarDivider(appearance),
               _toolbarToggleButton(Icons.gesture, 'Draw', _drawMode, _toggleDrawMode, appearance),
               _toolbarButton(Icons.grid_view_outlined, 'Grid', _addPhotoGrid, appearance),
               _toolbarButton(
@@ -2967,6 +2974,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _toolbarButton(Icons.layers, 'Layers', _showLayersSheet, appearance),
               _toolbarToggleButton(
                   Icons.select_all, 'Group', _groupSelectMode, _toggleGroupSelectMode, appearance),
+              _toolbarDivider(appearance),
               _toolbarButton(Icons.copy, 'Duplicate',
                   hasSelection ? _duplicateSelected : null, appearance),
               _toolbarButton(Icons.delete_outline, 'Delete',
@@ -2989,28 +2997,80 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
 
   Widget _toolbarToggleButton(IconData icon, String label, bool active, VoidCallback onTap,
       AppearanceSettings appearance) {
-    final color = active ? appearance.primaryColor : null;
+    return _toolbarButtonChrome(
+      icon: icon,
+      label: label,
+      active: active,
+      appearance: appearance,
+      onTap: () {
+        if (appearance.haptics) HapticFeedback.selectionClick();
+        onTap();
+      },
+    );
+  }
+
+  Widget _toolbarButton(
+      IconData icon, String label, VoidCallback? onTap, AppearanceSettings appearance) {
+    return _toolbarButtonChrome(
+      icon: icon,
+      label: label,
+      active: false,
+      disabled: onTap == null,
+      appearance: appearance,
+      onTap: onTap == null
+          ? null
+          : () {
+              if (appearance.haptics) HapticFeedback.selectionClick();
+              onTap();
+            },
+    );
+  }
+
+  /// Shared visual chrome for every toolbar button (both the plain
+  /// action kind and the toggle kind) -- a soft tinted icon chip rather
+  /// than a bare Icon floating over a label, the concrete fix for
+  /// "tools icon in flyer and logo designer are also very cheap in case
+  /// of looks" (direct user feedback). An active/toggled-on button gets
+  /// a filled chip + a subtle glow shadow instead of just a flat colour
+  /// swap, so the pressed/on state actually reads as "on" at a glance.
+  Widget _toolbarButtonChrome({
+    required IconData icon,
+    required String label,
+    required bool active,
+    required AppearanceSettings appearance,
+    required VoidCallback? onTap,
+    bool disabled = false,
+  }) {
+    final color = disabled ? Colors.grey.shade400 : appearance.primaryColor;
     return TouchFeedbackWrapper(
       appearance: appearance,
       radius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: () {
-          if (appearance.haptics) HapticFeedback.selectionClick();
-          onTap();
-        },
+        onTap: onTap,
         child: Container(
-          width: 72,
+          width: 68,
           padding: const EdgeInsets.symmetric(vertical: 6),
-          decoration: BoxDecoration(
-            color: active ? appearance.primaryColor.withValues(alpha: 0.12) : null,
-            borderRadius: BorderRadius.circular(14),
-          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 22, color: color),
-              const SizedBox(height: 2),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: disabled
+                      ? Colors.grey.withValues(alpha: 0.06)
+                      : color.withValues(alpha: active ? 0.16 : 0.08),
+                  borderRadius: BorderRadius.circular(11),
+                  boxShadow: active
+                      ? [BoxShadow(color: color.withValues(alpha: 0.25), blurRadius: 8, spreadRadius: 0.5)]
+                      : null,
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 20, color: color),
+              ),
+              const SizedBox(height: 3),
               Text(label,
                   style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
             ],
@@ -3020,35 +3080,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     );
   }
 
-  Widget _toolbarButton(
-      IconData icon, String label, VoidCallback? onTap, AppearanceSettings appearance) {
-    final disabled = onTap == null;
-    final color = disabled ? Colors.grey.shade400 : appearance.primaryColor;
-    return TouchFeedbackWrapper(
-      appearance: appearance,
-      radius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap == null
-            ? null
-            : () {
-                if (appearance.haptics) HapticFeedback.selectionClick();
-                onTap();
-              },
-        child: Container(
-          width: 72,
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 22, color: color),
-              const SizedBox(height: 2),
-              Text(label,
-                  style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
-            ],
-          ),
-        ),
-      ),
+  /// A thin, low-contrast separator between toolbar groups (insert
+  /// content / canvas tools / selection actions) -- lets the eye parse
+  /// 15 icons as 3 short clusters instead of one undifferentiated strip.
+  Widget _toolbarDivider(AppearanceSettings appearance) {
+    return Container(
+      width: 1,
+      height: 32,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      color: appearance.primaryColor.withValues(alpha: 0.12),
     );
   }
 
