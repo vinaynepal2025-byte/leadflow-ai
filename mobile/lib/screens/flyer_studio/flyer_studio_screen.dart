@@ -457,6 +457,117 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     _markDirty();
   }
 
+  // Canva-parity Phase D -- photo grids. A layout is just a set of
+  // pre-positioned, empty `image` elements tiling a region of the canvas
+  // seamlessly -- each one is a fully independent, already-existing image
+  // element (drag/resize/replace/adjust all work on it unchanged), so
+  // "grids" reuses 100% of existing image-element machinery rather than
+  // inventing a new nested/grouped element type this app's flat-list
+  // canvas model doesn't have. Tapping an empty slot already opens the
+  // image picker via the same "Tap, then Replace" flow every empty image
+  // element has.
+  Future<void> _addPhotoGrid() async {
+    final layout = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Photo grid layout'),
+        children: [
+          _gridLayoutOption(ctx, '2h', '2-up, side by side'),
+          _gridLayoutOption(ctx, '2v', '2-up, stacked'),
+          _gridLayoutOption(ctx, '3big', '1 large + 2 small'),
+          _gridLayoutOption(ctx, '4up', '2x2 grid'),
+        ],
+      ),
+    );
+    if (layout == null) return;
+
+    const gap = 8.0;
+    final regionX = _canvasWidth * 0.1;
+    final regionY = _canvasHeight * 0.2;
+    final regionW = _canvasWidth * 0.8;
+    final regionH = _canvasHeight * 0.5;
+
+    List<Rect> slots;
+    switch (layout) {
+      case '2v':
+        final h = (regionH - gap) / 2;
+        slots = [
+          Rect.fromLTWH(regionX, regionY, regionW, h),
+          Rect.fromLTWH(regionX, regionY + h + gap, regionW, h),
+        ];
+        break;
+      case '3big':
+        final leftW = regionW * 0.6;
+        final rightW = regionW - leftW - gap;
+        final rightH = (regionH - gap) / 2;
+        slots = [
+          Rect.fromLTWH(regionX, regionY, leftW, regionH),
+          Rect.fromLTWH(regionX + leftW + gap, regionY, rightW, rightH),
+          Rect.fromLTWH(regionX + leftW + gap, regionY + rightH + gap, rightW, rightH),
+        ];
+        break;
+      case '4up':
+        final w = (regionW - gap) / 2;
+        final h = (regionH - gap) / 2;
+        slots = [
+          Rect.fromLTWH(regionX, regionY, w, h),
+          Rect.fromLTWH(regionX + w + gap, regionY, w, h),
+          Rect.fromLTWH(regionX, regionY + h + gap, w, h),
+          Rect.fromLTWH(regionX + w + gap, regionY + h + gap, w, h),
+        ];
+        break;
+      case '2h':
+      default:
+        final w = (regionW - gap) / 2;
+        slots = [
+          Rect.fromLTWH(regionX, regionY, w, regionH),
+          Rect.fromLTWH(regionX + w + gap, regionY, w, regionH),
+        ];
+    }
+
+    _pushUndo();
+    setState(() {
+      var z = _nextZIndex();
+      for (final slot in slots) {
+        _elements.add(FlyerElement(
+          id: '${_newId()}-$z',
+          type: FlyerElementType.image,
+          x: slot.left,
+          y: slot.top,
+          width: slot.width,
+          height: slot.height,
+          fit: 'cover',
+          zIndex: z,
+        ));
+        z++;
+      }
+      _sortElements();
+    });
+    _markDirty();
+  }
+
+  Widget _gridLayoutOption(BuildContext ctx, String value, String label) {
+    return SimpleDialogOption(
+      onPressed: () => Navigator.pop(ctx, value),
+      child: Row(
+        children: [
+          Icon(
+            value == '2h'
+                ? Icons.view_column_outlined
+                : value == '2v'
+                    ? Icons.table_rows_outlined
+                    : value == '3big'
+                        ? Icons.dashboard_customize_outlined
+                        : Icons.grid_view_outlined,
+            size: 22,
+          ),
+          const SizedBox(width: 12),
+          Text(label),
+        ],
+      ),
+    );
+  }
+
   int _nextZIndex() =>
       _elements.isEmpty ? 0 : (_elements.map((e) => e.zIndex).reduce(math.max) + 1);
 
@@ -2629,6 +2740,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _toolbarButton(Icons.qr_code, 'QR Code', _addQrCodeElement, appearance),
               _toolbarButton(Icons.bar_chart, 'Chart', _addChartElement, appearance),
               _toolbarToggleButton(Icons.gesture, 'Draw', _drawMode, _toggleDrawMode, appearance),
+              _toolbarButton(Icons.grid_view_outlined, 'Grid', _addPhotoGrid, appearance),
               _toolbarButton(Icons.perm_media_outlined, 'Assets', _openAssetLibrary, appearance),
               _toolbarButton(
                   Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
@@ -3129,16 +3241,36 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           _markDirty();
         },
       ),
-      _sliderRow(
-        icon: Icons.rounded_corner,
-        value: el.cornerRadius.clamp(0, 200),
-        min: 0,
-        max: 200,
-        onChanged: (v) {
-          setState(() => el.cornerRadius = v);
-          _markDirty();
-        },
+      // Frames (Canva-parity Phase D) -- masks this image/logo into a
+      // shape via the same shapeKind field the 'shape' element type
+      // already uses. 'None' (shapeKind 'rect') keeps the plain
+      // rounded-rect behaviour every image had before frames existed.
+      Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: kFrameShapeLabels.entries.map((e) {
+          final selected = (el.shapeKind.isEmpty ? 'rect' : el.shapeKind) == e.key;
+          return ChoiceChip(
+            label: Text(e.value),
+            selected: selected,
+            onSelected: (_) {
+              setState(() => el.shapeKind = e.key);
+              _markDirty();
+            },
+          );
+        }).toList(),
       ),
+      if (el.shapeKind == 'rect' || el.shapeKind.isEmpty)
+        _sliderRow(
+          icon: Icons.rounded_corner,
+          value: el.cornerRadius.clamp(0, 200),
+          min: 0,
+          max: 200,
+          onChanged: (v) {
+            setState(() => el.cornerRadius = v);
+            _markDirty();
+          },
+        ),
       // Photo adjustments (Canva-parity Phase C) -- real ColorFilter.matrix
       // math (see imageAdjustmentMatrix in flyer_canvas_element_widget.dart),
       // not a fake/cosmetic control.

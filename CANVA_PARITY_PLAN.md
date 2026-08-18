@@ -28,7 +28,7 @@ Brightness, contrast, saturation, and a duotone effect. Today an image element o
 ## Phase D — Frames & photo grids
 
 Frames: an image masked into a shape (circle/star/blob). Grids: multiple photos auto-arranged into a layout (2-up, 3-up, collage).
-**Status: 📋** — frames via `ClipPath` with the existing shape-path definitions (`FlyerShapePainter` already has several); grids via a layout helper that places N images into preset slot arrangements, each slot still an independently editable/replaceable element.
+**Status: ✅ shipped** — frames via `ClipPath`/`FramePathClipper` reusing the same `shapeKind` field the 'shape' element type already has (circle/star/hexagon/blob; QR codes are deliberately excluded so a frame can never make one unscannable). The blob shape is a deterministic multi-frequency sine/cosine perturbation, not random, so it doesn't jitter between rebuilds -- verified with a standalone script for determinism and staying within a sane radius bound. Grids are a "Grid" toolbar entry offering 4 layouts (2-up side-by-side, 2-up stacked, 1-large-2-small, 2×2) that place N pre-positioned empty `image` elements tiling a region -- each slot is a fully independent, already-existing image element (drag/resize/replace/adjust all just work), so this reuses 100% of existing machinery rather than a new nested/grouped element type. Layout rect math (no overlaps, stays within the region) verified with a standalone script for all 4 layouts.
 
 ## Phase E — Draw tool
 
@@ -89,7 +89,7 @@ Canva's AI suite: generate a whole design from a prompt, AI copywriting, text-to
 | A — Unified Elements panel | 📋 |
 | B — Text effects (outline/curved) | ✅ outline + curve shipped; hollow/lift not yet |
 | C — Photo adjustments/filters | ✅ brightness/contrast/saturation shipped; duotone not yet |
-| D — Frames & grids | 📋 |
+| D — Frames & grids | ✅ shipped |
 | E — Draw tool | ✅ shipped |
 | F — Charts | ✅ shipped |
 | G — QR code element | ✅ shipped |

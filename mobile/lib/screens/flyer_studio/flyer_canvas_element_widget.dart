@@ -295,6 +295,114 @@ class FlyerRulerPainter extends CustomPainter {
       old.canvasHeight != canvasHeight;
 }
 
+/// A 5-point star path, shared by FlyerShapePainter's own 'star' shape
+/// kind and by frame masking (framePathFor) below -- one definition
+/// rather than two copies that could drift.
+Path starPath(Size size) {
+  const points = 5;
+  final w = size.width, h = size.height;
+  final cx = w / 2, cy = h / 2;
+  final outerR = math.min(w, h) / 2;
+  final innerR = outerR * 0.42;
+  final path = Path();
+  for (var i = 0; i < points * 2; i++) {
+    final r = i.isEven ? outerR : innerR;
+    final angle = (math.pi / points) * i - math.pi / 2;
+    final x = cx + r * math.cos(angle);
+    final y = cy + r * math.sin(angle);
+    if (i == 0) {
+      path.moveTo(x, y);
+    } else {
+      path.lineTo(x, y);
+    }
+  }
+  path.close();
+  return path;
+}
+
+Path _hexagonPath(Size size) {
+  final w = size.width, h = size.height;
+  final cx = w / 2, cy = h / 2;
+  final r = math.min(w, h) / 2;
+  final path = Path();
+  for (var i = 0; i < 6; i++) {
+    final angle = (math.pi / 3) * i - math.pi / 2;
+    final x = cx + r * math.cos(angle);
+    final y = cy + r * math.sin(angle);
+    if (i == 0) {
+      path.moveTo(x, y);
+    } else {
+      path.lineTo(x, y);
+    }
+  }
+  path.close();
+  return path;
+}
+
+/// An organic "blob" frame -- a smooth closed curve through 8 points at
+/// a deterministically wobbled radius (fixed multi-frequency sine/cosine
+/// perturbation, not random, so the same element renders identically
+/// every time rather than jittering between rebuilds), connected with
+/// quadratic beziers through midpoints for a rounded, non-polygonal feel.
+Path _blobPath(Size size) {
+  final w = size.width, h = size.height;
+  final cx = w / 2, cy = h / 2;
+  final baseR = math.min(w, h) / 2;
+  const n = 8;
+  final pts = <Offset>[];
+  for (var i = 0; i < n; i++) {
+    final angle = (2 * math.pi / n) * i;
+    final r = baseR * (1 + 0.16 * math.sin(3 * angle) + 0.08 * math.cos(5 * angle));
+    pts.add(Offset(cx + r * math.cos(angle), cy + r * math.sin(angle)));
+  }
+  final path = Path()..moveTo((pts[0].dx + pts[n - 1].dx) / 2, (pts[0].dy + pts[n - 1].dy) / 2);
+  for (var i = 0; i < n; i++) {
+    final next = pts[(i + 1) % n];
+    final mid = Offset((pts[i].dx + next.dx) / 2, (pts[i].dy + next.dy) / 2);
+    path.quadraticBezierTo(pts[i].dx, pts[i].dy, mid.dx, mid.dy);
+  }
+  path.close();
+  return path;
+}
+
+/// The frame shapes offered for masking an image/logo element (Canva-
+/// parity Phase D). Returns null for 'rect' -- meaning "no mask, use the
+/// normal ClipRRect+cornerRadius path" -- so an element with the default
+/// shapeKind renders exactly as it did before frames existed.
+Path? framePathFor(String kind, Size size) {
+  switch (kind) {
+    case 'circle':
+      return Path()..addOval(Rect.fromLTWH(0, 0, size.width, size.height));
+    case 'star':
+      return starPath(size);
+    case 'hexagon':
+      return _hexagonPath(size);
+    case 'blob':
+      return _blobPath(size);
+    default:
+      return null;
+  }
+}
+
+const Map<String, String> kFrameShapeLabels = {
+  'rect': 'None',
+  'circle': 'Circle',
+  'star': 'Star',
+  'hexagon': 'Hexagon',
+  'blob': 'Blob',
+};
+
+class FramePathClipper extends CustomClipper<Path> {
+  final String kind;
+  const FramePathClipper({required this.kind});
+
+  @override
+  Path getClip(Size size) => framePathFor(kind, size) ?? (Path()..addRect(Offset.zero & size));
+
+  @override
+  bool shouldReclip(covariant FramePathClipper oldClipper) => oldClipper.kind != kind;
+}
+
 /// Draws the shape kinds that don't fit a plain BoxDecoration (triangle,
 /// line, arrow, star). 'rect'/'circle' stay on BoxDecoration in
 /// _buildContent -- cheaper, and the only kinds cornerRadius means
@@ -341,32 +449,10 @@ class FlyerShapePainter extends CustomPainter {
           ..lineTo(0, h / 2 + shaftH / 2)
           ..close();
       case 'star':
-        return _starPath(w, h);
+        return starPath(Size(w, h));
       default:
         return Path()..addRect(Rect.fromLTWH(0, 0, w, h));
     }
-  }
-
-  Path _starPath(double w, double h) {
-    const points = 5;
-    final cx = w / 2;
-    final cy = h / 2;
-    final outerR = math.min(w, h) / 2;
-    final innerR = outerR * 0.42;
-    final path = Path();
-    for (var i = 0; i < points * 2; i++) {
-      final r = i.isEven ? outerR : innerR;
-      final angle = (math.pi / points) * i - math.pi / 2;
-      final x = cx + r * math.cos(angle);
-      final y = cy + r * math.sin(angle);
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    path.close();
-    return path;
   }
 
   @override
@@ -961,12 +1047,25 @@ class FlyerCanvasElementWidget extends StatelessWidget {
             child: photo,
           );
         }
+        // Frames (Canva-parity Phase D) -- an image/logo can mask into a
+        // shape via shapeKind, the same field the 'shape' element type
+        // already uses (reuse, not a new field). Deliberately excluded
+        // for qrcode: masking away the quiet-zone/corners of a QR code
+        // can make it unscannable, so it always stays a plain rounded
+        // rect regardless of shapeKind.
+        final frameKind =
+            element.type != FlyerElementType.qrcode ? element.shapeKind : 'rect';
         return Opacity(
           opacity: element.opacity,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(element.cornerRadius * scale),
-            child: photo,
-          ),
+          child: frameKind == 'rect'
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(element.cornerRadius * scale),
+                  child: photo,
+                )
+              : ClipPath(
+                  clipper: FramePathClipper(kind: frameKind),
+                  child: photo,
+                ),
         );
       case FlyerElementType.shape:
         if (const {'triangle', 'line', 'arrow', 'star'}.contains(element.shapeKind)) {
