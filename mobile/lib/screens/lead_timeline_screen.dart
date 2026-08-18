@@ -66,6 +66,17 @@ class _LeadTimelineScreenState extends State<LeadTimelineScreen> {
     'offer': _EventStyle(Icons.local_offer_outlined, Color(0xFFB45309)),
     'reminder': _EventStyle(Icons.alarm, Color(0xFFE07A1F)),
     'created': _EventStyle(Icons.person_add_alt, Color(0xFF5F6368)),
+    'lifecycle_change': _EventStyle(Icons.timeline, Color(0xFF7C3AED)),
+  };
+
+  // source: MANUAL/AI/AUTOMATION/SYSTEM -- Leads Ecosystem Phase 6. MANUAL
+  // is the overwhelming default (every event before this phase), so it's
+  // left unbadged; the other three are worth calling out since they're
+  // the genuinely new thing this phase adds to the timeline.
+  static const Map<String, Color> _sourceColors = {
+    'AI': Color(0xFF9333EA),
+    'AUTOMATION': Color(0xFFB8860B),
+    'SYSTEM': Color(0xFF5F6368),
   };
 
   _EventStyle _styleFor(String type) =>
@@ -224,6 +235,21 @@ class _LeadTimelineScreenState extends State<LeadTimelineScreen> {
                           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                         ),
                       ),
+                      if (_sourceColors.containsKey(e['source']))
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: _sourceColors[e['source']]!.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              e['source'].toString(),
+                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: _sourceColors[e['source']]),
+                            ),
+                          ),
+                        ),
                       Text(_timeOf(at),
                           style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
                     ],

@@ -35,6 +35,7 @@ const DEFAULTS = [
   { item_key: 'pipeline_builder',    default_label: 'Pipeline Builder',       sort_order: 14 },
   { item_key: 'custom_fields',       default_label: 'Custom Fields',          sort_order: 15 },
   { item_key: 'settings',            default_label: 'Settings',               sort_order: 16 },
+  { item_key: 'automation_center',   default_label: 'Automation Center',      sort_order: 17 },
 ];
 
 // Ensures a tenant has all 17 built-in item rows. Safe to call every

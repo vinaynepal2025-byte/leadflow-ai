@@ -855,6 +855,54 @@ class ApiService {
     _checkOk(res);
   }
 
+  // ---------- AI Agents (Leads Ecosystem Phase 5) ----------
+
+  Future<List<Map<String, dynamic>>> getAgents() async {
+    final res = await http.get(Uri.parse('$baseUrl/agents'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  /// Read-only -- computes and returns the agent's recommendation without
+  /// enqueueing anything. Safe to call as often as you like.
+  Future<Map<String, dynamic>> analyzeAgent(String agentName, String leadId) async {
+    final res = await http.post(Uri.parse('$baseUrl/agents/$agentName/$leadId/analyze'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Enqueues the agent's recommended action via the durable orchestrator
+  /// (initiated_by: manual server-side, since this is you tapping the
+  /// button). Execution happens a few minutes later, not instantly.
+  Future<Map<String, dynamic>> actAgent(String agentName, String leadId) async {
+    final res = await http.post(Uri.parse('$baseUrl/agents/$agentName/$leadId/act'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  // ---------- Orchestrator (Leads Ecosystem Phase 4/6) ----------
+
+  Future<List<Map<String, dynamic>>> getOrchestratorJobs({String? status}) async {
+    final uri = Uri.parse('$baseUrl/orchestrator/jobs').replace(
+      queryParameters: {if (status != null) 'status': status},
+    );
+    final res = await http.get(uri, headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<void> approveOrchestratorJob(String jobId) async {
+    final res = await http.post(Uri.parse('$baseUrl/orchestrator/jobs/$jobId/approve'), headers: _headers);
+    _checkOk(res);
+  }
+
+  Future<void> retryOrchestratorJob(String jobId) async {
+    final res = await http.post(Uri.parse('$baseUrl/orchestrator/jobs/$jobId/retry'), headers: _headers);
+    _checkOk(res);
+  }
+
   // ---------- Contact Import ----------
 
   Future<Map<String, dynamic>> importLeadsCsv(String filePath, String fileName) async {

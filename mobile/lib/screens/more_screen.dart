@@ -6,6 +6,7 @@ import 'performance_screen.dart';
 import 'audit_screen.dart';
 import 'knowledge_screen.dart';
 import 'automations_screen.dart';
+import 'automation_center_screen.dart';
 import 'calendar_screen.dart';
 import 'colleges_screen.dart';
 import 'team_screen.dart';
@@ -46,6 +47,7 @@ const Map<String, IconData> kMoreMenuIconOptions = {
   'settings_outlined': Icons.settings_outlined,
   'star': Icons.star,
   'link': Icons.link,
+  'hub_outlined': Icons.hub_outlined,
 };
 
 // Default label + icon + subtitle + navigation target per built-in
@@ -79,6 +81,7 @@ final Map<String, _MoreMenuItemDef> kMoreMenuDefaults = {
   'pipeline_builder': _MoreMenuItemDef('Pipeline Builder', 'Customize your lead stages', 'view_kanban_outlined', () => const PipelineBuilderScreen()),
   'custom_fields': _MoreMenuItemDef('Custom Fields', 'Define your own lead fields', 'dashboard_customize_outlined', () => const CustomFieldsBuilderScreen()),
   'settings': _MoreMenuItemDef('Settings', 'Branding & contact info', 'settings_outlined', () => const SettingsScreen()),
+  'automation_center': _MoreMenuItemDef('Automation Center', 'AI agents, auto mode, job queue', 'hub_outlined', () => const AutomationCenterScreen()),
 };
 
 Color _hexToColor(String hex) {
@@ -111,6 +114,7 @@ const Map<String, Color> kMoreMenuDefaultColors = {
   'pipeline_builder': Colors.deepOrange,
   'custom_fields': Color(0xFF558B2F),
   'settings': Colors.grey,
+  'automation_center': Colors.lightGreen,
 };
 
 /// The More screen now reads its own tile list from the tenant's
