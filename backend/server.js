@@ -49,6 +49,8 @@ const dashboardSectionsRouter = require('./routes/dashboardSections');
 const leadListFieldsRouter = require('./routes/leadListFields');
 const leadNotesRouter = require('./routes/leadNotes');
 const leadLifecycleRouter = require('./routes/leadLifecycle');
+const toolsRouter = require('./routes/tools');
+const { registerBuiltinTools } = require('./services/builtinTools');
 const db = require('./db');
 
 const app = express();
@@ -163,6 +165,11 @@ app.use('/share-targets', require('./routes/shareTargets'));
 app.use('/call-prep', require('./routes/callPrep'));
 app.use('/leads', require('./routes/leadTimeline'));
 app.use('/leads', leadLifecycleRouter);
+
+// Tool Registry -- register every built-in tool once at startup, before
+// any request could try to invoke one.
+registerBuiltinTools();
+app.use('/tools', toolsRouter);
 app.use('/lead360', require('./routes/lead360'));
 
 const PORT = process.env.PORT || 3000;
