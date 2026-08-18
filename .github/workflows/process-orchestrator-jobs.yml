@@ -1,0 +1,28 @@
+name: Process Orchestrator Jobs
+
+# Same reasoning as process-scheduled-messages.yml: Render's free tier
+# has no reliable background worker/cron of its own, so this uses GitHub
+# Actions as the external trigger for the durable orchestrator's job
+# queue (services/orchestrator.js) -- processing due jobs (retries,
+# fresh enqueues) without depending on any browser/app being open. Runs
+# every 5 minutes (tighter than the 15-minute scheduled-messages cron,
+# since retry backoff here starts at 60s and dead-letters faster jobs
+# matter for the Automation Center's responsiveness once it exists).
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call process-due-jobs endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -sf -X POST "https://leadflow-ai-backend-e50r.onrender.com/orchestrator/process-due-jobs" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            --max-time 60 \
+            || echo "Backend may be cold-starting (Render free tier) — will retry next scheduled run"
