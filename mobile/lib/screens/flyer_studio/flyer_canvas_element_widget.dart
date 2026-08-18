@@ -295,6 +295,114 @@ class FlyerRulerPainter extends CustomPainter {
       old.canvasHeight != canvasHeight;
 }
 
+/// A 5-point star path, shared by FlyerShapePainter's own 'star' shape
+/// kind and by frame masking (framePathFor) below -- one definition
+/// rather than two copies that could drift.
+Path starPath(Size size) {
+  const points = 5;
+  final w = size.width, h = size.height;
+  final cx = w / 2, cy = h / 2;
+  final outerR = math.min(w, h) / 2;
+  final innerR = outerR * 0.42;
+  final path = Path();
+  for (var i = 0; i < points * 2; i++) {
+    final r = i.isEven ? outerR : innerR;
+    final angle = (math.pi / points) * i - math.pi / 2;
+    final x = cx + r * math.cos(angle);
+    final y = cy + r * math.sin(angle);
+    if (i == 0) {
+      path.moveTo(x, y);
+    } else {
+      path.lineTo(x, y);
+    }
+  }
+  path.close();
+  return path;
+}
+
+Path _hexagonPath(Size size) {
+  final w = size.width, h = size.height;
+  final cx = w / 2, cy = h / 2;
+  final r = math.min(w, h) / 2;
+  final path = Path();
+  for (var i = 0; i < 6; i++) {
+    final angle = (math.pi / 3) * i - math.pi / 2;
+    final x = cx + r * math.cos(angle);
+    final y = cy + r * math.sin(angle);
+    if (i == 0) {
+      path.moveTo(x, y);
+    } else {
+      path.lineTo(x, y);
+    }
+  }
+  path.close();
+  return path;
+}
+
+/// An organic "blob" frame -- a smooth closed curve through 8 points at
+/// a deterministically wobbled radius (fixed multi-frequency sine/cosine
+/// perturbation, not random, so the same element renders identically
+/// every time rather than jittering between rebuilds), connected with
+/// quadratic beziers through midpoints for a rounded, non-polygonal feel.
+Path _blobPath(Size size) {
+  final w = size.width, h = size.height;
+  final cx = w / 2, cy = h / 2;
+  final baseR = math.min(w, h) / 2;
+  const n = 8;
+  final pts = <Offset>[];
+  for (var i = 0; i < n; i++) {
+    final angle = (2 * math.pi / n) * i;
+    final r = baseR * (1 + 0.16 * math.sin(3 * angle) + 0.08 * math.cos(5 * angle));
+    pts.add(Offset(cx + r * math.cos(angle), cy + r * math.sin(angle)));
+  }
+  final path = Path()..moveTo((pts[0].dx + pts[n - 1].dx) / 2, (pts[0].dy + pts[n - 1].dy) / 2);
+  for (var i = 0; i < n; i++) {
+    final next = pts[(i + 1) % n];
+    final mid = Offset((pts[i].dx + next.dx) / 2, (pts[i].dy + next.dy) / 2);
+    path.quadraticBezierTo(pts[i].dx, pts[i].dy, mid.dx, mid.dy);
+  }
+  path.close();
+  return path;
+}
+
+/// The frame shapes offered for masking an image/logo element (Canva-
+/// parity Phase D). Returns null for 'rect' -- meaning "no mask, use the
+/// normal ClipRRect+cornerRadius path" -- so an element with the default
+/// shapeKind renders exactly as it did before frames existed.
+Path? framePathFor(String kind, Size size) {
+  switch (kind) {
+    case 'circle':
+      return Path()..addOval(Rect.fromLTWH(0, 0, size.width, size.height));
+    case 'star':
+      return starPath(size);
+    case 'hexagon':
+      return _hexagonPath(size);
+    case 'blob':
+      return _blobPath(size);
+    default:
+      return null;
+  }
+}
+
+const Map<String, String> kFrameShapeLabels = {
+  'rect': 'None',
+  'circle': 'Circle',
+  'star': 'Star',
+  'hexagon': 'Hexagon',
+  'blob': 'Blob',
+};
+
+class FramePathClipper extends CustomClipper<Path> {
+  final String kind;
+  const FramePathClipper({required this.kind});
+
+  @override
+  Path getClip(Size size) => framePathFor(kind, size) ?? (Path()..addRect(Offset.zero & size));
+
+  @override
+  bool shouldReclip(covariant FramePathClipper oldClipper) => oldClipper.kind != kind;
+}
+
 /// Draws the shape kinds that don't fit a plain BoxDecoration (triangle,
 /// line, arrow, star). 'rect'/'circle' stay on BoxDecoration in
 /// _buildContent -- cheaper, and the only kinds cornerRadius means
@@ -341,32 +449,10 @@ class FlyerShapePainter extends CustomPainter {
           ..lineTo(0, h / 2 + shaftH / 2)
           ..close();
       case 'star':
-        return _starPath(w, h);
+        return starPath(Size(w, h));
       default:
         return Path()..addRect(Rect.fromLTWH(0, 0, w, h));
     }
-  }
-
-  Path _starPath(double w, double h) {
-    const points = 5;
-    final cx = w / 2;
-    final cy = h / 2;
-    final outerR = math.min(w, h) / 2;
-    final innerR = outerR * 0.42;
-    final path = Path();
-    for (var i = 0; i < points * 2; i++) {
-      final r = i.isEven ? outerR : innerR;
-      final angle = (math.pi / points) * i - math.pi / 2;
-      final x = cx + r * math.cos(angle);
-      final y = cy + r * math.sin(angle);
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-    }
-    path.close();
-    return path;
   }
 
   @override
@@ -961,12 +1047,25 @@ class FlyerCanvasElementWidget extends StatelessWidget {
             child: photo,
           );
         }
+        // Frames (Canva-parity Phase D) -- an image/logo can mask into a
+        // shape via shapeKind, the same field the 'shape' element type
+        // already uses (reuse, not a new field). Deliberately excluded
+        // for qrcode: masking away the quiet-zone/corners of a QR code
+        // can make it unscannable, so it always stays a plain rounded
+        // rect regardless of shapeKind.
+        final frameKind =
+            element.type != FlyerElementType.qrcode ? element.shapeKind : 'rect';
         return Opacity(
           opacity: element.opacity,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(element.cornerRadius * scale),
-            child: photo,
-          ),
+          child: frameKind == 'rect'
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(element.cornerRadius * scale),
+                  child: photo,
+                )
+              : ClipPath(
+                  clipper: FramePathClipper(kind: frameKind),
+                  child: photo,
+                ),
         );
       case FlyerElementType.shape:
         if (const {'triangle', 'line', 'arrow', 'star'}.contains(element.shapeKind)) {
@@ -1059,6 +1158,31 @@ class FlyerCanvasElementWidget extends StatelessWidget {
               height: h,
               color: Colors.grey.shade200,
               child: const Icon(Icons.broken_image, color: Colors.grey),
+            ),
+          ),
+        );
+      case FlyerElementType.chart:
+        return Opacity(
+          opacity: element.opacity,
+          child: CustomPaint(
+            size: Size(w, h),
+            painter: ChartPainter(
+              kind: element.chartKind,
+              labels: element.chartLabels,
+              values: element.chartValues,
+              seriesColor: flyerHexToColor(element.shapeColor),
+            ),
+          ),
+        );
+      case FlyerElementType.drawing:
+        return Opacity(
+          opacity: element.opacity,
+          child: CustomPaint(
+            size: Size(w, h),
+            painter: DrawingPainter(
+              points: element.drawingPoints,
+              color: flyerHexToColor(element.shapeColor),
+              strokeWidth: (element.strokeWidth > 0 ? element.strokeWidth : 4) * scale,
             ),
           ),
         );
@@ -1202,4 +1326,234 @@ class CurvedTextPainter extends CustomPainter {
         oldDelegate.outlineColor != outlineColor ||
         oldDelegate.outlineWidth != outlineWidth;
   }
+}
+
+/// Charts (Canva-parity Phase F) -- a small element type that turns a
+/// {labels, values} data table the user typed in into a real bar/line/pie
+/// chart, no charting package needed for these 3 basic kinds. All three
+/// modes guard the same degenerate cases: an empty/all-zero value set
+/// renders flat bars/a flat line rather than dividing by zero, and a
+/// single-value pie renders one full circle rather than nothing.
+class ChartPainter extends CustomPainter {
+  final String kind;
+  final List<String> labels;
+  final List<double> values;
+  final Color seriesColor;
+
+  ChartPainter({
+    required this.kind,
+    required this.labels,
+    required this.values,
+    required this.seriesColor,
+  });
+
+  static const List<Color> _pieColors = [
+    Color(0xFF1B2A4A),
+    Color(0xFF2563EB),
+    Color(0xFF0EA5E9),
+    Color(0xFF10B981),
+    Color(0xFFF59E0B),
+    Color(0xFFEF4444),
+    Color(0xFF8B5CF6),
+    Color(0xFFEC4899),
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.isEmpty || size.width <= 0 || size.height <= 0) return;
+    switch (kind) {
+      case 'line':
+        _paintLine(canvas, size);
+        break;
+      case 'pie':
+        _paintPie(canvas, size);
+        break;
+      case 'bar':
+      default:
+        _paintBar(canvas, size);
+    }
+  }
+
+  bool get _hasLabels => labels.any((l) => l.trim().isNotEmpty);
+
+  void _drawLabel(Canvas canvas, String text, Offset topLeft, double maxWidth) {
+    if (text.isEmpty) return;
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: const TextStyle(fontSize: 10, color: Colors.black87)),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+    tp.paint(canvas, Offset(topLeft.dx + (maxWidth - tp.width) / 2, topLeft.dy));
+  }
+
+  void _paintBar(Canvas canvas, Size size) {
+    final labelSpace = _hasLabels ? 16.0 : 0.0;
+    final chartH = size.height - labelSpace;
+    if (chartH <= 0) return;
+    final maxV = values.fold<double>(0, (m, v) => math.max(m, v));
+    final n = values.length;
+    final slotW = size.width / n;
+    final barW = slotW * 0.6;
+    final paint = Paint()..color = seriesColor;
+    for (var i = 0; i < n; i++) {
+      final barH = maxV > 0 ? (values[i] / maxV) * chartH : 0.0;
+      final left = i * slotW + (slotW - barW) / 2;
+      final rect = Rect.fromLTWH(left, chartH - barH, barW, barH);
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(3)), paint);
+      if (labelSpace > 0 && i < labels.length) {
+        _drawLabel(canvas, labels[i], Offset(i * slotW, chartH + 2), slotW);
+      }
+    }
+  }
+
+  void _paintLine(Canvas canvas, Size size) {
+    final labelSpace = _hasLabels ? 16.0 : 0.0;
+    final chartH = size.height - labelSpace;
+    if (chartH <= 0) return;
+    final n = values.length;
+    final maxV = values.fold<double>(values.first, (m, v) => math.max(m, v));
+    final minV = values.fold<double>(values.first, (m, v) => math.min(m, v));
+    final range = maxV - minV;
+    final stepX = n > 1 ? size.width / (n - 1) : 0.0;
+
+    final points = <Offset>[];
+    for (var i = 0; i < n; i++) {
+      // A flat series (range == 0) draws a horizontal line through the
+      // middle rather than dividing by zero.
+      final norm = range > 0 ? (values[i] - minV) / range : 0.5;
+      final x = n > 1 ? i * stepX : size.width / 2;
+      final y = chartH - norm * chartH;
+      points.add(Offset(x, y));
+    }
+
+    final linePaint = Paint()
+      ..color = seriesColor
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (final p in points.skip(1)) {
+      path.lineTo(p.dx, p.dy);
+    }
+    canvas.drawPath(path, linePaint);
+
+    final dotPaint = Paint()..color = seriesColor;
+    for (var i = 0; i < points.length; i++) {
+      canvas.drawCircle(points[i], 3.5, dotPaint);
+      if (labelSpace > 0 && i < labels.length) {
+        final labelW = n > 1 ? stepX : size.width;
+        _drawLabel(canvas, labels[i], Offset(points[i].dx - labelW / 2, chartH + 2), labelW);
+      }
+    }
+  }
+
+  void _paintPie(Canvas canvas, Size size) {
+    final total = values.fold<double>(0, (a, b) => a + b);
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2 * 0.85;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    if (total <= 0) {
+      // No data yet to proportion slices from -- an empty ring reads as
+      // "nothing entered" rather than a misleading full-colour disc.
+      final paint = Paint()
+        ..color = Colors.grey.shade300
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3;
+      canvas.drawCircle(center, radius, paint);
+      return;
+    }
+    var startAngle = -math.pi / 2;
+    for (var i = 0; i < values.length; i++) {
+      final sweep = (values[i] / total) * 2 * math.pi;
+      final paint = Paint()..color = _pieColors[i % _pieColors.length];
+      canvas.drawArc(rect, startAngle, sweep, true, paint);
+      startAngle += sweep;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant ChartPainter oldDelegate) {
+    return oldDelegate.kind != kind ||
+        oldDelegate.seriesColor != seriesColor ||
+        !_listEquals(oldDelegate.labels, labels) ||
+        !_listEquals(oldDelegate.values, values);
+  }
+
+  static bool _listEquals<T>(List<T> a, List<T> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+}
+
+/// Freehand drawing (Canva-parity Phase E). [points] are fractional
+/// (0.0..1.0 of the element's own width/height, see FlyerElement.
+/// drawingPoints) so the stroke redraws correctly at whatever size the
+/// element widget is currently laid out at -- while actively drawing
+/// (DrawCaptureOverlay below) and after a resize alike, the same painter
+/// runs, just fed a different [size].
+class DrawingPainter extends CustomPainter {
+  final List<List<double>> points;
+  final Color color;
+  final double strokeWidth;
+
+  DrawingPainter({required this.points, required this.color, required this.strokeWidth});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.length < 2) return;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path()..moveTo(points.first[0] * size.width, points.first[1] * size.height);
+    for (final p in points.skip(1)) {
+      path.lineTo(p[0] * size.width, p[1] * size.height);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant DrawingPainter oldDelegate) {
+    return oldDelegate.color != color ||
+        oldDelegate.strokeWidth != strokeWidth ||
+        oldDelegate.points.length != points.length;
+  }
+}
+
+/// The in-progress stroke preview while actively drawing (before pan-end
+/// turns it into a real FlyerElement) -- raw screen-space points, unlike
+/// DrawingPainter's fractional element-local ones above, since this
+/// paints directly over the live canvas view at a fixed size for the
+/// duration of one gesture.
+class LiveStrokePainter extends CustomPainter {
+  final List<Offset> points;
+  final Color color;
+  final double strokeWidth;
+
+  LiveStrokePainter({required this.points, required this.color, required this.strokeWidth});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.length < 2) return;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (final p in points.skip(1)) {
+      path.lineTo(p.dx, p.dy);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant LiveStrokePainter oldDelegate) => true;
 }

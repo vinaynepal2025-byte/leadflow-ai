@@ -11,7 +11,7 @@
 
 import 'package:flutter/material.dart' show IconData, Icons;
 
-enum FlyerElementType { text, image, logo, shape, icon, svg, qrcode }
+enum FlyerElementType { text, image, logo, shape, icon, svg, qrcode, chart, drawing }
 
 FlyerElementType flyerElementTypeFromString(String? s) {
   switch (s) {
@@ -27,6 +27,10 @@ FlyerElementType flyerElementTypeFromString(String? s) {
       return FlyerElementType.svg;
     case 'qrcode':
       return FlyerElementType.qrcode;
+    case 'chart':
+      return FlyerElementType.chart;
+    case 'drawing':
+      return FlyerElementType.drawing;
     case 'text':
     default:
       return FlyerElementType.text;
@@ -47,6 +51,10 @@ String flyerElementTypeToString(FlyerElementType t) {
       return 'svg';
     case FlyerElementType.qrcode:
       return 'qrcode';
+    case FlyerElementType.chart:
+      return 'chart';
+    case FlyerElementType.drawing:
+      return 'drawing';
     case FlyerElementType.text:
       return 'text';
   }
@@ -240,6 +248,27 @@ class FlyerElement {
   String? strokeColor; // hex or null (no stroke)
   double strokeWidth;
 
+  // Chart-specific (Canva-parity Phase F). Reuses shapeColor as the
+  // primary series colour (bar/line) -- same reuse reasoning as icons
+  // below -- so the existing colour picker/AI Quick Restyle machinery
+  // works on a chart's colour for free. Pie mode ignores shapeColor in
+  // favour of a small fixed high-contrast palette, since a single colour
+  // can't distinguish slices.
+  String chartKind; // 'bar' | 'line' | 'pie'
+  List<String> chartLabels;
+  List<double> chartValues;
+
+  // Drawing-specific (Canva-parity Phase E). Points are stored as
+  // FRACTIONAL coordinates -- each [x, y] pair in 0.0..1.0 of the
+  // element's own width/height -- rather than absolute pixels, so
+  // dragging this element's resize handles scales the stroke correctly
+  // for free (the painter just multiplies by the current size.width/
+  // size.height every repaint) instead of needing a separate
+  // re-normalization step on every resize. Reuses shapeColor (pen
+  // colour) and strokeWidth (pen thickness), same reuse reasoning as
+  // icons/SVG/chart above.
+  List<List<double>> drawingPoints;
+
   // Icon-specific -- deliberately reuses shapeColor for fill rather than
   // adding a separate colour field: an icon is conceptually a special
   // shape (single-colour glyph), and every colour-editing control the
@@ -296,10 +325,15 @@ class FlyerElement {
     this.shapeGradientEnd,
     this.strokeColor,
     this.strokeWidth = 0,
+    this.chartKind = 'bar',
+    List<String>? chartLabels,
+    List<double>? chartValues,
+    this.drawingPoints = const [],
     this.iconKey = 'star',
     this.svgData,
     this.svgRecolor = false,
-  });
+  })  : chartLabels = chartLabels ?? const ['A', 'B', 'C'],
+        chartValues = chartValues ?? const [30, 60, 45];
 
   factory FlyerElement.fromJson(Map<String, dynamic> json) {
     return FlyerElement(
@@ -341,6 +375,13 @@ class FlyerElement {
       shapeGradientEnd: json['shapeGradientEnd']?.toString(),
       strokeColor: json['strokeColor']?.toString(),
       strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 0,
+      chartKind: json['chartKind']?.toString() ?? 'bar',
+      chartLabels: (json['chartLabels'] as List?)?.map((e) => e.toString()).toList(),
+      chartValues: (json['chartValues'] as List?)?.map((e) => (e as num).toDouble()).toList(),
+      drawingPoints: (json['drawingPoints'] as List?)
+              ?.map((p) => (p as List).map((n) => (n as num).toDouble()).toList())
+              .toList() ??
+          const [],
       iconKey: json['iconKey']?.toString() ?? 'star',
       svgData: json['svgData']?.toString(),
       svgRecolor: json['svgRecolor'] == true,
@@ -409,9 +450,67 @@ class FlyerElement {
       map['svgData'] = svgData ?? '';
       map['svgRecolor'] = svgRecolor;
       if (svgRecolor) map['shapeColor'] = shapeColor;
+    } else if (type == FlyerElementType.chart) {
+      map['chartKind'] = chartKind;
+      map['chartLabels'] = chartLabels;
+      map['chartValues'] = chartValues;
+      map['shapeColor'] = shapeColor;
+    } else if (type == FlyerElementType.drawing) {
+      map['drawingPoints'] = drawingPoints;
+      map['shapeColor'] = shapeColor;
+      map['strokeWidth'] = strokeWidth;
     }
     return map;
   }
 
   FlyerElement clone() => FlyerElement.fromJson(toJson());
+}
+
+/// Backward-compatible canvas_json parsing (Canva-parity Phase H). A
+/// legacy/single-page project's canvas_json is a flat array of element
+/// maps (each has a 'type' key) -- treated as one page. A genuinely
+/// multi-page project's canvas_json is an array of page-wrapper maps
+/// (each `{'__page': true, 'elements': [...]}`) -- nothing before this
+/// feature existed ever wrote that shape, so it's an unambiguous
+/// discriminator. Pure function (no widget/BuildContext involved) so it's
+/// directly unit-testable -- see test/flyer_multipage_test.dart, since
+/// this is the one piece of this feature where a bug could corrupt an
+/// already-saved real project's data.
+List<List<FlyerElement>> parsePagesFromCanvasJson(List raw) {
+  if (raw.isEmpty) return [[]];
+  final first = raw.first;
+  final isMultiPage = first is Map && first['__page'] == true;
+  if (isMultiPage) {
+    final pages = raw
+        .whereType<Map>()
+        .map((p) => ((p['elements'] as List?) ?? [])
+            .whereType<Map>()
+            .map((e) => FlyerElement.fromJson(Map<String, dynamic>.from(e)))
+            .toList())
+        .toList();
+    return pages.isEmpty ? [[]] : pages;
+  }
+  return [
+    raw
+        .whereType<Map>()
+        .map((e) => FlyerElement.fromJson(Map<String, dynamic>.from(e)))
+        .toList()
+  ];
+}
+
+/// The wire shape for canvas_json: a true single page stays the exact
+/// flat array it always was (zero format churn for the overwhelmingly
+/// common case, and what every other reader of canvas_json -- AI
+/// generation, project duplication -- already expects); only a
+/// genuinely multi-page project uses the new page-wrapper shape.
+List<Map<String, dynamic>> canvasJsonForPages(List<List<FlyerElement>> pages) {
+  if (pages.length <= 1) {
+    return pages.isEmpty ? [] : pages[0].map((e) => e.toJson()).toList();
+  }
+  return pages
+      .map((page) => {
+            '__page': true,
+            'elements': page.map((e) => e.toJson()).toList(),
+          })
+      .toList();
 }
