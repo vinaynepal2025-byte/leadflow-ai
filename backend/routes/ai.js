@@ -1,24 +1,29 @@
 const express = require('express');
 const db = require('../db');
 const { analyzeLead } = require('../services/aiAnalysis');
-const { activeProvider, activeModel, DEFAULT_MODELS, generateJson } = require('../services/aiProvider');
+const { activeProvider, activeModel, DEFAULT_MODELS, PROVIDER_KEY_ENV_VARS, generateJson } = require('../services/aiProvider');
 
 const router = express.Router();
 
-// GET /ai/provider — which AI is active, and whether its key is set.
-// Lets the app show "AI: Gemini (ready)" instead of failing silently.
+// GET /ai/provider — which AI is active, whether its key is set, and
+// (since aiProvider.js's activeProvider() now auto-detects when
+// AI_PROVIDER isn't explicitly set) whether that pick was explicit or
+// auto-detected -- plus every provider's own configured status, so a
+// case like "GEMINI_API_KEY is set but AI_PROVIDER=claude is also set,
+// so Gemini is being ignored" is visible here instead of silently
+// failing with no clue why.
 router.get('/provider', async (req, res) => {
   const provider = activeProvider();
-  const keyEnvVar = {
-    claude: 'ANTHROPIC_API_KEY',
-    gemini: 'GEMINI_API_KEY',
-    openrouter: 'OPENROUTER_API_KEY',
-  }[provider];
+  const keyEnvVar = PROVIDER_KEY_ENV_VARS[provider];
   res.json({
     provider,
     model: activeModel(),
     configured: Boolean(keyEnvVar && process.env[keyEnvVar]),
-    available_providers: Object.keys(DEFAULT_MODELS),
+    provider_was_explicit: Boolean(process.env.AI_PROVIDER),
+    available_providers: Object.keys(DEFAULT_MODELS).map((p) => ({
+      provider: p,
+      configured: Boolean(process.env[PROVIDER_KEY_ENV_VARS[p]]),
+    })),
   });
 });
 

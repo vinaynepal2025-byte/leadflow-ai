@@ -15,6 +15,12 @@ const DEFAULT_MODELS = {
   openrouter: 'anthropic/claude-3.5-sonnet',
 };
 
+const PROVIDER_KEY_ENV_VARS = {
+  claude: 'ANTHROPIC_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+};
+
 // Retries a transient-overload response (429 rate-limited, 503 model
 // currently overloaded -- both explicitly "try again shortly" per Google/
 // OpenRouter's own error bodies, not a real failure) with short backoff
@@ -34,8 +40,24 @@ async function fetchWithRetry(url, init, { retries = 2, baseDelayMs = 1200 } = {
   return lastRes;
 }
 
+// Explicit AI_PROVIDER always wins -- an operator who set it on purpose
+// should never be silently overridden. Only when it's UNSET do we avoid
+// defaulting blindly to 'claude': that old default meant setting
+// GEMINI_API_KEY (or OPENROUTER_API_KEY) alone, without also
+// remembering to set AI_PROVIDER, silently did nothing -- the app kept
+// trying Claude, found no ANTHROPIC_API_KEY, and failed with "Claude
+// not configured," even though a real, usable key was sitting right
+// there unused. Auto-detect now picks whichever provider actually has a
+// key configured, in the same claude -> gemini -> openrouter order the
+// code already used as its default preference.
 function activeProvider() {
-  return (process.env.AI_PROVIDER || 'claude').toLowerCase();
+  const explicit = process.env.AI_PROVIDER;
+  if (explicit) return explicit.toLowerCase();
+
+  for (const provider of ['claude', 'gemini', 'openrouter']) {
+    if (process.env[PROVIDER_KEY_ENV_VARS[provider]]) return provider;
+  }
+  return 'claude'; // nothing configured anywhere -- same original default/error as before
 }
 
 function activeModel() {
@@ -130,4 +152,4 @@ async function generateJson(prompt, options) {
   }
 }
 
-module.exports = { generateText, generateJson, activeProvider, activeModel, DEFAULT_MODELS };
+module.exports = { generateText, generateJson, activeProvider, activeModel, DEFAULT_MODELS, PROVIDER_KEY_ENV_VARS };

@@ -52,6 +52,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loading = true;
   bool _saving = false;
   String? _serverTestResult;
+  Map<String, dynamic>? _aiStatus;
 
   @override
   void initState() {
@@ -66,6 +67,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _emailCtrl.text = data['contact_email'] ?? '';
     _phoneCtrl.text = data['contact_phone'] ?? '';
     setState(() => _loading = false);
+    _loadAiStatus();
+  }
+
+  Future<void> _loadAiStatus() async {
+    try {
+      final status = await _api.getAiProviderStatus();
+      if (mounted) setState(() => _aiStatus = status);
+    } catch (_) {
+      // non-critical -- rest of Settings still works without it
+    }
   }
 
   Future<void> _save() async {
@@ -93,6 +104,75 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       setState(() => _serverTestResult = '❌ Could not reach this server: ${e.toString().replaceFirst('Exception: ', '')}');
     }
+  }
+
+  Widget _aiStatusCard() {
+    final status = _aiStatus;
+    if (status == null) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(12),
+          child: Row(children: [
+            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 12),
+            Text('Checking AI provider status...', style: TextStyle(fontSize: 13)),
+          ]),
+        ),
+      );
+    }
+
+    final provider = status['provider']?.toString() ?? 'unknown';
+    final configured = status['configured'] == true;
+    final providers = (status['available_providers'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    // A provider other than the active one that DOES have a key set --
+    // exactly the "you configured Gemini but the app is still trying
+    // Claude" situation this card exists to catch.
+    final unusedConfigured = providers.where((p) => p['provider'] != provider && p['configured'] == true).toList();
+
+    return Card(
+      color: configured ? Colors.green.withValues(alpha: 0.08) : Colors.orange.withValues(alpha: 0.08),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(configured ? Icons.check_circle_outline : Icons.warning_amber_outlined,
+                  color: configured ? Colors.green : Colors.orange, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Active: ${provider[0].toUpperCase()}${provider.substring(1)} ${configured ? "(ready)" : "(not configured)"}',
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+            ]),
+            if (!configured)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, left: 28),
+                child: Text(
+                  'No API key set for $provider on the backend. AI features will fail until one is added.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                ),
+              ),
+            if (unusedConfigured.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, left: 28),
+                child: Text(
+                  '⚠ You have a key configured for ${unusedConfigured.map((p) => p['provider']).join(', ')}, but it isn\'t being used '
+                  '(the backend\'s AI_PROVIDER setting points elsewhere). Set AI_PROVIDER=${unusedConfigured.first['provider']} on the '
+                  'backend to switch to it.',
+                  style: const TextStyle(fontSize: 12, color: Colors.deepOrange, fontWeight: FontWeight.w600),
+                ),
+              ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _loadAiStatus,
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Recheck'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -148,6 +228,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 8),
             Text(_serverTestResult!, style: const TextStyle(fontSize: 13)),
           ],
+          const SizedBox(height: 32),
+          const Divider(),
+          const SizedBox(height: 8),
+          const Text('AI Provider', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: 4),
+          const Text(
+            'Which AI (Claude / Gemini / OpenRouter) powers Lead Scoring insights, AI Agents, and every AI-assisted feature in the app.',
+            style: TextStyle(color: Colors.grey, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          _aiStatusCard(),
           const SizedBox(height: 32),
           const Divider(),
           const SizedBox(height: 12),
