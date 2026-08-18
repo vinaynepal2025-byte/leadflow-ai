@@ -11,7 +11,7 @@
 
 import 'package:flutter/material.dart' show IconData, Icons;
 
-enum FlyerElementType { text, image, logo, shape, icon, svg, qrcode }
+enum FlyerElementType { text, image, logo, shape, icon, svg, qrcode, chart }
 
 FlyerElementType flyerElementTypeFromString(String? s) {
   switch (s) {
@@ -27,6 +27,8 @@ FlyerElementType flyerElementTypeFromString(String? s) {
       return FlyerElementType.svg;
     case 'qrcode':
       return FlyerElementType.qrcode;
+    case 'chart':
+      return FlyerElementType.chart;
     case 'text':
     default:
       return FlyerElementType.text;
@@ -47,6 +49,8 @@ String flyerElementTypeToString(FlyerElementType t) {
       return 'svg';
     case FlyerElementType.qrcode:
       return 'qrcode';
+    case FlyerElementType.chart:
+      return 'chart';
     case FlyerElementType.text:
       return 'text';
   }
@@ -240,6 +244,16 @@ class FlyerElement {
   String? strokeColor; // hex or null (no stroke)
   double strokeWidth;
 
+  // Chart-specific (Canva-parity Phase F). Reuses shapeColor as the
+  // primary series colour (bar/line) -- same reuse reasoning as icons
+  // below -- so the existing colour picker/AI Quick Restyle machinery
+  // works on a chart's colour for free. Pie mode ignores shapeColor in
+  // favour of a small fixed high-contrast palette, since a single colour
+  // can't distinguish slices.
+  String chartKind; // 'bar' | 'line' | 'pie'
+  List<String> chartLabels;
+  List<double> chartValues;
+
   // Icon-specific -- deliberately reuses shapeColor for fill rather than
   // adding a separate colour field: an icon is conceptually a special
   // shape (single-colour glyph), and every colour-editing control the
@@ -296,10 +310,14 @@ class FlyerElement {
     this.shapeGradientEnd,
     this.strokeColor,
     this.strokeWidth = 0,
+    this.chartKind = 'bar',
+    List<String>? chartLabels,
+    List<double>? chartValues,
     this.iconKey = 'star',
     this.svgData,
     this.svgRecolor = false,
-  });
+  })  : chartLabels = chartLabels ?? const ['A', 'B', 'C'],
+        chartValues = chartValues ?? const [30, 60, 45];
 
   factory FlyerElement.fromJson(Map<String, dynamic> json) {
     return FlyerElement(
@@ -341,6 +359,9 @@ class FlyerElement {
       shapeGradientEnd: json['shapeGradientEnd']?.toString(),
       strokeColor: json['strokeColor']?.toString(),
       strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 0,
+      chartKind: json['chartKind']?.toString() ?? 'bar',
+      chartLabels: (json['chartLabels'] as List?)?.map((e) => e.toString()).toList(),
+      chartValues: (json['chartValues'] as List?)?.map((e) => (e as num).toDouble()).toList(),
       iconKey: json['iconKey']?.toString() ?? 'star',
       svgData: json['svgData']?.toString(),
       svgRecolor: json['svgRecolor'] == true,
@@ -409,6 +430,11 @@ class FlyerElement {
       map['svgData'] = svgData ?? '';
       map['svgRecolor'] = svgRecolor;
       if (svgRecolor) map['shapeColor'] = shapeColor;
+    } else if (type == FlyerElementType.chart) {
+      map['chartKind'] = chartKind;
+      map['chartLabels'] = chartLabels;
+      map['chartValues'] = chartValues;
+      map['shapeColor'] = shapeColor;
     }
     return map;
   }

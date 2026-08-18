@@ -1878,6 +1878,9 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           copy.svgRecolor = true;
           copy.shapeColor = hex;
           break;
+        case FlyerElementType.chart:
+          copy.shapeColor = hex;
+          break;
         case FlyerElementType.image:
         case FlyerElementType.logo:
         case FlyerElementType.qrcode:
@@ -2222,6 +2225,9 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                                 } else if (el.type == FlyerElementType.qrcode) {
                                   _selectElement(el.id);
                                   _editQrCodeData(el);
+                                } else if (el.type == FlyerElementType.chart) {
+                                  _selectElement(el.id);
+                                  _editChartData(el);
                                 } else {
                                   _selectElement(el.id);
                                   _replaceElementImage(el);
@@ -2523,6 +2529,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _toolbarButton(Icons.emoji_symbols_outlined, 'Icon', _openIconPicker, appearance),
               _toolbarButton(Icons.polyline, 'SVG', _importSvgElement, appearance),
               _toolbarButton(Icons.qr_code, 'QR Code', _addQrCodeElement, appearance),
+              _toolbarButton(Icons.bar_chart, 'Chart', _addChartElement, appearance),
               _toolbarButton(Icons.perm_media_outlined, 'Assets', _openAssetLibrary, appearance),
               _toolbarButton(
                   Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
@@ -2697,6 +2704,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                     if (el.type == FlyerElementType.icon) ..._iconControls(el),
                     if (el.type == FlyerElementType.svg) ..._svgControls(el),
                     if (el.type == FlyerElementType.qrcode) ..._qrCodeControls(el),
+                    if (el.type == FlyerElementType.chart) ..._chartControls(el),
                   ],
                 ),
               ),
@@ -3446,6 +3454,212 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
   }
 
+  // Canva-parity Phase F -- a small data-entry dialog (chart kind + a
+  // growing list of label/value rows) shared by "add a chart" and "edit
+  // this chart's data". Returns null on cancel; on save, returns at least
+  // one row (rows with a blank label AND blank value are dropped, but if
+  // that would leave zero rows the dialog blocks save with a SnackBar
+  // rather than producing an element with no data to render).
+  Future<({String kind, List<String> labels, List<double> values})?> _promptChartData({
+    String initialKind = 'bar',
+    List<String>? initialLabels,
+    List<double>? initialValues,
+  }) async {
+    var kind = initialKind;
+    final labels = initialLabels ?? const ['A', 'B', 'C'];
+    final values = initialValues ?? const [30.0, 60.0, 45.0];
+    final labelControllers = List.generate(labels.length, (i) => TextEditingController(text: labels[i]));
+    final valueControllers =
+        List.generate(values.length, (i) => TextEditingController(text: values[i].toString()));
+
+    final result = await showDialog<({String kind, List<String> labels, List<double> values})>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setDialogState) {
+          return AlertDialog(
+            title: const Text('Chart data'),
+            content: SizedBox(
+              width: 340,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final k in ['bar', 'line', 'pie'])
+                          ChoiceChip(
+                            label: Text(k[0].toUpperCase() + k.substring(1)),
+                            selected: kind == k,
+                            onSelected: (_) => setDialogState(() => kind = k),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    for (var i = 0; i < labelControllers.length; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: TextField(
+                                controller: labelControllers[i],
+                                decoration: const InputDecoration(labelText: 'Label', isDense: true),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 2,
+                              child: TextField(
+                                controller: valueControllers[i],
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                decoration: const InputDecoration(labelText: 'Value', isDense: true),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.remove_circle_outline, size: 20),
+                              onPressed: () => setDialogState(() {
+                                labelControllers.removeAt(i);
+                                valueControllers.removeAt(i);
+                              }),
+                            ),
+                          ],
+                        ),
+                      ),
+                    TextButton.icon(
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Add row'),
+                      onPressed: () => setDialogState(() {
+                        labelControllers.add(TextEditingController());
+                        valueControllers.add(TextEditingController(text: '0'));
+                      }),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              TextButton(
+                onPressed: () {
+                  final outLabels = <String>[];
+                  final outValues = <double>[];
+                  for (var i = 0; i < labelControllers.length; i++) {
+                    final l = labelControllers[i].text.trim();
+                    final v = double.tryParse(valueControllers[i].text.trim());
+                    if (l.isEmpty && v == null) continue;
+                    outLabels.add(l);
+                    outValues.add(v ?? 0);
+                  }
+                  if (outLabels.isEmpty) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('Add at least one row with a value')));
+                    return;
+                  }
+                  Navigator.pop(ctx, (kind: kind, labels: outLabels, values: outValues));
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+    for (final c in labelControllers) {
+      c.dispose();
+    }
+    for (final c in valueControllers) {
+      c.dispose();
+    }
+    return result;
+  }
+
+  Future<void> _addChartElement() async {
+    final data = await _promptChartData();
+    if (data == null) return;
+    _addElement(FlyerElement(
+      id: _newId(),
+      type: FlyerElementType.chart,
+      x: _canvasWidth * 0.15,
+      y: _canvasHeight * 0.3,
+      width: _canvasWidth * 0.7,
+      height: _canvasWidth * 0.5,
+      chartKind: data.kind,
+      chartLabels: data.labels,
+      chartValues: data.values,
+      shapeColor: '#2563EB',
+      zIndex: _nextZIndex(),
+    ));
+  }
+
+  Future<void> _editChartData(FlyerElement el) async {
+    final data = await _promptChartData(
+      initialKind: el.chartKind,
+      initialLabels: el.chartLabels,
+      initialValues: el.chartValues,
+    );
+    if (data == null) return;
+    _pushUndo();
+    setState(() {
+      el.chartKind = data.kind;
+      el.chartLabels = data.labels;
+      el.chartValues = data.values;
+    });
+    _markDirty();
+  }
+
+  List<Widget> _chartControls(FlyerElement el) {
+    return [
+      Row(
+        children: [
+          TextButton.icon(
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: const Text('Edit data'),
+            onPressed: () => _editChartData(el),
+          ),
+          const Spacer(),
+          IconButton(
+            icon: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: flyerHexToColor(el.shapeColor),
+                border: Border.all(color: Colors.grey.shade400),
+                shape: BoxShape.circle,
+              ),
+            ),
+            tooltip: el.chartKind == 'pie' ? 'Colour (bar/line only)' : 'Chart colour',
+            onPressed: el.chartKind == 'pie'
+                ? null
+                : () async {
+                    final picked = await showDialog<Color>(
+                      context: context,
+                      builder: (_) => ColorPickerDialog(
+                          initial: flyerHexToColor(el.shapeColor), title: 'Chart Colour'),
+                    );
+                    if (picked != null) {
+                      setState(() => el.shapeColor = flyerColorToHex(picked));
+                      _markDirty();
+                    }
+                  },
+          ),
+        ],
+      ),
+      _sliderRow(
+        icon: Icons.opacity,
+        value: el.opacity.clamp(0.1, 1.0),
+        min: 0.1,
+        max: 1.0,
+        onChanged: (v) {
+          setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+    ];
+  }
+
   Widget _sliderRow({
     required IconData icon,
     required double value,
@@ -3544,6 +3758,17 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 errorBuilder: (_, __, ___) => Icon(_iconFor(el.type), size: 18, color: Colors.grey),
               )
             : Icon(_iconFor(el.type), size: 18, color: Colors.grey);
+        break;
+      case FlyerElementType.chart:
+        content = Icon(
+          el.chartKind == 'pie'
+              ? Icons.pie_chart
+              : el.chartKind == 'line'
+                  ? Icons.show_chart
+                  : Icons.bar_chart,
+          color: flyerHexToColor(el.shapeColor),
+          size: 22,
+        );
         break;
     }
     return ClipRRect(
@@ -3737,6 +3962,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         return Icons.polyline;
       case FlyerElementType.qrcode:
         return Icons.qr_code;
+      case FlyerElementType.chart:
+        return Icons.bar_chart;
     }
   }
 

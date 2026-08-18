@@ -1062,6 +1062,19 @@ class FlyerCanvasElementWidget extends StatelessWidget {
             ),
           ),
         );
+      case FlyerElementType.chart:
+        return Opacity(
+          opacity: element.opacity,
+          child: CustomPaint(
+            size: Size(w, h),
+            painter: ChartPainter(
+              kind: element.chartKind,
+              labels: element.chartLabels,
+              values: element.chartValues,
+              seriesColor: flyerHexToColor(element.shapeColor),
+            ),
+          ),
+        );
     }
   }
 
@@ -1201,5 +1214,166 @@ class CurvedTextPainter extends CustomPainter {
         oldDelegate.curveAmount != curveAmount ||
         oldDelegate.outlineColor != outlineColor ||
         oldDelegate.outlineWidth != outlineWidth;
+  }
+}
+
+/// Charts (Canva-parity Phase F) -- a small element type that turns a
+/// {labels, values} data table the user typed in into a real bar/line/pie
+/// chart, no charting package needed for these 3 basic kinds. All three
+/// modes guard the same degenerate cases: an empty/all-zero value set
+/// renders flat bars/a flat line rather than dividing by zero, and a
+/// single-value pie renders one full circle rather than nothing.
+class ChartPainter extends CustomPainter {
+  final String kind;
+  final List<String> labels;
+  final List<double> values;
+  final Color seriesColor;
+
+  ChartPainter({
+    required this.kind,
+    required this.labels,
+    required this.values,
+    required this.seriesColor,
+  });
+
+  static const List<Color> _pieColors = [
+    Color(0xFF1B2A4A),
+    Color(0xFF2563EB),
+    Color(0xFF0EA5E9),
+    Color(0xFF10B981),
+    Color(0xFFF59E0B),
+    Color(0xFFEF4444),
+    Color(0xFF8B5CF6),
+    Color(0xFFEC4899),
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.isEmpty || size.width <= 0 || size.height <= 0) return;
+    switch (kind) {
+      case 'line':
+        _paintLine(canvas, size);
+        break;
+      case 'pie':
+        _paintPie(canvas, size);
+        break;
+      case 'bar':
+      default:
+        _paintBar(canvas, size);
+    }
+  }
+
+  bool get _hasLabels => labels.any((l) => l.trim().isNotEmpty);
+
+  void _drawLabel(Canvas canvas, String text, Offset topLeft, double maxWidth) {
+    if (text.isEmpty) return;
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: const TextStyle(fontSize: 10, color: Colors.black87)),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+    tp.paint(canvas, Offset(topLeft.dx + (maxWidth - tp.width) / 2, topLeft.dy));
+  }
+
+  void _paintBar(Canvas canvas, Size size) {
+    final labelSpace = _hasLabels ? 16.0 : 0.0;
+    final chartH = size.height - labelSpace;
+    if (chartH <= 0) return;
+    final maxV = values.fold<double>(0, (m, v) => math.max(m, v));
+    final n = values.length;
+    final slotW = size.width / n;
+    final barW = slotW * 0.6;
+    final paint = Paint()..color = seriesColor;
+    for (var i = 0; i < n; i++) {
+      final barH = maxV > 0 ? (values[i] / maxV) * chartH : 0.0;
+      final left = i * slotW + (slotW - barW) / 2;
+      final rect = Rect.fromLTWH(left, chartH - barH, barW, barH);
+      canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(3)), paint);
+      if (labelSpace > 0 && i < labels.length) {
+        _drawLabel(canvas, labels[i], Offset(i * slotW, chartH + 2), slotW);
+      }
+    }
+  }
+
+  void _paintLine(Canvas canvas, Size size) {
+    final labelSpace = _hasLabels ? 16.0 : 0.0;
+    final chartH = size.height - labelSpace;
+    if (chartH <= 0) return;
+    final n = values.length;
+    final maxV = values.fold<double>(values.first, (m, v) => math.max(m, v));
+    final minV = values.fold<double>(values.first, (m, v) => math.min(m, v));
+    final range = maxV - minV;
+    final stepX = n > 1 ? size.width / (n - 1) : 0.0;
+
+    final points = <Offset>[];
+    for (var i = 0; i < n; i++) {
+      // A flat series (range == 0) draws a horizontal line through the
+      // middle rather than dividing by zero.
+      final norm = range > 0 ? (values[i] - minV) / range : 0.5;
+      final x = n > 1 ? i * stepX : size.width / 2;
+      final y = chartH - norm * chartH;
+      points.add(Offset(x, y));
+    }
+
+    final linePaint = Paint()
+      ..color = seriesColor
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (final p in points.skip(1)) {
+      path.lineTo(p.dx, p.dy);
+    }
+    canvas.drawPath(path, linePaint);
+
+    final dotPaint = Paint()..color = seriesColor;
+    for (var i = 0; i < points.length; i++) {
+      canvas.drawCircle(points[i], 3.5, dotPaint);
+      if (labelSpace > 0 && i < labels.length) {
+        final labelW = n > 1 ? stepX : size.width;
+        _drawLabel(canvas, labels[i], Offset(points[i].dx - labelW / 2, chartH + 2), labelW);
+      }
+    }
+  }
+
+  void _paintPie(Canvas canvas, Size size) {
+    final total = values.fold<double>(0, (a, b) => a + b);
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2 * 0.85;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    if (total <= 0) {
+      // No data yet to proportion slices from -- an empty ring reads as
+      // "nothing entered" rather than a misleading full-colour disc.
+      final paint = Paint()
+        ..color = Colors.grey.shade300
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3;
+      canvas.drawCircle(center, radius, paint);
+      return;
+    }
+    var startAngle = -math.pi / 2;
+    for (var i = 0; i < values.length; i++) {
+      final sweep = (values[i] / total) * 2 * math.pi;
+      final paint = Paint()..color = _pieColors[i % _pieColors.length];
+      canvas.drawArc(rect, startAngle, sweep, true, paint);
+      startAngle += sweep;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant ChartPainter oldDelegate) {
+    return oldDelegate.kind != kind ||
+        oldDelegate.seriesColor != seriesColor ||
+        !_listEquals(oldDelegate.labels, labels) ||
+        !_listEquals(oldDelegate.values, values);
+  }
+
+  static bool _listEquals<T>(List<T> a, List<T> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 }

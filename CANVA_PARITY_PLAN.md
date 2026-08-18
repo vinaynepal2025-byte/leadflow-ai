@@ -38,7 +38,7 @@ Freehand drawing directly on the canvas.
 ## Phase F — Charts
 
 Bar/line/pie chart elements built from a small data table the user types in.
-**Status: 📋** — a new element type rendering via `CustomPainter` from a `{labels, values}` structure stored in the element; no charting package needed for the 3 basic types.
+**Status: ✅ shipped** — a new element type rendering via `ChartPainter` (`flyer_canvas_element_widget.dart`) from a `{labels, values}` structure stored in the element; no charting package needed for the 3 basic types. A shared data-entry dialog (chart kind + add/remove label/value rows) both creates and edits a chart. Bar-height/pie-sweep/line-normalization math verified against known values plus the degenerate cases (all-zero values, a single value, a flat line) with a standalone script before wiring it in.
 
 ## Phase G — QR code element
 
@@ -91,7 +91,7 @@ Canva's AI suite: generate a whole design from a prompt, AI copywriting, text-to
 | C — Photo adjustments/filters | ✅ brightness/contrast/saturation shipped; duotone not yet |
 | D — Frames & grids | 📋 |
 | E — Draw tool | 📋 |
-| F — Charts | 📋 |
+| F — Charts | ✅ shipped |
 | G — QR code element | ✅ shipped |
 | H — Multi-page designs | 📋 |
 | I — Magic Resize | ✅ baseline |
