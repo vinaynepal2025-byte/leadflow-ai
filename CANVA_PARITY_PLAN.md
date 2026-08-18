@@ -33,7 +33,7 @@ Frames: an image masked into a shape (circle/star/blob). Grids: multiple photos 
 ## Phase E — Draw tool
 
 Freehand drawing directly on the canvas.
-**Status: 📋** — `GestureDetector` recording `Offset` points into a `Path`, rendered as a new element type (`FlyerElementType.drawing`), same persistence pattern as every other element (serializes as a list of points in `canvas_json`).
+**Status: ✅ shipped** — a "Draw" toolbar toggle puts the canvas into a distinct capture mode (same shape as the existing Group-select mode): a top `GestureDetector` swallows pan gestures into a live stroke preview, and on release the stroke becomes a real `FlyerElementType.drawing` element with a pen colour/width row above the toolbar while active. Points are stored as *fractional* coordinates (0.0–1.0 of the element's own bounding box) rather than absolute pixels, so dragging the element's normal resize handles afterward scales the stroke correctly for free — verified with a standalone script covering bounding-box computation, fractional-point round-tripping, resize scaling, and the degenerate straight-line case (clamped to a minimum 20px so a perfectly vertical/horizontal stroke still gets a real, selectable bounding box).
 
 ## Phase F — Charts
 
@@ -90,7 +90,7 @@ Canva's AI suite: generate a whole design from a prompt, AI copywriting, text-to
 | B — Text effects (outline/curved) | ✅ outline + curve shipped; hollow/lift not yet |
 | C — Photo adjustments/filters | ✅ brightness/contrast/saturation shipped; duotone not yet |
 | D — Frames & grids | 📋 |
-| E — Draw tool | 📋 |
+| E — Draw tool | ✅ shipped |
 | F — Charts | ✅ shipped |
 | G — QR code element | ✅ shipped |
 | H — Multi-page designs | 📋 |

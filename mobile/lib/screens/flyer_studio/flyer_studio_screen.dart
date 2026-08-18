@@ -90,6 +90,18 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   final Set<String> _groupSelectedIds = {};
   double? _groupRotateStartAngle;
 
+  // Draw tool (Canva-parity Phase E). A distinct mode, same shape as
+  // _groupSelectMode above -- while active, the canvas captures freehand
+  // pan gestures into a new drawing element instead of the normal
+  // drag/resize/select interaction. _liveStrokePoints is screen-space
+  // (raw pixels within the canvas view) for the in-progress preview only;
+  // the finished element stores fractional points instead (see
+  // FlyerElement.drawingPoints).
+  bool _drawMode = false;
+  List<Offset> _liveStrokePoints = [];
+  Color _drawColor = const Color(0xFF1B2A4A);
+  double _drawStrokeWidth = 4;
+
   Timer? _autosaveTimer;
   final List<String> _undoStack = [];
   final List<String> _redoStack = [];
@@ -290,6 +302,19 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     });
   }
 
+  void _toggleDrawMode() {
+    if (context.read<AppearanceSettings>().haptics) HapticFeedback.selectionClick();
+    setState(() {
+      _drawMode = !_drawMode;
+      _liveStrokePoints = [];
+      if (_drawMode) {
+        _selectedId = null;
+        _groupSelectMode = false;
+        _groupSelectedIds.clear();
+      }
+    });
+  }
+
   void _toggleGroupMember(String id) {
     if (context.read<AppearanceSettings>().haptics) HapticFeedback.selectionClick();
     setState(() {
@@ -446,6 +471,48 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   }
 
   String _newId() => DateTime.now().microsecondsSinceEpoch.toString();
+
+  // Canva-parity Phase E -- turns the just-finished freehand stroke
+  // (_liveStrokePoints, screen-space) into a real FlyerElement.
+  // _addElement already pushes undo, so this doesn't call it separately.
+  void _finishDrawing(double scale) {
+    final pts = _liveStrokePoints;
+    setState(() => _liveStrokePoints = []);
+    if (pts.length < 2) return; // an accidental tap, not a real stroke
+
+    var minX = pts.first.dx, maxX = pts.first.dx;
+    var minY = pts.first.dy, maxY = pts.first.dy;
+    for (final p in pts) {
+      minX = math.min(minX, p.dx);
+      maxX = math.max(maxX, p.dx);
+      minY = math.min(minY, p.dy);
+      maxY = math.max(maxY, p.dy);
+    }
+    // A perfectly straight vertical/horizontal stroke has zero width or
+    // height in one axis -- clamp to a minimum so the element still has
+    // a real, selectable/resizable bounding box afterwards.
+    final boundingW = math.max(maxX - minX, 20.0);
+    final boundingH = math.max(maxY - minY, 20.0);
+    final fractionalPoints = pts
+        .map((p) => [
+              ((p.dx - minX) / boundingW).clamp(0.0, 1.0),
+              ((p.dy - minY) / boundingH).clamp(0.0, 1.0),
+            ])
+        .toList();
+
+    _addElement(FlyerElement(
+      id: _newId(),
+      type: FlyerElementType.drawing,
+      x: minX / scale,
+      y: minY / scale,
+      width: boundingW / scale,
+      height: boundingH / scale,
+      drawingPoints: fractionalPoints,
+      shapeColor: flyerColorToHex(_drawColor),
+      strokeWidth: _drawStrokeWidth,
+      zIndex: _nextZIndex(),
+    ));
+  }
 
   void _addTextElement() {
     final el = FlyerElement(
@@ -1879,6 +1946,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           copy.shapeColor = hex;
           break;
         case FlyerElementType.chart:
+        case FlyerElementType.drawing:
           copy.shapeColor = hex;
           break;
         case FlyerElementType.image:
@@ -2086,13 +2154,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                         duration: const Duration(milliseconds: 200),
                         curve: Curves.easeOut,
                         alignment: Alignment.bottomCenter,
-                        child: _groupSelectMode
-                            ? (_groupSelectedIds.isNotEmpty
-                                ? _buildGroupActionBar()
-                                : const SizedBox(width: double.infinity, height: 0))
-                            : (selected != null
-                                ? _buildStylePanel(selected)
-                                : const SizedBox(width: double.infinity, height: 0)),
+                        child: _drawMode
+                            ? _buildDrawToolBar()
+                            : (_groupSelectMode
+                                ? (_groupSelectedIds.isNotEmpty
+                                    ? _buildGroupActionBar()
+                                    : const SizedBox(width: double.infinity, height: 0))
+                                : (selected != null
+                                    ? _buildStylePanel(selected)
+                                    : const SizedBox(width: double.infinity, height: 0))),
                       ),
                       _buildActionBar(),
                       _buildToolbar(),
@@ -2228,6 +2298,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                                 } else if (el.type == FlyerElementType.chart) {
                                   _selectElement(el.id);
                                   _editChartData(el);
+                                } else if (el.type == FlyerElementType.drawing) {
+                                  _selectElement(el.id);
                                 } else {
                                   _selectElement(el.id);
                                   _replaceElementImage(el);
@@ -2264,6 +2336,32 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               child: CustomPaint(
                                 painter: FlyerSnapGuidePainter(
                                     guides: _snapGuides, scale: scale),
+                              ),
+                            ),
+                          ),
+                        // Draw mode's capture surface -- deliberately the
+                        // LAST (topmost) child here, opaque-hit-testing,
+                        // so while active it swallows every pan gesture
+                        // over the canvas before any element underneath
+                        // ever sees it (Stack hit-tests in reverse paint
+                        // order). Only present in the tree at all while
+                        // _drawMode is on, so normal drag/resize/select
+                        // is completely unaffected the rest of the time.
+                        if (_drawMode && !_exporting)
+                          Positioned.fill(
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onPanStart: (details) =>
+                                  setState(() => _liveStrokePoints = [details.localPosition]),
+                              onPanUpdate: (details) => setState(
+                                  () => _liveStrokePoints = [..._liveStrokePoints, details.localPosition]),
+                              onPanEnd: (_) => _finishDrawing(scale),
+                              child: CustomPaint(
+                                painter: LiveStrokePainter(
+                                  points: _liveStrokePoints,
+                                  color: _drawColor,
+                                  strokeWidth: _drawStrokeWidth * scale,
+                                ),
                               ),
                             ),
                           ),
@@ -2530,6 +2628,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _toolbarButton(Icons.polyline, 'SVG', _importSvgElement, appearance),
               _toolbarButton(Icons.qr_code, 'QR Code', _addQrCodeElement, appearance),
               _toolbarButton(Icons.bar_chart, 'Chart', _addChartElement, appearance),
+              _toolbarToggleButton(Icons.gesture, 'Draw', _drawMode, _toggleDrawMode, appearance),
               _toolbarButton(Icons.perm_media_outlined, 'Assets', _openAssetLibrary, appearance),
               _toolbarButton(
                   Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
@@ -2617,6 +2716,60 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // Canva-parity Phase E -- pen colour + thickness, live for the next
+  // stroke (each finished stroke bakes in whatever these were set to at
+  // the moment it was drawn; changing them here doesn't retroactively
+  // recolour strokes already on the canvas, same as every other design
+  // tool's pen settings).
+  Widget _buildDrawToolBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: context.watch<AppearanceSettings>().primaryColor.withValues(alpha: 0.12)),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.gesture, size: 16, color: Colors.grey),
+          const SizedBox(width: 8),
+          const Text('Draw mode -- drag on the canvas', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          const Spacer(),
+          GestureDetector(
+            onTap: () async {
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(initial: _drawColor, title: 'Pen colour'),
+              );
+              if (picked != null) setState(() => _drawColor = picked);
+            },
+            child: Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: _drawColor,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.grey.shade400),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Icon(Icons.line_weight, size: 16, color: Colors.grey),
+          SizedBox(
+            width: 100,
+            child: Slider(
+              value: _drawStrokeWidth,
+              min: 1,
+              max: 20,
+              onChanged: (v) => setState(() => _drawStrokeWidth = v),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3770,6 +3923,9 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
           size: 22,
         );
         break;
+      case FlyerElementType.drawing:
+        content = Icon(Icons.gesture, color: flyerHexToColor(el.shapeColor), size: 22);
+        break;
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(6),
@@ -3964,6 +4120,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         return Icons.qr_code;
       case FlyerElementType.chart:
         return Icons.bar_chart;
+      case FlyerElementType.drawing:
+        return Icons.gesture;
     }
   }
 

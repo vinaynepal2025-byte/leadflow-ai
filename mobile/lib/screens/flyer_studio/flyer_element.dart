@@ -11,7 +11,7 @@
 
 import 'package:flutter/material.dart' show IconData, Icons;
 
-enum FlyerElementType { text, image, logo, shape, icon, svg, qrcode, chart }
+enum FlyerElementType { text, image, logo, shape, icon, svg, qrcode, chart, drawing }
 
 FlyerElementType flyerElementTypeFromString(String? s) {
   switch (s) {
@@ -29,6 +29,8 @@ FlyerElementType flyerElementTypeFromString(String? s) {
       return FlyerElementType.qrcode;
     case 'chart':
       return FlyerElementType.chart;
+    case 'drawing':
+      return FlyerElementType.drawing;
     case 'text':
     default:
       return FlyerElementType.text;
@@ -51,6 +53,8 @@ String flyerElementTypeToString(FlyerElementType t) {
       return 'qrcode';
     case FlyerElementType.chart:
       return 'chart';
+    case FlyerElementType.drawing:
+      return 'drawing';
     case FlyerElementType.text:
       return 'text';
   }
@@ -254,6 +258,17 @@ class FlyerElement {
   List<String> chartLabels;
   List<double> chartValues;
 
+  // Drawing-specific (Canva-parity Phase E). Points are stored as
+  // FRACTIONAL coordinates -- each [x, y] pair in 0.0..1.0 of the
+  // element's own width/height -- rather than absolute pixels, so
+  // dragging this element's resize handles scales the stroke correctly
+  // for free (the painter just multiplies by the current size.width/
+  // size.height every repaint) instead of needing a separate
+  // re-normalization step on every resize. Reuses shapeColor (pen
+  // colour) and strokeWidth (pen thickness), same reuse reasoning as
+  // icons/SVG/chart above.
+  List<List<double>> drawingPoints;
+
   // Icon-specific -- deliberately reuses shapeColor for fill rather than
   // adding a separate colour field: an icon is conceptually a special
   // shape (single-colour glyph), and every colour-editing control the
@@ -313,6 +328,7 @@ class FlyerElement {
     this.chartKind = 'bar',
     List<String>? chartLabels,
     List<double>? chartValues,
+    this.drawingPoints = const [],
     this.iconKey = 'star',
     this.svgData,
     this.svgRecolor = false,
@@ -362,6 +378,10 @@ class FlyerElement {
       chartKind: json['chartKind']?.toString() ?? 'bar',
       chartLabels: (json['chartLabels'] as List?)?.map((e) => e.toString()).toList(),
       chartValues: (json['chartValues'] as List?)?.map((e) => (e as num).toDouble()).toList(),
+      drawingPoints: (json['drawingPoints'] as List?)
+              ?.map((p) => (p as List).map((n) => (n as num).toDouble()).toList())
+              .toList() ??
+          const [],
       iconKey: json['iconKey']?.toString() ?? 'star',
       svgData: json['svgData']?.toString(),
       svgRecolor: json['svgRecolor'] == true,
@@ -435,6 +455,10 @@ class FlyerElement {
       map['chartLabels'] = chartLabels;
       map['chartValues'] = chartValues;
       map['shapeColor'] = shapeColor;
+    } else if (type == FlyerElementType.drawing) {
+      map['drawingPoints'] = drawingPoints;
+      map['shapeColor'] = shapeColor;
+      map['strokeWidth'] = strokeWidth;
     }
     return map;
   }

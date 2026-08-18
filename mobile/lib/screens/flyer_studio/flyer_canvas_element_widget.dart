@@ -1075,6 +1075,18 @@ class FlyerCanvasElementWidget extends StatelessWidget {
             ),
           ),
         );
+      case FlyerElementType.drawing:
+        return Opacity(
+          opacity: element.opacity,
+          child: CustomPaint(
+            size: Size(w, h),
+            painter: DrawingPainter(
+              points: element.drawingPoints,
+              color: flyerHexToColor(element.shapeColor),
+              strokeWidth: (element.strokeWidth > 0 ? element.strokeWidth : 4) * scale,
+            ),
+          ),
+        );
     }
   }
 
@@ -1376,4 +1388,73 @@ class ChartPainter extends CustomPainter {
     }
     return true;
   }
+}
+
+/// Freehand drawing (Canva-parity Phase E). [points] are fractional
+/// (0.0..1.0 of the element's own width/height, see FlyerElement.
+/// drawingPoints) so the stroke redraws correctly at whatever size the
+/// element widget is currently laid out at -- while actively drawing
+/// (DrawCaptureOverlay below) and after a resize alike, the same painter
+/// runs, just fed a different [size].
+class DrawingPainter extends CustomPainter {
+  final List<List<double>> points;
+  final Color color;
+  final double strokeWidth;
+
+  DrawingPainter({required this.points, required this.color, required this.strokeWidth});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.length < 2) return;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path()..moveTo(points.first[0] * size.width, points.first[1] * size.height);
+    for (final p in points.skip(1)) {
+      path.lineTo(p[0] * size.width, p[1] * size.height);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant DrawingPainter oldDelegate) {
+    return oldDelegate.color != color ||
+        oldDelegate.strokeWidth != strokeWidth ||
+        oldDelegate.points.length != points.length;
+  }
+}
+
+/// The in-progress stroke preview while actively drawing (before pan-end
+/// turns it into a real FlyerElement) -- raw screen-space points, unlike
+/// DrawingPainter's fractional element-local ones above, since this
+/// paints directly over the live canvas view at a fixed size for the
+/// duration of one gesture.
+class LiveStrokePainter extends CustomPainter {
+  final List<Offset> points;
+  final Color color;
+  final double strokeWidth;
+
+  LiveStrokePainter({required this.points, required this.color, required this.strokeWidth});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.length < 2) return;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (final p in points.skip(1)) {
+      path.lineTo(p.dx, p.dy);
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant LiveStrokePainter oldDelegate) => true;
 }
