@@ -26,6 +26,7 @@ import 'lead_notes_screen.dart';
 import 'customize_lead_detail_screen.dart';
 import 'flyer_studio/flyer_history_screen.dart';
 import 'lead_timeline_screen.dart';
+import 'automation_center_screen.dart';
 import '../widgets/glass_widgets.dart';
 
 // Must stay in sync with backend/routes/leadDetailSections.js DEFAULTS
@@ -552,6 +553,16 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
       appBar: AppBar(
         title: Text(lead.fullName),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.hub_outlined),
+            tooltip: 'AI Agents',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => AutomationCenterScreen(initialLeadId: lead.id, initialLeadName: lead.fullName),
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.tune),
             tooltip: 'Customize this screen',
