@@ -86,11 +86,11 @@ router.post('/submit/:publicKey', async (req, res) => {
 
   const id = randomUUID();
   await db.prepare(`
-    INSERT INTO leads (id, tenant_id, full_name, phone, email, source, stage, assigned_to, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO leads (id, tenant_id, full_name, phone, email, source, stage, assigned_to, notes, lifecycle_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, form.tenant_id, full_name, phone || null, email || null,
     `${form.channel}: ${form.name}`, form.default_stage, form.assign_to || null,
-    noteParts.join('\n') || null);
+    noteParts.join('\n') || null, 'NEW');
 
   await db.prepare('UPDATE capture_forms SET submission_count = submission_count + 1 WHERE id = ?').run(form.id);
 

@@ -18,6 +18,7 @@ const { sendWhatsAppMessage } = require('./whatsapp');
 const { sendEmail } = require('./email');
 const { generateText, generateJson } = require('./aiProvider');
 const { createNotification } = require('../routes/notifications');
+const { fireEvent } = require('./automationEngine');
 const { isValidTransition, computeAllowedNextStates, NEEDS_REVIEW } = require('./leadLifecycle');
 
 function registerBuiltinTools() {
@@ -138,6 +139,21 @@ function registerBuiltinTools() {
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `).run(transitionId, context.tenant_id, lead_id, fromStatus, to_status, context.actor.type, reason || null);
       });
+
+      // Fire-and-forget, same pattern as every other trigger call site
+      // (leads.js, documents.js, cockpit.js, routes/leadLifecycle.js's
+      // own PATCH endpoint) -- the transition is already committed
+      // above, so a failing automation rule must never undo or block
+      // it. Keeps this tool's behavior identical to the human-facing
+      // PATCH /leads/:id/lifecycle-status route, which this tool's own
+      // description claims equivalence with.
+      fireEvent('lead.lifecycle_status_changed', {
+        tenant_id: context.tenant_id,
+        lead_id,
+        from_status: fromStatus,
+        to_status,
+        initiated_by: context.actor.type,
+      }).catch((err) => console.error('lead.lifecycle_status_changed automation failed (transition already saved):', err.message));
 
       return { lead_id, from_status: fromStatus, to_status, transition_id: transitionId };
     },
