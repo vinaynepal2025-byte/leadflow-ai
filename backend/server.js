@@ -52,6 +52,7 @@ const leadLifecycleRouter = require('./routes/leadLifecycle');
 const toolsRouter = require('./routes/tools');
 const { registerBuiltinTools } = require('./services/builtinTools');
 const orchestratorRouter = require('./routes/orchestrator');
+const agentsRouter = require('./routes/agents');
 const db = require('./db');
 
 const app = express();
@@ -172,6 +173,7 @@ app.use('/leads', leadLifecycleRouter);
 registerBuiltinTools();
 app.use('/tools', toolsRouter);
 app.use('/orchestrator', orchestratorRouter);
+app.use('/agents', agentsRouter);
 app.use('/lead360', require('./routes/lead360'));
 
 const PORT = process.env.PORT || 3000;
