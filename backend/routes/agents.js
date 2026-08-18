@@ -18,6 +18,8 @@ const leadRecoveryAgent = require('../services/agents/leadRecoveryAgent');
 const intakeAgent = require('../services/agents/intakeAgent');
 const documentAgent = require('../services/agents/documentAgent');
 const nurtureAgent = require('../services/agents/nurtureAgent');
+const callingIntelligenceAgent = require('../services/agents/callingIntelligenceAgent');
+const paymentCommitmentAgent = require('../services/agents/paymentCommitmentAgent');
 
 const router = express.Router();
 
@@ -28,6 +30,8 @@ const AGENTS = {
   [intakeAgent.AGENT_NAME]: intakeAgent,
   [documentAgent.AGENT_NAME]: documentAgent,
   [nurtureAgent.AGENT_NAME]: nurtureAgent,
+  [callingIntelligenceAgent.AGENT_NAME]: callingIntelligenceAgent,
+  [paymentCommitmentAgent.AGENT_NAME]: paymentCommitmentAgent,
 };
 
 function tenantId(req) {
