@@ -948,6 +948,17 @@ class ApiService {
     return jsonDecode(body) as Map<String, dynamic>;
   }
 
+  // ---------- AI Provider Status ----------
+
+  /// {provider, model, configured, provider_was_explicit, available_providers: [{provider, configured}]}
+  /// -- lets the app show "AI: Gemini (ready)" or flag a configured-but-
+  /// unused key instead of every AI feature just failing with no clue why.
+  Future<Map<String, dynamic>> getAiProviderStatus() async {
+    final res = await http.get(Uri.parse('$baseUrl/ai/provider'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   // ---------- Email ----------
 
   Future<void> sendEmail({required String leadId, required String subject, required String message, String? createdBy}) async {
