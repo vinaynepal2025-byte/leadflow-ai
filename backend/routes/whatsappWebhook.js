@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto');
 const db = require('../db');
 const { createNotification } = require('./notifications');
 const { handleInboundForTriage } = require('../services/smartTriage');
+const { verifyMetaSignature } = require('../services/webhookSecurity');
 
 const router = express.Router();
 
@@ -33,6 +34,10 @@ router.get('/webhook', async (req, res) => {
 
 // POST /whatsapp/webhook — inbound message events from Meta
 router.post('/webhook', async (req, res) => {
+  if (!verifyMetaSignature(req, { secretEnvVar: 'WHATSAPP_APP_SECRET', webhookName: 'WhatsApp' })) {
+    return res.sendStatus(401);
+  }
+
   // Always acknowledge immediately — Meta retries if it doesn't get a fast 200.
   res.sendStatus(200);
 

@@ -13,6 +13,7 @@ const db = require('../db');
 const { fetchLeadDetails } = require('../services/facebookLeadAds');
 const { createNotification } = require('./notifications');
 const { fireEvent } = require('../services/automationEngine');
+const { verifyMetaSignature } = require('../services/webhookSecurity');
 
 const router = express.Router();
 
@@ -35,6 +36,10 @@ router.get('/webhook', (req, res) => {
 
 // POST /lead-ads/webhook — fired by Meta whenever someone submits a lead form
 router.post('/webhook', async (req, res) => {
+  if (!verifyMetaSignature(req, { secretEnvVar: 'LEAD_ADS_APP_SECRET', webhookName: 'Lead Ads' })) {
+    return res.sendStatus(401);
+  }
+
   res.sendStatus(200); // ack immediately — Meta retries on a slow/failed response
 
   try {

@@ -58,7 +58,13 @@ const app = express();
 // Express read X-Forwarded-Proto and report the real scheme.
 app.set('trust proxy', 1);
 app.use(cors());
-app.use(express.json());
+// `verify` stashes the exact raw bytes Express parsed onto req.rawBody --
+// needed by services/webhookSecurity.js to recompute Meta's
+// X-Hub-Signature-256 HMAC, which must be taken over the raw body, not
+// the re-serialized JSON (whitespace/key-order could differ and break
+// the signature). Applies to every request; the cost is one extra
+// Buffer reference, not a copy.
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
 // P0 SECURITY FIX -- Phase 1 (foundation, non-breaking). See
 // middleware/auth.js for the full rationale. Additive only: requests
