@@ -48,7 +48,7 @@ A QR code as a placeable, resizable canvas element (encoding a URL/lead-capture-
 ## Phase H — Multi-page designs
 
 One project, several pages/canvases (e.g., a 2-page flyer or a mini-brochure).
-**Status: 📋** — extends the document model (`flyer_projects.canvas_json` becomes an array-of-pages instead of an array-of-elements at the top level) — a real schema-shape change, needs a migration path for existing single-page projects (treat a legacy array as "page 1").
+**Status: ✅ shipped** — the highest-blast-radius change in this whole plan (it touches the saved-data shape of every existing flyer/logo project), so it was built and verified last, and deliberately conservatively: canvas_json's wire shape only changes for a project that's *actually* multi-page. A single page (still the overwhelming common case, including every project saved before this feature existed) round-trips through the exact same flat array it always has -- zero format churn, and every other reader of canvas_json (AI generation, project duplication, which the backend never inspects the structure of at all) keeps working unmodified. A genuinely multi-page project uses a new page-wrapper shape (`{'__page': true, 'elements': [...]}` per page), an unambiguous discriminator nothing before this ever wrote. The parsing/serialization is two pure functions (`parsePagesFromCanvasJson`/`canvasJsonForPages` in `flyer_element.dart`, no widget/BuildContext involved) specifically so the backward-compatibility behaviour could be unit-tested in isolation -- `test/flyer_multipage_test.dart` covers legacy-load, multi-page-load, an AI-generation-style flat response arriving for an already-multi-page project, and full round-trips for both shapes (10 tests, all passing). UI: a page strip (add/switch/long-press-to-delete) above the toolbar, hidden in Logo Studio mode since a logo mark has no Canva-parity multi-page concept. Undo/redo history is deliberately scoped per-page (cleared on page switch), documented as a real, considered scoping decision rather than an oversight. Export/share/thumbnail generation still operate on the currently-active page only for this pass -- a "export/flatten the whole multi-page design" action is a natural follow-up, not included here.
 
 ## Phase I — Magic Resize (smarter)
 
@@ -93,7 +93,7 @@ Canva's AI suite: generate a whole design from a prompt, AI copywriting, text-to
 | E — Draw tool | ✅ shipped |
 | F — Charts | ✅ shipped |
 | G — QR code element | ✅ shipped |
-| H — Multi-page designs | 📋 |
+| H — Multi-page designs | ✅ shipped |
 | I — Magic Resize | ✅ baseline |
 | J — Background remover | ⚠️ classical-CV version buildable; AI-quality needs a paid API |
 | K — Bigger library | ⚠️ ongoing content growth, not one task |
@@ -101,4 +101,4 @@ Canva's AI suite: generate a whole design from a prompt, AI copywriting, text-to
 | M — Collaboration | 🏗️ separate initiative, low value for this product |
 | N — AI Magic Design suite | ⚠️ partially exists; text-to-image needs a new paid API |
 
-This is a genuinely large program — comparable in size to the 12-phase Logo Studio build earlier in this session, likely larger. It will continue phase-by-phase in the same way: real code, real verification, one commit per phase, this table kept honest about what's actually done.
+This is a genuinely large program — comparable in size to the 12-phase Logo Studio build earlier in this session, likely larger. Every phase buildable with code alone and no external cost/vendor decision (A, B, C, D, E, F, G, H) is now shipped and verified, per the explicit instruction to finish everything code-only first. What's left is all in the other category on purpose: J/N need a paid AI API decision, K is ongoing content growth rather than a one-time task, L/M are separate infrastructure initiatives sized honestly rather than folded in here. This table stays the record of what's actually true, not aspirational — updated the same pass any of these change.

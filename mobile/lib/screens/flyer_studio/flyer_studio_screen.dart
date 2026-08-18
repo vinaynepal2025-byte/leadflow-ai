@@ -71,6 +71,19 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   String? _backgroundImageUrl;
   List<FlyerElement> _elements = [];
 
+  // Multi-page designs (Canva-parity Phase H). _elements is always "the
+  // active page's elements" -- unchanged in meaning from before this
+  // existed, so the 40+ existing call sites that read/mutate it keep
+  // working untouched. _pages holds every page's elements, kept in sync
+  // with _elements via _syncActivePage() immediately before any read
+  // (switch/save) that needs the full set. A brand-new/legacy single-
+  // page project is just _pages.length == 1, which round-trips through
+  // canvas_json in the exact same flat-array shape it always has --
+  // multi-page only changes the wire format for genuinely multi-page
+  // projects, so no existing saved project's data shape changes.
+  List<List<FlyerElement>> _pages = [[]];
+  int _activePageIndex = 0;
+
   String? _selectedId;
   bool _loading = true;
   bool _saving = false;
@@ -180,12 +193,78 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     _canvasHeight = (data['canvas_height'] as num?)?.toDouble() ?? 1350;
     _backgroundColor = data['background_color']?.toString() ?? '#FFFFFF';
     _backgroundImageUrl = data['background_image_url']?.toString();
-    final raw = (data['canvas_json'] as List?) ?? [];
-    _elements = raw
-        .whereType<Map>()
-        .map((e) => FlyerElement.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
+    _pages = parsePagesFromCanvasJson((data['canvas_json'] as List?) ?? []);
+    _activePageIndex = 0;
+    _elements = _pages[0];
     _sortElements();
+  }
+
+  /// Writes the currently-active page's in-progress edits back into
+  /// _pages before anything (page switch, save) needs the full set.
+  void _syncActivePage() {
+    if (_activePageIndex >= 0 && _activePageIndex < _pages.length) {
+      _pages[_activePageIndex] = _elements;
+    }
+  }
+
+  List<Map<String, dynamic>> _canvasJsonForSave() {
+    _syncActivePage();
+    return canvasJsonForPages(_pages);
+  }
+
+  void _switchToPage(int index) {
+    if (index == _activePageIndex || index < 0 || index >= _pages.length) return;
+    _syncActivePage();
+    setState(() {
+      _activePageIndex = index;
+      _elements = _pages[index];
+      _selectedId = null;
+      // Undo/redo history doesn't cross page boundaries -- a snapshot
+      // taken on one page can't be meaningfully restored onto another.
+      _undoStack.clear();
+      _redoStack.clear();
+    });
+  }
+
+  void _addPage() {
+    _syncActivePage();
+    setState(() {
+      _pages.add([]);
+      _activePageIndex = _pages.length - 1;
+      _elements = _pages[_activePageIndex];
+      _selectedId = null;
+      _undoStack.clear();
+      _redoStack.clear();
+    });
+    _markDirty();
+  }
+
+  Future<void> _deletePage(int index) async {
+    if (_pages.length <= 1) {
+      _showSnack('A design needs at least one page');
+      return;
+    }
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('Delete this page?'),
+        content: const Text('This removes the page and everything on it.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    setState(() {
+      _pages.removeAt(index);
+      if (_activePageIndex >= _pages.length) _activePageIndex = _pages.length - 1;
+      _elements = _pages[_activePageIndex];
+      _selectedId = null;
+      _undoStack.clear();
+      _redoStack.clear();
+    });
+    _markDirty();
   }
 
   void _sortElements() => _elements.sort((a, b) => a.zIndex.compareTo(b.zIndex));
@@ -259,7 +338,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     try {
       await _api.updateFlyerProjectCanvas(
         _projectId!,
-        _elements.map((e) => e.toJson()).toList(),
+        _canvasJsonForSave(),
       );
       _dirty = false;
       if (!silent) _showSnack('Saved');
@@ -2393,6 +2472,13 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 : Column(
                     children: [
                       Expanded(child: _buildCanvasArea()),
+                      // Multi-page designs (Canva-parity Phase H). Logo
+                      // Studio reuses this same screen for a single
+                      // artboard mark -- multi-page has no meaning there
+                      // (Canva itself treats a logo as one canvas), so
+                      // it's hidden in that mode rather than offering a
+                      // control that doesn't do anything sensible.
+                      if (!widget.isLogoMode && !_exporting) _buildPageBar(),
                       AnimatedSize(
                         duration: const Duration(milliseconds: 200),
                         curve: Curves.easeOut,
@@ -3014,6 +3100,66 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               max: 20,
               onChanged: (v) => setState(() => _drawStrokeWidth = v),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Canva-parity Phase H -- a slim strip of page chips, always visible
+  // (even for a single page) so "add a page" stays discoverable rather
+  // than hidden behind a menu. Deliberately simple numbered chips, not
+  // live-rendered thumbnails -- a thumbnail-per-page preview would need
+  // its own RepaintBoundary/toImage pass per page on every edit, real
+  // rendering cost for a feature whose core value (multiple pages in one
+  // design, each independently editable) doesn't depend on it.
+  Widget _buildPageBar() {
+    final appearance = context.watch<AppearanceSettings>();
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(bottom: BorderSide(color: appearance.primaryColor.withValues(alpha: 0.1))),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _pages.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              itemBuilder: (ctx, i) {
+                final active = i == _activePageIndex;
+                return GestureDetector(
+                  onTap: () => _switchToPage(i),
+                  onLongPress: _pages.length > 1 ? () => _deletePage(i) : null,
+                  child: Container(
+                    width: 36,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: active ? appearance.primaryColor.withValues(alpha: 0.15) : Colors.transparent,
+                      border: Border.all(
+                          color: active ? appearance.primaryColor : Colors.grey.shade400, width: active ? 1.5 : 1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${i + 1}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: active ? FontWeight.bold : FontWeight.normal,
+                        color: active ? appearance.primaryColor : null,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_box_outlined, size: 20),
+            tooltip: 'Add page',
+            onPressed: _addPage,
           ),
         ],
       ),

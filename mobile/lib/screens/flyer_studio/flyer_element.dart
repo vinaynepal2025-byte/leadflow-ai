@@ -465,3 +465,52 @@ class FlyerElement {
 
   FlyerElement clone() => FlyerElement.fromJson(toJson());
 }
+
+/// Backward-compatible canvas_json parsing (Canva-parity Phase H). A
+/// legacy/single-page project's canvas_json is a flat array of element
+/// maps (each has a 'type' key) -- treated as one page. A genuinely
+/// multi-page project's canvas_json is an array of page-wrapper maps
+/// (each `{'__page': true, 'elements': [...]}`) -- nothing before this
+/// feature existed ever wrote that shape, so it's an unambiguous
+/// discriminator. Pure function (no widget/BuildContext involved) so it's
+/// directly unit-testable -- see test/flyer_multipage_test.dart, since
+/// this is the one piece of this feature where a bug could corrupt an
+/// already-saved real project's data.
+List<List<FlyerElement>> parsePagesFromCanvasJson(List raw) {
+  if (raw.isEmpty) return [[]];
+  final first = raw.first;
+  final isMultiPage = first is Map && first['__page'] == true;
+  if (isMultiPage) {
+    final pages = raw
+        .whereType<Map>()
+        .map((p) => ((p['elements'] as List?) ?? [])
+            .whereType<Map>()
+            .map((e) => FlyerElement.fromJson(Map<String, dynamic>.from(e)))
+            .toList())
+        .toList();
+    return pages.isEmpty ? [[]] : pages;
+  }
+  return [
+    raw
+        .whereType<Map>()
+        .map((e) => FlyerElement.fromJson(Map<String, dynamic>.from(e)))
+        .toList()
+  ];
+}
+
+/// The wire shape for canvas_json: a true single page stays the exact
+/// flat array it always was (zero format churn for the overwhelmingly
+/// common case, and what every other reader of canvas_json -- AI
+/// generation, project duplication -- already expects); only a
+/// genuinely multi-page project uses the new page-wrapper shape.
+List<Map<String, dynamic>> canvasJsonForPages(List<List<FlyerElement>> pages) {
+  if (pages.length <= 1) {
+    return pages.isEmpty ? [] : pages[0].map((e) => e.toJson()).toList();
+  }
+  return pages
+      .map((page) => {
+            '__page': true,
+            'elements': page.map((e) => e.toJson()).toList(),
+          })
+      .toList();
+}
