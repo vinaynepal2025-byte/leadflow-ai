@@ -9,7 +9,9 @@
 // newer one — canvas_json is schemaless JSONB on the server precisely so
 // this stays true as the editor gains features.
 
-enum FlyerElementType { text, image, logo, shape }
+import 'package:flutter/material.dart' show IconData, Icons;
+
+enum FlyerElementType { text, image, logo, shape, icon, svg, qrcode }
 
 FlyerElementType flyerElementTypeFromString(String? s) {
   switch (s) {
@@ -19,6 +21,12 @@ FlyerElementType flyerElementTypeFromString(String? s) {
       return FlyerElementType.logo;
     case 'shape':
       return FlyerElementType.shape;
+    case 'icon':
+      return FlyerElementType.icon;
+    case 'svg':
+      return FlyerElementType.svg;
+    case 'qrcode':
+      return FlyerElementType.qrcode;
     case 'text':
     default:
       return FlyerElementType.text;
@@ -33,25 +41,21 @@ String flyerElementTypeToString(FlyerElementType t) {
       return 'logo';
     case FlyerElementType.shape:
       return 'shape';
+    case FlyerElementType.icon:
+      return 'icon';
+    case FlyerElementType.svg:
+      return 'svg';
+    case FlyerElementType.qrcode:
+      return 'qrcode';
     case FlyerElementType.text:
       return 'text';
   }
 }
 
-// The bundled font families. Keeping Flyer Studio on the same set as the
-// rest of the app means every font here is guaranteed to render on-device
-// (shipped in the APK, no network fetch), and gives the AI-generate
-// endpoint a safe whitelist to validate against.
-const List<String> kFlyerFontFamilies = [
-  'SpaceGrotesk',
-  'Inter',
-  'PlayfairDisplay',
-  'Lato',
-  'Poppins',
-  'Roboto',
-  'Montserrat',
-  'OpenSans',
-];
+// The bundled font list itself lives in flyer_fonts.dart (kFlyerFontOptions
+// / kFlyerFontFamilies) — it also needs to know each font's server-side
+// registered name for GenerateLogoScreen's template pipeline, which
+// doesn't belong in this file's plain element-model concerns.
 
 /// Shape kinds available on the Shape tool. 'rect' and 'circle' render via
 /// a plain BoxDecoration (cheap, and cornerRadius applies); everything
@@ -64,6 +68,72 @@ const Map<String, String> kFlyerShapeKindLabels = {
   'line': 'Line',
   'arrow': 'Arrow',
   'star': 'Star',
+};
+
+// A proper icon library -- "different shapes, different styles" was the
+// direct ask, and 6 hand-drawn Path shapes is a narrow answer next to a
+// real icon set. String-key-to-IconData, same pattern as every other
+// curated icon picker in this app (kMoreMenuIconOptions etc.), so a
+// FlyerElement only ever stores a stable string key, never a raw
+// codepoint/fontFamily pair. Grouped loosely by theme for the picker UI;
+// the grouping itself isn't persisted anywhere.
+const Map<String, IconData> kFlyerIconLibrary = {
+  // Education & consultancy
+  'school': Icons.school,
+  'menu_book': Icons.menu_book,
+  'local_library': Icons.local_library,
+  'science': Icons.science,
+  'calculate': Icons.calculate,
+  'psychology': Icons.psychology,
+  'workspace_premium': Icons.workspace_premium,
+  'emoji_events': Icons.emoji_events,
+  'card_membership': Icons.card_membership,
+  'verified': Icons.verified,
+  'verified_user': Icons.verified_user,
+  // Travel & global
+  'public': Icons.public,
+  'flight_takeoff': Icons.flight_takeoff,
+  'language': Icons.language,
+  'explore': Icons.explore,
+  'location_on': Icons.location_on,
+  // Business & growth
+  'business_center': Icons.business_center,
+  'trending_up': Icons.trending_up,
+  'insights': Icons.insights,
+  'handshake': Icons.handshake,
+  'groups': Icons.groups,
+  'diversity_3': Icons.diversity_3,
+  'rocket_launch': Icons.rocket_launch,
+  'lightbulb': Icons.lightbulb,
+  // Communication
+  'chat_bubble': Icons.chat_bubble,
+  'campaign': Icons.campaign,
+  'notifications': Icons.notifications,
+  'mail': Icons.mail,
+  'call': Icons.call,
+  // Tech
+  'computer': Icons.computer,
+  'auto_awesome': Icons.auto_awesome,
+  'bolt': Icons.bolt,
+  'shield': Icons.shield,
+  // Symbols & shapes
+  'star_rounded': Icons.star_rounded,
+  'favorite': Icons.favorite,
+  'diamond': Icons.diamond,
+  'celebration': Icons.celebration,
+  'flag': Icons.flag,
+  'circle': Icons.circle,
+  'hexagon': Icons.hexagon,
+  'square': Icons.square,
+  'change_history': Icons.change_history,
+  'arrow_circle_right': Icons.arrow_circle_right,
+  'check_circle': Icons.check_circle,
+  'favorite_border': Icons.favorite_border,
+  'add_circle': Icons.add_circle,
+  'sunny': Icons.sunny,
+  'eco': Icons.eco,
+  'palette': Icons.palette,
+  'brush': Icons.brush,
 };
 
 /// Canvas size presets. A flyer that's going to Instagram Stories has very
@@ -145,11 +215,23 @@ class FlyerElement {
   double lineHeight;
   double letterSpacing;
   bool textShadow;
+  // Text effects (Canva-parity Phase B). outlineWidth 0 / curveAmount 0 both
+  // mean "no effect", so existing text elements render and serialize
+  // identically to before these fields existed.
+  String? outlineColor; // hex or null (no stroke outline)
+  double outlineWidth; // 0..12, logical px before scale
+  double curveAmount; // -100..100; 0 = straight, + arcs up, - arcs down
 
   // Image / logo-specific
   String? url;
   String fit; // 'cover' | 'contain'
   double cornerRadius;
+  // Photo adjustments (Canva-parity Phase C) -- 0 means "no change" for
+  // all three, so an element with no adjustments applied renders and
+  // serializes identically to before these fields existed.
+  double brightness; // -100..100
+  double contrast; // -100..100
+  double saturation; // 0 (greyscale) .. 2 (double), 1 = no change
 
   // Shape-specific
   String shapeColor;
@@ -157,6 +239,24 @@ class FlyerElement {
   String? shapeGradientEnd; // hex or null (flat fill)
   String? strokeColor; // hex or null (no stroke)
   double strokeWidth;
+
+  // Icon-specific -- deliberately reuses shapeColor for fill rather than
+  // adding a separate colour field: an icon is conceptually a special
+  // shape (single-colour glyph), and every colour-editing control the
+  // style panel already has for shapes (picker, AI Quick Restyle-style
+  // apply) works on it for free this way.
+  String iconKey; // key into kFlyerIconLibrary
+
+  // SVG-specific. svgData holds the sanitized SVG markup itself (already
+  // run through svg_sanitizer.dart before an element is ever created), not
+  // a URL -- this is what keeps an imported SVG a true vector object that
+  // stays editable (recolourable, re-exportable as SVG) through save/
+  // reopen, rather than a bitmap. svgRecolor reuses shapeColor (same
+  // reasoning as icons above) to force the whole graphic to one flat
+  // colour via a ColorFilter, for monochrome/icon-style source SVGs;
+  // multi-colour source SVGs should leave it off and render as authored.
+  String? svgData;
+  bool svgRecolor;
 
   FlyerElement({
     required this.id,
@@ -182,14 +282,23 @@ class FlyerElement {
     this.lineHeight = 1.2,
     this.letterSpacing = 0,
     this.textShadow = false,
+    this.outlineColor,
+    this.outlineWidth = 0,
+    this.curveAmount = 0,
     this.url,
     this.fit = 'cover',
     this.cornerRadius = 0,
+    this.brightness = 0,
+    this.contrast = 0,
+    this.saturation = 1,
     this.shapeColor = '#CCCCCC',
     this.shapeKind = 'rect',
     this.shapeGradientEnd,
     this.strokeColor,
     this.strokeWidth = 0,
+    this.iconKey = 'star',
+    this.svgData,
+    this.svgRecolor = false,
   });
 
   factory FlyerElement.fromJson(Map<String, dynamic> json) {
@@ -218,14 +327,23 @@ class FlyerElement {
       lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.2,
       letterSpacing: (json['letterSpacing'] as num?)?.toDouble() ?? 0,
       textShadow: json['textShadow'] == true,
+      outlineColor: json['outlineColor']?.toString(),
+      outlineWidth: (json['outlineWidth'] as num?)?.toDouble() ?? 0,
+      curveAmount: (json['curveAmount'] as num?)?.toDouble() ?? 0,
       url: json['url']?.toString(),
       fit: json['fit']?.toString() ?? 'cover',
       cornerRadius: (json['cornerRadius'] as num?)?.toDouble() ?? 0,
+      brightness: (json['brightness'] as num?)?.toDouble() ?? 0,
+      contrast: (json['contrast'] as num?)?.toDouble() ?? 0,
+      saturation: (json['saturation'] as num?)?.toDouble() ?? 1,
       shapeColor: json['shapeColor']?.toString() ?? '#CCCCCC',
       shapeKind: json['shapeKind']?.toString() ?? 'rect',
       shapeGradientEnd: json['shapeGradientEnd']?.toString(),
       strokeColor: json['strokeColor']?.toString(),
       strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 0,
+      iconKey: json['iconKey']?.toString() ?? 'star',
+      svgData: json['svgData']?.toString(),
+      svgRecolor: json['svgRecolor'] == true,
     );
   }
 
@@ -256,10 +374,27 @@ class FlyerElement {
       map['letterSpacing'] = letterSpacing;
       map['textShadow'] = textShadow;
       if (backgroundColor != null) map['backgroundColor'] = backgroundColor;
+      if (outlineColor != null) map['outlineColor'] = outlineColor;
+      map['outlineWidth'] = outlineWidth;
+      map['curveAmount'] = curveAmount;
     } else if (type == FlyerElementType.image || type == FlyerElementType.logo) {
       map['url'] = url ?? '';
       map['fit'] = fit;
       map['cornerRadius'] = cornerRadius;
+      map['brightness'] = brightness;
+      map['contrast'] = contrast;
+      map['saturation'] = saturation;
+    } else if (type == FlyerElementType.qrcode) {
+      // Renders through the same image codepath as image/logo (url/fit/
+      // cornerRadius), but also keeps the raw encoded text and the
+      // fg/bg colours used to generate it, so "Edit QR data" can
+      // regenerate the PNG without the user retyping anything.
+      map['text'] = text ?? '';
+      map['url'] = url ?? '';
+      map['fit'] = 'contain';
+      map['cornerRadius'] = cornerRadius;
+      map['color'] = color;
+      if (backgroundColor != null) map['backgroundColor'] = backgroundColor;
     } else if (type == FlyerElementType.shape) {
       map['shapeColor'] = shapeColor;
       map['shapeKind'] = shapeKind;
@@ -267,6 +402,13 @@ class FlyerElement {
       if (shapeGradientEnd != null) map['shapeGradientEnd'] = shapeGradientEnd;
       if (strokeColor != null) map['strokeColor'] = strokeColor;
       map['strokeWidth'] = strokeWidth;
+    } else if (type == FlyerElementType.icon) {
+      map['iconKey'] = iconKey;
+      map['shapeColor'] = shapeColor;
+    } else if (type == FlyerElementType.svg) {
+      map['svgData'] = svgData ?? '';
+      map['svgRecolor'] = svgRecolor;
+      if (svgRecolor) map['shapeColor'] = shapeColor;
     }
     return map;
   }

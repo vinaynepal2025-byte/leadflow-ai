@@ -22,6 +22,7 @@
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import '../../theme/appearance_settings.dart';
 import 'flyer_element.dart';
@@ -29,12 +30,94 @@ import 'flyer_element.dart';
 typedef ElementChanged = void Function(FlyerElement element);
 
 Color flyerHexToColor(String hex, {double opacity = 1.0}) {
+  // 'transparent' is a sentinel, not a real hex value -- used by Logo
+  // Studio (a logo composites onto other designs, so a genuinely
+  // transparent canvas background matters there in a way it never did
+  // for flyers, which always render onto an opaque page).
+  if (hex == 'transparent') return Colors.transparent;
   var h = hex.replaceAll('#', '').trim();
   if (h.length == 6) h = 'FF$h';
   if (h.length != 8) return Colors.black.withOpacity(opacity);
   final value = int.tryParse(h, radix: 16);
   if (value == null) return Colors.black.withOpacity(opacity);
   return Color(value).withOpacity(opacity);
+}
+
+/// Photo adjustments (Canva-parity Phase C, see CANVA_PARITY_PLAN.md) --
+/// combines brightness/contrast/saturation into the single 4x5 matrix
+/// `ColorFilter.matrix` accepts, entirely client-side, no new dependency.
+/// Flutter's matrix operates on channel values in the 0-255 range (not
+/// 0-1), with the 5th column of each row being an additive offset in
+/// that same range.
+List<double> imageAdjustmentMatrix({
+  required double brightness, // -100..100
+  required double contrast, // -100..100
+  required double saturation, // 0 (greyscale) .. 2 (double), 1 = no change
+}) {
+  // Standard luminance-preserving saturation matrix.
+  const lumR = 0.2126, lumG = 0.7152, lumB = 0.0722;
+  final sr = (1 - saturation) * lumR;
+  final sg = (1 - saturation) * lumG;
+  final sb = (1 - saturation) * lumB;
+  final saturationMatrix = <double>[
+    sr + saturation, sg, sb, 0, 0,
+    sr, sg + saturation, sb, 0, 0,
+    sr, sg, sb + saturation, 0, 0,
+    0, 0, 0, 1, 0,
+  ];
+
+  // contrast: -100..100 -> a multiplicative factor around 1.0, pivoting
+  // around mid-grey (128) so contrast changes don't also shift brightness.
+  final contrastFactor = 1 + (contrast.clamp(-100, 100) / 100);
+  final contrastOffset = 128 * (1 - contrastFactor);
+  final contrastMatrix = <double>[
+    contrastFactor, 0, 0, 0, contrastOffset,
+    0, contrastFactor, 0, 0, contrastOffset,
+    0, 0, contrastFactor, 0, contrastOffset,
+    0, 0, 0, 1, 0,
+  ];
+
+  final brightnessOffset = brightness.clamp(-100, 100).toDouble();
+  final brightnessMatrix = <double>[
+    1, 0, 0, 0, brightnessOffset,
+    0, 1, 0, 0, brightnessOffset,
+    0, 0, 1, 0, brightnessOffset,
+    0, 0, 0, 1, 0,
+  ];
+
+  // Compose as brightness(contrast(saturation(colour))) -- apply
+  // saturation first (so contrast/brightness act on the final tone), via
+  // proper 5x5 homogeneous matrix multiplication (each 4x5 input
+  // represents a 5x5 affine matrix with an implicit [0,0,0,0,1] last row).
+  return _multiplyColorMatrices(brightnessMatrix, _multiplyColorMatrices(contrastMatrix, saturationMatrix));
+}
+
+List<double> _multiplyColorMatrices(List<double> a, List<double> b) {
+  List<List<double>> to5x5(List<double> m) => [
+        [m[0], m[1], m[2], m[3], m[4]],
+        [m[5], m[6], m[7], m[8], m[9]],
+        [m[10], m[11], m[12], m[13], m[14]],
+        [m[15], m[16], m[17], m[18], m[19]],
+        [0, 0, 0, 0, 1],
+      ];
+  final ma = to5x5(a);
+  final mb = to5x5(b);
+  final result = List.generate(5, (_) => List<double>.filled(5, 0));
+  for (var i = 0; i < 5; i++) {
+    for (var j = 0; j < 5; j++) {
+      var sum = 0.0;
+      for (var k = 0; k < 5; k++) {
+        sum += ma[i][k] * mb[k][j];
+      }
+      result[i][j] = sum;
+    }
+  }
+  return [
+    result[0][0], result[0][1], result[0][2], result[0][3], result[0][4],
+    result[1][0], result[1][1], result[1][2], result[1][3], result[1][4],
+    result[2][0], result[2][1], result[2][2], result[2][3], result[2][4],
+    result[3][0], result[3][1], result[3][2], result[3][3], result[3][4],
+  ];
 }
 
 String flyerColorToHex(Color c) =>
@@ -88,6 +171,37 @@ class FlyerSnapGuidePainter extends CustomPainter {
 /// A faint 10x10 alignment grid, purely a visual placement aid (never
 /// exported -- callers only mount this outside `exporting` mode). Off by
 /// default; toggled from the Background & size sheet.
+/// The classic grey/white checkerboard indicating "genuinely
+/// transparent" -- shown BEHIND the canvas (outside its RepaintBoundary)
+/// when Logo Studio's background is set to transparent, so the person
+/// editing can see exactly what won't render, without that pattern
+/// itself ever ending up baked into the exported PNG.
+class CheckerboardPainter extends CustomPainter {
+  final double cellSize;
+  const CheckerboardPainter({this.cellSize = 12});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final light = Paint()..color = const Color(0xFFF0F0F0);
+    final dark = Paint()..color = const Color(0xFFD8D8D8);
+    canvas.drawRect(Offset.zero & size, light);
+    final cols = (size.width / cellSize).ceil();
+    final rows = (size.height / cellSize).ceil();
+    for (var row = 0; row < rows; row++) {
+      for (var col = 0; col < cols; col++) {
+        if ((row + col) % 2 == 0) continue;
+        canvas.drawRect(
+          Rect.fromLTWH(col * cellSize, row * cellSize, cellSize, cellSize),
+          dark,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CheckerboardPainter old) => old.cellSize != cellSize;
+}
+
 class FlyerGridPainter extends CustomPainter {
   final double scale;
   final double canvasWidth;
@@ -701,6 +815,76 @@ class FlyerCanvasElementWidget extends StatelessWidget {
   Widget _buildContent(double w, double h) {
     switch (element.type) {
       case FlyerElementType.text:
+        final displayText = element.text?.isNotEmpty == true
+            ? element.text!
+            : (exporting ? '' : 'Double-tap to edit');
+        final baseStyle = TextStyle(
+          fontSize: element.fontSize * scale,
+          fontFamily: element.fontFamily,
+          color: flyerHexToColor(element.color),
+          fontWeight:
+              element.fontWeight == 'bold' ? FontWeight.bold : FontWeight.normal,
+          fontStyle: element.italic ? FontStyle.italic : FontStyle.normal,
+          height: element.lineHeight,
+          letterSpacing: element.letterSpacing * scale,
+          decoration:
+              element.underline ? TextDecoration.underline : TextDecoration.none,
+          shadows: element.textShadow
+              ? [
+                  Shadow(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    blurRadius: 6 * scale,
+                    offset: Offset(0, 2 * scale),
+                  ),
+                ]
+              : null,
+        );
+        final hasOutline = element.outlineColor != null && element.outlineWidth > 0;
+        Widget textChild;
+        if (element.curveAmount != 0 && displayText.isNotEmpty) {
+          // Curved text (Canva-parity Phase B) -- each glyph placed along a
+          // real circular arc via CustomPainter, same trig used server-side
+          // by archText() in logoTemplates.js, ported to the live canvas.
+          textChild = CustomPaint(
+            size: Size(w, h),
+            painter: CurvedTextPainter(
+              text: displayText,
+              style: baseStyle,
+              curveAmount: element.curveAmount,
+              outlineColor: hasOutline ? flyerHexToColor(element.outlineColor!) : null,
+              outlineWidth: element.outlineWidth * scale,
+            ),
+          );
+        } else if (hasOutline) {
+          // Stroke-outline effect: paint a stroked copy of the text behind
+          // the normal filled copy, both identically laid out via Stack.
+          textChild = Stack(
+            children: [
+              Text(
+                displayText,
+                textAlign: _textAlignFor(element.textAlign),
+                style: baseStyle.copyWith(
+                  foreground: Paint()
+                    ..style = PaintingStyle.stroke
+                    ..strokeWidth = element.outlineWidth * scale
+                    ..color = flyerHexToColor(element.outlineColor!),
+                  shadows: null,
+                ),
+              ),
+              Text(
+                displayText,
+                textAlign: _textAlignFor(element.textAlign),
+                style: baseStyle,
+              ),
+            ],
+          );
+        } else {
+          textChild = Text(
+            displayText,
+            textAlign: _textAlignFor(element.textAlign),
+            style: baseStyle,
+          );
+        }
         return Opacity(
           opacity: element.opacity,
           child: Container(
@@ -711,37 +895,12 @@ class FlyerCanvasElementWidget extends StatelessWidget {
                 ? flyerHexToColor(element.backgroundColor!)
                 : Colors.transparent,
             padding: const EdgeInsets.all(4),
-            child: Text(
-              element.text?.isNotEmpty == true
-                  ? element.text!
-                  : (exporting ? '' : 'Double-tap to edit'),
-              textAlign: _textAlignFor(element.textAlign),
-              style: TextStyle(
-                fontSize: element.fontSize * scale,
-                fontFamily: element.fontFamily,
-                color: flyerHexToColor(element.color),
-                fontWeight:
-                    element.fontWeight == 'bold' ? FontWeight.bold : FontWeight.normal,
-                fontStyle: element.italic ? FontStyle.italic : FontStyle.normal,
-                height: element.lineHeight,
-                letterSpacing: element.letterSpacing * scale,
-                decoration:
-                    element.underline ? TextDecoration.underline : TextDecoration.none,
-                shadows: element.textShadow
-                    ? [
-                        Shadow(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          blurRadius: 6 * scale,
-                          offset: Offset(0, 2 * scale),
-                        ),
-                      ]
-                    : null,
-              ),
-            ),
+            child: textChild,
           ),
         );
       case FlyerElementType.image:
       case FlyerElementType.logo:
+      case FlyerElementType.qrcode:
         if (element.url == null || element.url!.isEmpty) {
           if (exporting) return const SizedBox.shrink();
           return Container(
@@ -758,38 +917,55 @@ class FlyerCanvasElementWidget extends StatelessWidget {
                 Icon(
                   element.type == FlyerElementType.logo
                       ? Icons.workspace_premium
-                      : Icons.image,
+                      : element.type == FlyerElementType.qrcode
+                          ? Icons.qr_code
+                          : Icons.image,
                   color: Colors.grey,
                 ),
                 if (h > 64)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 4),
-                    child: Text('Tap, then Replace',
-                        style: TextStyle(fontSize: 9, color: Colors.grey)),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                        element.type == FlyerElementType.qrcode
+                            ? 'Tap, then Edit QR data'
+                            : 'Tap, then Replace',
+                        style: const TextStyle(fontSize: 9, color: Colors.grey)),
                   ),
               ],
             ),
+          );
+        }
+        final hasPhotoAdjustments = element.brightness != 0 || element.contrast != 0 || element.saturation != 1;
+        Widget photo = Image.network(
+          element.url!,
+          width: w,
+          height: h,
+          fit: element.fit == 'contain' ? BoxFit.contain : BoxFit.cover,
+          loadingBuilder: (ctx, child, progress) => progress == null
+              ? child
+              : Container(width: w, height: h, color: Colors.grey.shade100),
+          errorBuilder: (_, __, ___) => Container(
+            width: w,
+            height: h,
+            color: Colors.grey.shade200,
+            child: const Icon(Icons.broken_image, color: Colors.grey),
+          ),
+        );
+        if (hasPhotoAdjustments) {
+          photo = ColorFiltered(
+            colorFilter: ColorFilter.matrix(imageAdjustmentMatrix(
+              brightness: element.brightness,
+              contrast: element.contrast,
+              saturation: element.saturation,
+            )),
+            child: photo,
           );
         }
         return Opacity(
           opacity: element.opacity,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(element.cornerRadius * scale),
-            child: Image.network(
-              element.url!,
-              width: w,
-              height: h,
-              fit: element.fit == 'contain' ? BoxFit.contain : BoxFit.cover,
-              loadingBuilder: (ctx, child, progress) => progress == null
-                  ? child
-                  : Container(width: w, height: h, color: Colors.grey.shade100),
-              errorBuilder: (_, __, ___) => Container(
-                width: w,
-                height: h,
-                color: Colors.grey.shade200,
-                child: const Icon(Icons.broken_image, color: Colors.grey),
-              ),
-            ),
+            child: photo,
           ),
         );
       case FlyerElementType.shape:
@@ -842,6 +1018,50 @@ class FlyerCanvasElementWidget extends StatelessWidget {
             ),
           ),
         );
+      case FlyerElementType.icon:
+        return Opacity(
+          opacity: element.opacity,
+          child: Center(
+            child: Icon(
+              kFlyerIconLibrary[element.iconKey] ?? Icons.star,
+              size: (w < h ? w : h) * 0.82,
+              color: flyerHexToColor(element.shapeColor),
+            ),
+          ),
+        );
+      case FlyerElementType.svg:
+        if (element.svgData == null || element.svgData!.isEmpty) {
+          if (exporting) return const SizedBox.shrink();
+          return Container(
+            width: w,
+            height: h,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade400),
+              color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: const Icon(Icons.polyline, color: Colors.grey),
+          );
+        }
+        return Opacity(
+          opacity: element.opacity,
+          child: SvgPicture.string(
+            element.svgData!,
+            width: w,
+            height: h,
+            fit: BoxFit.contain,
+            colorFilter: element.svgRecolor
+                ? ColorFilter.mode(flyerHexToColor(element.shapeColor), BlendMode.srcIn)
+                : null,
+            placeholderBuilder: (_) => SizedBox(width: w, height: h),
+            errorBuilder: (_, __, ___) => Container(
+              width: w,
+              height: h,
+              color: Colors.grey.shade200,
+              child: const Icon(Icons.broken_image, color: Colors.grey),
+            ),
+          ),
+        );
     }
   }
 
@@ -865,5 +1085,121 @@ class FlyerCanvasElementWidget extends StatelessWidget {
       default:
         return TextAlign.left;
     }
+  }
+}
+
+/// Curved text (Canva-parity Phase B). Places each character along a real
+/// circular arc computed from a chord/sagitta relationship: the arc always
+/// spans exactly the element's width, and how far it bulges is driven by
+/// [curveAmount] (-100..100; 0 is handled by the caller before reaching
+/// here, positive bulges the text upward like a rainbow, negative bulges it
+/// downward). Same character-placement trig as the server-side archText()
+/// in backend/services/logoTemplates.js, ported to a live, editable canvas.
+class CurvedTextPainter extends CustomPainter {
+  final String text;
+  final TextStyle style;
+  final double curveAmount;
+  final Color? outlineColor;
+  final double outlineWidth;
+
+  CurvedTextPainter({
+    required this.text,
+    required this.style,
+    required this.curveAmount,
+    this.outlineColor,
+    this.outlineWidth = 0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final chars = text.split('');
+    if (chars.isEmpty || size.width <= 0 || size.height <= 0) return;
+
+    final bulgeUp = curveAmount >= 0;
+    final maxSagitta = size.height * 0.5;
+    final sagitta = (curveAmount.abs() / 100).clamp(0.0, 1.0) * maxSagitta;
+    final halfChord = size.width / 2;
+    final cx = size.width / 2;
+    final centerY = size.height / 2;
+
+    // Degenerate case (sagitta ~0, e.g. a near-flat element): fall back to
+    // a straight baseline rather than dividing by ~0 in the radius formula.
+    if (sagitta < 0.5) {
+      _paintStraightFallback(canvas, size);
+      return;
+    }
+
+    final radius = (halfChord * halfChord + sagitta * sagitta) / (2 * sagitta);
+    final halfSpanRad = math.asin((halfChord / radius).clamp(-1.0, 1.0));
+    final cyCenter =
+        bulgeUp ? centerY - sagitta / 2 + radius : centerY + sagitta / 2 - radius;
+
+    // Measure each character's width up front so characters are spaced by
+    // actual glyph advance, not a uniform guess.
+    final painters = chars
+        .map((ch) => TextPainter(
+              text: TextSpan(text: ch, style: style),
+              textDirection: TextDirection.ltr,
+            )..layout())
+        .toList();
+    final totalWidth = painters.fold<double>(0, (sum, p) => sum + p.width);
+    if (totalWidth <= 0) return;
+
+    var traveled = 0.0;
+    for (var i = 0; i < chars.length; i++) {
+      final p = painters[i];
+      // Character's centre, as a fraction of total advance, mapped onto the
+      // arc's angular span.
+      final midFraction = (traveled + p.width / 2) / totalWidth;
+      traveled += p.width;
+      final rad = -halfSpanRad + (2 * halfSpanRad) * midFraction;
+
+      final x = cx + radius * math.sin(rad);
+      final y = bulgeUp
+          ? cyCenter - radius * math.cos(rad)
+          : cyCenter + radius * math.cos(rad);
+      final rotation = bulgeUp ? rad : -rad;
+
+      canvas.save();
+      canvas.translate(x, y);
+      canvas.rotate(rotation);
+      final glyphOffset = Offset(-p.width / 2, -p.height / 2);
+      if (outlineColor != null && outlineWidth > 0) {
+        final strokePainter = TextPainter(
+          text: TextSpan(
+            text: chars[i],
+            style: style.copyWith(
+              foreground: Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = outlineWidth
+                ..color = outlineColor!,
+              shadows: null,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        strokePainter.paint(canvas, glyphOffset);
+      }
+      p.paint(canvas, glyphOffset);
+      canvas.restore();
+    }
+  }
+
+  void _paintStraightFallback(Canvas canvas, Size size) {
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: size.width);
+    tp.paint(canvas, Offset((size.width - tp.width) / 2, (size.height - tp.height) / 2));
+  }
+
+  @override
+  bool shouldRepaint(covariant CurvedTextPainter oldDelegate) {
+    return oldDelegate.text != text ||
+        oldDelegate.style != style ||
+        oldDelegate.curveAmount != curveAmount ||
+        oldDelegate.outlineColor != outlineColor ||
+        oldDelegate.outlineWidth != outlineWidth;
   }
 }

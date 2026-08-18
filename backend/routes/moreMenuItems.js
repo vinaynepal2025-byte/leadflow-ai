@@ -1,8 +1,11 @@
 const express = require('express');
+const multer = require('multer');
 const { randomUUID } = require('crypto');
 const db = require('../db');
+const { uploadFile, getSignedUrl } = require('../services/supabaseStorage');
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 function tenantId(req) {
   return req.header('x-tenant-id') || 'demo-consultancy';
@@ -46,13 +49,49 @@ async function ensureSeeded(tid) {
   }
 }
 
+// Resolves icon_image_path to a signed URL -- same pattern as
+// flyerProjects.js's attachUrls, one signed-URL call per row that
+// actually has an uploaded icon (most rows have none, so this is cheap
+// in practice).
+async function attachIconUrl(row) {
+  if (!row || !row.icon_image_path) return row;
+  try {
+    return { ...row, icon_image_url: await getSignedUrl(row.icon_image_path, 3600) };
+  } catch (err) {
+    return { ...row, icon_image_url: null };
+  }
+}
+
 // GET /more-menu-items -- full config for this tenant, built-ins
 // auto-seeded on first call. Sorted by sort_order for direct UI rendering.
 router.get('/', async (req, res) => {
   const tid = tenantId(req);
   await ensureSeeded(tid);
   const rows = await db.prepare('SELECT * FROM more_menu_items WHERE tenant_id = ? ORDER BY sort_order ASC').all(tid);
-  res.json(rows);
+  res.json(await Promise.all(rows.map(attachIconUrl)));
+});
+
+// POST /more-menu-items/:item_key/icon-image  (multipart: file=<image>)
+// Uploads a custom icon image, replacing the built-in Material glyph on
+// this one tile -- "icon upload ka bhi option do".
+router.post('/:item_key/icon-image', upload.single('file'), async (req, res) => {
+  const tid = tenantId(req);
+  const { item_key } = req.params;
+  const existing = await db.prepare('SELECT id FROM more_menu_items WHERE tenant_id = ? AND item_key = ?').get(tid, item_key);
+  if (!existing) return res.status(404).json({ error: 'Item not found for this tenant' });
+  if (!req.file) return res.status(400).json({ error: 'file is required' });
+
+  const storagePath = `tile-icons/${tid}/${item_key}-${randomUUID()}-${req.file.originalname}`;
+  try {
+    await uploadFile(req.file.buffer, storagePath, req.file.mimetype);
+  } catch (err) {
+    return res.status(502).json({ error: `Upload failed: ${err.message}` });
+  }
+
+  await db.prepare('UPDATE more_menu_items SET icon_image_path = ?, updated_at = now() WHERE tenant_id = ? AND item_key = ?')
+    .run(storagePath, tid, item_key);
+
+  res.json(await attachIconUrl(await db.prepare('SELECT * FROM more_menu_items WHERE tenant_id = ? AND item_key = ?').get(tid, item_key)));
 });
 
 // POST /more-menu-items -- create a custom item (opens a URL). Only
@@ -97,11 +136,26 @@ router.patch('/:item_key', async (req, res) => {
   const existing = await db.prepare('SELECT id FROM more_menu_items WHERE tenant_id = ? AND item_key = ?').get(tid, item_key);
   if (!existing) return res.status(404).json({ error: 'Item not found for this tenant' });
 
-  const allowed = ['enabled', 'sort_order', 'custom_label', 'icon_override', 'color_override', 'gradient_override', 'style_variant'];
+  const allowed = ['enabled', 'sort_order', 'custom_label', 'icon_override', 'color_override', 'gradient_override', 'style_variant', 'style_json'];
   const updates = [];
   const values = [];
   for (const field of allowed) {
-    if (req.body[field] !== undefined) { updates.push(field + ' = ?'); values.push(req.body[field]); }
+    if (req.body[field] !== undefined) {
+      updates.push(field + ' = ?');
+      values.push(field === 'style_json' ? JSON.stringify(req.body[field]) : req.body[field]);
+    }
+  }
+  // icon_image_path is handled separately from the generic allow-list --
+  // it's a storage path, and accepting an arbitrary client-supplied one
+  // here would let a tenant point their tile at any object in the shared
+  // bucket (including another tenant's private files) just by knowing
+  // its path. The only legitimate way to SET it is the dedicated
+  // POST /:item_key/icon-image upload route below, which generates the
+  // path itself; PATCH only ever accepts explicit null, to remove a
+  // previously uploaded icon and fall back to icon_override again.
+  if (req.body.icon_image_path === null) {
+    updates.push('icon_image_path = ?');
+    values.push(null);
   }
   if (updates.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
 
@@ -109,7 +163,7 @@ router.patch('/:item_key', async (req, res) => {
   values.push(tid, item_key);
   await db.prepare('UPDATE more_menu_items SET ' + updates.join(', ') + ' WHERE tenant_id = ? AND item_key = ?').run(...values);
 
-  res.json(await db.prepare('SELECT * FROM more_menu_items WHERE tenant_id = ? AND item_key = ?').get(tid, item_key));
+  res.json(await attachIconUrl(await db.prepare('SELECT * FROM more_menu_items WHERE tenant_id = ? AND item_key = ?').get(tid, item_key)));
 });
 
 // PUT /more-menu-items/reorder  { order: ['flyer_studio', 'team', ...] }

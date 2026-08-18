@@ -219,4 +219,81 @@ ${messageText.slice(0, 2000)}
   }
 });
 
+// POST /ai/restyle-section  { instruction, item_label, current_color, current_style_variant }
+// The backend half of "AI Quick Restyle" -- a single natural-language
+// command changes exactly one already-identified button/section's look
+// (colour, gradient, style-variant), never the whole app's theme. Which
+// item to restyle is resolved client-side (mobile/lib/screens/
+// customize_registry.dart's findBestMatch, deterministic label
+// matching -- no AI needed just to find a button by name); this route
+// only interprets the *style* half of the command, reusing the same
+// generateJson() provider layer as generate-theme/suggest-emojis.
+router.post('/restyle-section', async (req, res) => {
+  const { instruction, item_label, current_color, current_style_variant } = req.body || {};
+  if (!instruction || typeof instruction !== 'string' || !instruction.trim()) {
+    return res.status(400).json({ error: 'instruction is required, e.g. "make it glow orange"' });
+  }
+  if (!item_label || typeof item_label !== 'string') {
+    return res.status(400).json({ error: 'item_label is required' });
+  }
+
+  const prompt = `You are a UI styling assistant. A mobile app has one specific button/section called "${item_label}". Its current style is: colour ${current_color || '(default)'}, style-variant ${current_style_variant || 'flat'}.
+The user gave this instruction for how to restyle ONLY this one button: "${instruction.trim()}"
+Output ONLY a JSON object (no markdown fences, no commentary) with exactly these fields:
+{
+  "color": "6-digit hex color for this item, e.g. #E85D4E -- your best interpretation of any colour/mood mentioned, or the current colour if none is implied",
+  "styleVariant": "one of: flat, gradient_badge, glow, glass -- pick gradient_badge if the instruction mentions a gradient/two colours blending, glow if it mentions glow/neon/pulse, glass if it mentions glass/frosted/transparent, otherwise flat",
+  "gradientEnd": "6-digit hex color to gradient toward, ONLY when styleVariant is gradient_badge and a second colour is implied or a sensible complementary one can be chosen -- otherwise null"
+}
+Interpret colour words naturally (e.g. "gold" -> a real gold hex, "forest green" -> a real dark green hex, "hot pink" -> a real vivid pink hex) -- don't just reuse the current colour unless the instruction genuinely doesn't ask for a colour change.`;
+
+  try {
+    const raw = await generateJson(prompt, { maxTokens: 400 });
+    const color = asHex(raw.color, current_color || '#1B2A4A');
+    const validVariants = ['flat', 'gradient_badge', 'glow', 'glass'];
+    const styleVariant = validVariants.includes(raw.styleVariant) ? raw.styleVariant : 'flat';
+    const gradientEnd = styleVariant === 'gradient_badge' ? asHex(raw.gradientEnd, color) : null;
+    res.json({ color, styleVariant, gradientEnd });
+  } catch (err) {
+    res.status(502).json({ error: 'Restyle failed: ' + err.message });
+  }
+});
+
+// POST /ai/find-icon  { query, available_keys }
+// Flyer/Logo Studio's "AI Icon Finder" -- type a concept ("graduation
+// cap", "handshake deal"), get back the best-matching icon from the
+// app's own curated library (kFlyerIconLibrary, mobile/lib/screens/
+// flyer_studio/flyer_element.dart) plus a fitting colour, added to the
+// canvas in one tap. The client sends its own available_keys so this
+// route never needs a second copy of the icon list to keep in sync --
+// the AI can only pick a key that's actually in the set it was given,
+// validated below rather than trusted blindly.
+router.post('/find-icon', async (req, res) => {
+  const { query, available_keys } = req.body || {};
+  if (!query || typeof query !== 'string' || !query.trim()) {
+    return res.status(400).json({ error: 'query is required, e.g. "graduation cap"' });
+  }
+  if (!Array.isArray(available_keys) || available_keys.length === 0) {
+    return res.status(400).json({ error: 'available_keys must be a non-empty array' });
+  }
+
+  const prompt = `You are matching a plain-language concept to the closest icon in a fixed icon set for a design tool.
+Available icon keys (pick EXACTLY ONE of these, verbatim): ${available_keys.join(', ')}
+Concept to match: "${query.trim()}"
+Output ONLY a JSON object (no markdown fences, no commentary):
+{
+  "iconKey": "one of the available icon keys above, your best match for the concept",
+  "color": "6-digit hex color that suits the concept's mood, e.g. #1B2A4A"
+}`;
+
+  try {
+    const raw = await generateJson(prompt, { maxTokens: 200 });
+    const iconKey = available_keys.includes(raw.iconKey) ? raw.iconKey : available_keys[0];
+    const color = asHex(raw.color, '#1B2A4A');
+    res.json({ iconKey, color });
+  } catch (err) {
+    res.status(502).json({ error: 'Icon search failed: ' + err.message });
+  }
+});
+
 module.exports = router;

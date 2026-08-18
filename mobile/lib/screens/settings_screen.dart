@@ -9,6 +9,32 @@ import 'customize_lead_detail_screen.dart';
 import 'customize_leads_list_screen.dart';
 import 'customize_share_targets_screen.dart';
 import 'flyer_studio/logo_library_screen.dart';
+import 'settings_studio_screen.dart';
+import '../widgets/launcher_tile.dart';
+
+class _SettingsDestination {
+  final String label;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+  final Widget Function() screenBuilder;
+  const _SettingsDestination(this.label, this.subtitle, this.icon, this.color, this.screenBuilder);
+}
+
+// Same distinct-hue-per-destination idea as kMoreMenuDefaultColors --
+// this list used to render as identical-colour ListTiles-in-Cards, the
+// exact same "flatter than the rest of the app" gap the More screen had
+// before its premium grid pass.
+final List<_SettingsDestination> _kSettingsDestinations = [
+  _SettingsDestination('Customize App Look', 'Colors, fonts, corners, dark mode, glass effect', Icons.palette_outlined, Colors.deepPurple, () => const CustomizeAppearanceScreen()),
+  _SettingsDestination('Customize Dashboard', 'Show, hide, reorder, and recolour your Dashboard widgets', Icons.space_dashboard_outlined, Colors.blue, () => const CustomizeDashboardScreen()),
+  _SettingsDestination('Customize Leads List', 'Show, hide, and reorder the fields on every lead row', Icons.view_list_outlined, Colors.teal, () => const CustomizeLeadsListScreen()),
+  _SettingsDestination('Customize Lead Detail', 'Show, hide, reorder, and restyle lead-screen buttons', Icons.tune_outlined, Colors.indigo, () => const CustomizeLeadDetailScreen()),
+  _SettingsDestination('Share Targets', 'Show, hide, reorder, and restyle apps for sharing flyers and creative assets', Icons.share_outlined, Colors.green, () => const CustomizeShareTargetsScreen()),
+  _SettingsDestination('Brand Kit', 'Colors, typography, and logos -- your brand identity in one place', Icons.diamond_outlined, Colors.pink, () => const BrandKitScreen()),
+  _SettingsDestination('Emoji Generator', 'AI-suggested emoji for any message, save your favourites', Icons.emoji_emotions_outlined, Color(0xFFB8860B), () => const EmojiGeneratorScreen()),
+  _SettingsDestination('Brand Logos', 'Upload and manage logos for flyers and branded documents', Icons.workspace_premium_outlined, Colors.deepOrange, () => const LogoLibraryScreen()),
+];
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -77,6 +103,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Settings Studio -- search any customizable button/section by
+          // name across the whole app (More Menu, Lead Detail, Share
+          // Targets, Dashboard, Leads List) and jump straight to its
+          // editor, instead of having to remember which of the Customize
+          // screens below it lives under.
+          Card(
+            color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.35),
+            child: ListTile(
+              leading: const Icon(Icons.search),
+              title: const Text('Settings Studio', style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text('Search any button in the app and customize it directly'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsStudioScreen())),
+            ),
+          ),
+          const SizedBox(height: 20),
           const Text('Consultancy Branding', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 12),
           TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Consultancy Name', border: OutlineInputBorder())),
@@ -108,85 +150,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
           const SizedBox(height: 32),
           const Divider(),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.palette_outlined),
-              title: const Text('Customize App Look'),
-              subtitle: const Text('Colors, fonts, corners, dark mode, glass effect'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeAppearanceScreen())),
-            ),
+          const SizedBox(height: 12),
+          const Text('Customize', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: 4),
+          const Text(
+            'Every one of these opens its own show/hide/reorder/restyle screen for that part of the app.',
+            style: TextStyle(color: Colors.grey, fontSize: 12),
           ),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.space_dashboard_outlined),
-              title: const Text('Customize Dashboard'),
-              subtitle: const Text('Show, hide, reorder, and recolour your Dashboard widgets'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeDashboardScreen())),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.view_list_outlined),
-              title: const Text('Customize Leads List'),
-              subtitle: const Text('Show, hide, and reorder the fields on every lead row'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeLeadsListScreen())),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.tune_outlined),
-              title: const Text('Customize Lead Detail'),
-              subtitle: const Text('Show, hide, reorder, and restyle lead-screen buttons'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeLeadDetailScreen())),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-              child: ListTile(
-                leading: const Icon(Icons.share_outlined),
-                title: const Text('Share Targets'),
-                subtitle: const Text('Show, hide, reorder, and restyle apps for sharing flyers and creative assets'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomizeShareTargetsScreen())),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.diamond_outlined),
-                title: const Text('Brand Kit'),
-                subtitle: const Text('Colors, typography, and logos -- your brand identity in one place'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BrandKitScreen())),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.emoji_emotions_outlined),
-                title: const Text('Emoji Generator'),
-                subtitle: const Text('AI-suggested emoji for any message, save your favourites'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EmojiGeneratorScreen())),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Card(
-            child: ListTile(
-              leading: const Icon(Icons.workspace_premium_outlined),
-              title: const Text('Brand Logos'),
-              subtitle: const Text('Upload and manage logos for flyers and branded documents'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LogoLibraryScreen())),
-            ),
+          const SizedBox(height: 12),
+          // Colourful destination grid -- previously a plain stack of
+          // identical single-colour Cards/ListTiles, the same "flatter
+          // than the rest of the app" gap the old More screen had.
+          // Subtitle text moves into a tooltip-free long-press-free
+          // simple label since a grid tile has no room for a subtitle
+          // line; the intro text above covers what these do in general.
+          GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 0.92,
+            children: _kSettingsDestinations.map((d) {
+              return LauncherTile(
+                label: d.label,
+                icon: d.icon,
+                color: d.color,
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => d.screenBuilder())),
+              );
+            }).toList(),
           ),
         ],
       ),

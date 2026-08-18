@@ -25,6 +25,7 @@ const DEFAULTS = [
   { section_key: 'lead_notes',           default_label: 'Notes',                   sort_order: 10 },
   { section_key: 'flyer_studio',         default_label: 'Make a Flyer',            sort_order: 11 },
   { section_key: 'activity_timeline',     default_label: 'Activity Timeline',       sort_order: 12 },
+  { section_key: 'share_logo',           default_label: 'Share Logo',              sort_order: 13 },
 ];
 
 // Ensures a tenant has all 10 built-in section rows. Safe to call every
@@ -100,11 +101,14 @@ router.patch('/:section_key', async (req, res) => {
   const existing = await db.prepare('SELECT id FROM lead_detail_sections WHERE tenant_id = ? AND section_key = ?').get(tid, section_key);
   if (!existing) return res.status(404).json({ error: 'Section not found for this tenant' });
 
-  const allowed = ['enabled', 'sort_order', 'custom_label', 'icon_override', 'color_override', 'size_override', 'shape_override', 'gradient_override', 'style_variant'];
+  const allowed = ['enabled', 'sort_order', 'custom_label', 'icon_override', 'color_override', 'size_override', 'shape_override', 'gradient_override', 'style_variant', 'style_json'];
   const updates = [];
   const values = [];
   for (const field of allowed) {
-    if (req.body[field] !== undefined) { updates.push(field + ' = ?'); values.push(req.body[field]); }
+    if (req.body[field] !== undefined) {
+      updates.push(field + ' = ?');
+      values.push(field === 'style_json' ? JSON.stringify(req.body[field]) : req.body[field]);
+    }
   }
   if (updates.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
 

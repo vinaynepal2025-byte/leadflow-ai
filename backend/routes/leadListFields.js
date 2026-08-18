@@ -23,6 +23,16 @@ const DEFAULTS = [
   { field_key: 'field_created_date', enabled: false, sort_order: 4 },
   { field_key: 'badge_stage',        enabled: true,  sort_order: 5 },
   { field_key: 'badge_score',        enabled: true,  sort_order: 6 },
+  // Not real optional display fields -- always enabled, never reordered.
+  // These two rows exist purely as style_json storage for whole-element
+  // appearance ("Leads button, cards mein bhi [free size/texture/icon]
+  // control do"): card_container is the whole lead row's card look,
+  // bulk_action_bar is the shared look of the Select All/Move/Delete
+  // buttons that appear during multi-select. The client filters both out
+  // of the normal show/hide/reorder list and edits them from a separate
+  // "Appearance" section instead.
+  { field_key: 'card_container',     enabled: true,  sort_order: 100 },
+  { field_key: 'bulk_action_bar',    enabled: true,  sort_order: 101 },
 ];
 
 // Ensures a tenant has all 7 built-in field rows. Safe to call every
@@ -54,11 +64,14 @@ router.patch('/:field_key', async (req, res) => {
   const existing = await db.prepare('SELECT id FROM lead_list_fields WHERE tenant_id = ? AND field_key = ?').get(tid, field_key);
   if (!existing) return res.status(404).json({ error: 'Field not found for this tenant' });
 
-  const allowed = ['enabled', 'sort_order'];
+  const allowed = ['enabled', 'sort_order', 'style_json'];
   const updates = [];
   const values = [];
   for (const field of allowed) {
-    if (req.body[field] !== undefined) { updates.push(field + ' = ?'); values.push(req.body[field]); }
+    if (req.body[field] !== undefined) {
+      updates.push(field + ' = ?');
+      values.push(field === 'style_json' ? JSON.stringify(req.body[field]) : req.body[field]);
+    }
   }
   if (updates.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
 

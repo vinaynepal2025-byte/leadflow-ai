@@ -12,6 +12,7 @@ import 'theme/appearance_settings.dart';
 import 'theme/glass_settings.dart';
 import 'theme/locale_settings.dart';
 import 'theme/label_overrides.dart';
+import 'theme/edit_mode_settings.dart';
 import 'services/api_service.dart';
 import 'widgets/grain_overlay.dart';
 import 'widgets/aurora_backdrop.dart';
@@ -60,6 +61,7 @@ class _DiagRootState extends State<_DiagRoot> {
   GlassSettings? _glass;
   LocaleSettings? _locale;
   LabelOverrides? _labelOverrides;
+  final EditModeSettings _editMode = EditModeSettings();
 
   @override
   void initState() {
@@ -186,6 +188,7 @@ class _DiagRootState extends State<_DiagRoot> {
         ChangeNotifierProvider.value(value: _appearance!),
         ChangeNotifierProvider.value(value: _labelOverrides!),
         ChangeNotifierProvider.value(value: _locale!),
+        ChangeNotifierProvider.value(value: _editMode),
       ],
       child: _RealApp(loggedIn: _loggedIn),
     );

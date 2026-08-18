@@ -28,6 +28,7 @@ const Map<String, IconData> kLeadDetailIconOptions = {
   'group_outlined': Icons.group_outlined,
   'shield_outlined': Icons.shield_outlined,
   'map_outlined': Icons.map_outlined,
+  'workspace_premium': Icons.workspace_premium,
 };
 
 // Default label + icon per built-in section_key. Must stay in sync with
@@ -48,6 +49,7 @@ const Map<String, String> kLeadDetailDefaultLabels = {
   'lead_notes': 'Notes',
   'flyer_studio': 'Make a Flyer',
   'activity_timeline': 'Activity Timeline',
+  'share_logo': 'Share Logo',
 };
 
 const Map<String, String> kLeadDetailDefaultIcons = {
@@ -64,10 +66,14 @@ const Map<String, String> kLeadDetailDefaultIcons = {
   'lead_notes': 'description_outlined',
   'flyer_studio': 'auto_awesome_mosaic_outlined',
   'activity_timeline': 'history',
+  'share_logo': 'workspace_premium',
 };
 
 class CustomizeLeadDetailScreen extends StatefulWidget {
-  const CustomizeLeadDetailScreen({super.key});
+  // Set when arriving from Settings Studio's search -- see the matching
+  // comment on CustomizeMoreMenuScreen.initialEditKey for why.
+  final String? initialEditKey;
+  const CustomizeLeadDetailScreen({super.key, this.initialEditKey});
 
   @override
   State<CustomizeLeadDetailScreen> createState() => _CustomizeLeadDetailScreenState();
@@ -92,6 +98,14 @@ class _CustomizeLeadDetailScreenState extends State<CustomizeLeadDetailScreen> {
       _sections = sections;
       _loading = false;
     });
+    if (widget.initialEditKey != null) {
+      for (final section in _sections) {
+        if (section['section_key'] == widget.initialEditKey) {
+          _openEditor(section);
+          break;
+        }
+      }
+    }
   }
 
   Future<void> _toggleEnabled(Map<String, dynamic> section, bool value) async {

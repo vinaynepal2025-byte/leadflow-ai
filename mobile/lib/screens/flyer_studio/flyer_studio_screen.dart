@@ -18,9 +18,11 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -34,12 +36,23 @@ import '../../widgets/color_picker_dialog.dart';
 import '../../widgets/glass_widgets.dart';
 import 'flyer_element.dart';
 import 'flyer_canvas_element_widget.dart';
+import 'flyer_fonts.dart';
+import 'svg_sanitizer.dart';
 
 class FlyerStudioScreen extends StatefulWidget {
   final String? projectId;
   final String? leadId;
+  // Logo Studio mode -- same freeform canvas engine (shapes, text,
+  // images, groups, undo/redo, export), just started with a square
+  // canvas, a transparent background (a logo composites onto other
+  // designs, unlike a flyer which is always its own opaque page), and
+  // an extra "Save to Brand Logos" export destination alongside the
+  // normal flyer save/share flow. Nothing about the editor itself
+  // branches on this flag -- every tool works exactly the same either
+  // way, it only changes the starting defaults and what "done" saves to.
+  final bool isLogoMode;
 
-  const FlyerStudioScreen({super.key, this.projectId, this.leadId});
+  const FlyerStudioScreen({super.key, this.projectId, this.leadId, this.isLogoMode = false});
 
   @override
   State<FlyerStudioScreen> createState() => _FlyerStudioScreenState();
@@ -134,8 +147,11 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     });
     try {
       final data = await _api.createFlyerProject(
-        title: 'Untitled Flyer',
+        title: widget.isLogoMode ? 'Untitled Logo' : 'Untitled Flyer',
         leadId: widget.leadId,
+        canvasWidth: widget.isLogoMode ? 512 : null,
+        canvasHeight: widget.isLogoMode ? 512 : null,
+        backgroundColor: widget.isLogoMode ? 'transparent' : null,
       );
       _applyProjectData(data);
     } catch (e) {
@@ -464,6 +480,450 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
       shapeColor: '#1B2A4A',
       zIndex: _nextZIndex(),
     ));
+  }
+
+  void _addIconElement(String iconKey, {String color = '#1B2A4A'}) {
+    final size = math.min(_canvasWidth, _canvasHeight) * 0.28;
+    _addElement(FlyerElement(
+      id: _newId(),
+      type: FlyerElementType.icon,
+      x: (_canvasWidth - size) / 2,
+      y: (_canvasHeight - size) / 2,
+      width: size,
+      height: size,
+      iconKey: iconKey,
+      shapeColor: color,
+      zIndex: _nextZIndex(),
+    ));
+  }
+
+  /// Imports a user-picked .svg file as a true vector element -- stays
+  /// editable (recolourable, moveable, resizable, re-exportable as SVG
+  /// later) rather than flattening it to a bitmap on the way in. Every
+  /// file is run through sanitizeSvg() before it ever touches the
+  /// document model (see svg_sanitizer.dart for what that strips).
+  /// [replaceTarget] set swaps an existing SVG element's artwork in place
+  /// (its "Replace SVG" button) instead of adding a new element.
+  Future<void> _importSvgElement({FlyerElement? replaceTarget}) async {
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['svg'],
+    );
+    if (picked == null || picked.files.single.path == null) return;
+
+    String raw;
+    try {
+      raw = await File(picked.files.single.path!).readAsString();
+    } catch (e) {
+      _showSnack('Could not read that file: $e');
+      return;
+    }
+
+    String sanitized;
+    try {
+      sanitized = sanitizeSvg(raw);
+    } on SvgSanitizeException catch (e) {
+      _showSnack('Could not import: ${e.message}');
+      return;
+    } catch (e) {
+      _showSnack('Could not import this SVG: $e');
+      return;
+    }
+
+    if (replaceTarget != null) {
+      _pushUndo();
+      setState(() => replaceTarget.svgData = sanitized);
+      _markDirty();
+      return;
+    }
+
+    final size = math.min(_canvasWidth, _canvasHeight) * 0.4;
+    _addElement(FlyerElement(
+      id: _newId(),
+      type: FlyerElementType.svg,
+      x: (_canvasWidth - size) / 2,
+      y: (_canvasHeight - size) / 2,
+      width: size,
+      height: size,
+      svgData: sanitized,
+      zIndex: _nextZIndex(),
+    ));
+  }
+
+  /// Shared by both the picker grid and the AI Icon Finder result --
+  /// see _openIconPicker's replaceTarget doc for why this branches.
+  void _applyIconChoice(FlyerElement? replaceTarget, String iconKey, {String? color}) {
+    if (replaceTarget != null) {
+      _pushUndo();
+      setState(() {
+        replaceTarget.iconKey = iconKey;
+        if (color != null) replaceTarget.shapeColor = color;
+      });
+      _markDirty();
+    } else {
+      _addIconElement(iconKey, color: color ?? '#1B2A4A');
+    }
+  }
+
+  /// Icon Library + AI Icon Finder -- "different shapes ... jaha apni
+  /// marzi se logo banaya ja sake" needed more than 6 hand-drawn shapes;
+  /// this is the other half of that ask, plus the one AI-integrated
+  /// tool from this pass: type a concept, the real configured AI
+  /// provider (POST /ai/find-icon) picks the closest match from the
+  /// curated set and a fitting colour, one tap to drop it on the canvas.
+  ///
+  /// [replaceTarget] set (from an icon element's own "change icon"
+  /// button) swaps that element's icon in place instead of adding a new
+  /// one -- same picker UI, different outcome, so there's exactly one
+  /// icon-choosing surface to build and maintain rather than two.
+  Future<void> _openIconPicker({FlyerElement? replaceTarget}) async {
+    final searchCtrl = TextEditingController();
+    bool searching = false;
+    String? searchError;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 16, right: 16, top: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+          ),
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.7,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _sheetDragHandle(),
+                Text('Add an icon', style: Theme.of(ctx).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: searchCtrl,
+                        decoration: const InputDecoration(
+                          hintText: 'Describe one, e.g. "graduation cap"',
+                          prefixIcon: Icon(Icons.auto_awesome, size: 20),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        onSubmitted: (_) async {
+                          if (searchCtrl.text.trim().isEmpty) return;
+                          setSheetState(() {
+                            searching = true;
+                            searchError = null;
+                          });
+                          try {
+                            final result = await _api.aiFindIcon(
+                              searchCtrl.text.trim(),
+                              kFlyerIconLibrary.keys.toList(),
+                            );
+                            if (mounted) {
+                              Navigator.pop(ctx);
+                              _applyIconChoice(replaceTarget, result['iconKey'] as String, color: result['color'] as String?);
+                            }
+                          } catch (e) {
+                            setSheetState(() {
+                              searching = false;
+                              searchError = 'Could not find a match: $e';
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                if (searching) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
+                if (searchError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(searchError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+                  ),
+                const SizedBox(height: 12),
+                const Text('Or pick one', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: GridView.count(
+                    crossAxisCount: 6,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    children: kFlyerIconLibrary.entries.map((e) {
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _applyIconChoice(replaceTarget, e.key);
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.grey.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(e.value, size: 22),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The Asset Library -- a tenant-wide pool of saved SVGs/images/logos
+  /// that any project can pull from, instead of every project re-picking
+  /// or re-generating the same graphic (Phase 1 audit: "no generic asset
+  /// library concept exists"). Always inserts a new element; there's no
+  /// [replaceTarget] variant here since the toolbar entry point is the
+  /// only caller and always adds fresh.
+  Future<void> _openAssetLibrary() async {
+    List<Map<String, dynamic>> assets;
+    try {
+      assets = await _api.getTenantAssets();
+    } catch (e) {
+      _showSnack('Could not load assets: $e');
+      return;
+    }
+    if (!mounted) return;
+
+    String? kindFilter;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final items = kindFilter == null
+              ? assets
+              : assets.where((a) => a['kind'] == kindFilter).toList();
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 16, right: 16, top: 16,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+            ),
+            child: SizedBox(
+              height: MediaQuery.of(ctx).size.height * 0.7,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _sheetDragHandle(),
+                  Row(
+                    children: [
+                      Text('Asset Library', style: Theme.of(ctx).textTheme.titleMedium),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.add_photo_alternate_outlined),
+                        tooltip: 'Upload image',
+                        onPressed: () async {
+                          final picked = await _imagePicker.pickImage(
+                              source: ImageSource.gallery, imageQuality: 90);
+                          if (picked == null) return;
+                          try {
+                            final created = await _api.uploadTenantAsset(
+                                filePath: picked.path, kind: 'image');
+                            setSheetState(() => assets = [created, ...assets]);
+                          } catch (e) {
+                            _showSnack('Upload failed: $e');
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _assetKindChip('All', null, kindFilter,
+                            (v) => setSheetState(() => kindFilter = v)),
+                        _assetKindChip('SVG', 'svg', kindFilter,
+                            (v) => setSheetState(() => kindFilter = v)),
+                        _assetKindChip('Images', 'image', kindFilter,
+                            (v) => setSheetState(() => kindFilter = v)),
+                        _assetKindChip('Logos', 'logo', kindFilter,
+                            (v) => setSheetState(() => kindFilter = v)),
+                        _assetKindChip('Icons', 'icon', kindFilter,
+                            (v) => setSheetState(() => kindFilter = v)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: items.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                'No saved assets yet — save an SVG from its properties panel, or upload an image here.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.grey.shade600),
+                              ),
+                            ),
+                          )
+                        : GridView.builder(
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 4,
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 8,
+                            ),
+                            itemCount: items.length,
+                            itemBuilder: (gridCtx, i) {
+                              final asset = items[i];
+                              return InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () {
+                                  Navigator.pop(ctx);
+                                  _insertAsset(asset);
+                                },
+                                onLongPress: () async {
+                                  final confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (dctx) => AlertDialog(
+                                      title: const Text('Remove asset?'),
+                                      content: const Text('This only removes it from your Asset Library.'),
+                                      actions: [
+                                        TextButton(
+                                            onPressed: () => Navigator.pop(dctx, false),
+                                            child: const Text('Cancel')),
+                                        FilledButton(
+                                            onPressed: () => Navigator.pop(dctx, true),
+                                            child: const Text('Remove')),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirm == true) {
+                                    try {
+                                      await _api.deleteTenantAsset(asset['id'].toString());
+                                      setSheetState(
+                                          () => assets = assets.where((a) => a['id'] != asset['id']).toList());
+                                    } catch (e) {
+                                      _showSnack('Could not remove: $e');
+                                    }
+                                  }
+                                },
+                                child: _assetThumbnail(asset),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _assetKindChip(
+      String label, String? value, String? current, ValueChanged<String?> onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: ChoiceChip(
+        label: Text(label, style: const TextStyle(fontSize: 12)),
+        selected: current == value,
+        onSelected: (_) => onTap(value),
+      ),
+    );
+  }
+
+  Widget _assetThumbnail(Map<String, dynamic> asset) {
+    final kind = asset['kind']?.toString();
+    Widget content;
+    if (kind == 'svg' && asset['svg_data'] != null) {
+      content = SvgPicture.string(asset['svg_data'].toString(), fit: BoxFit.contain);
+    } else if (asset['asset_url'] != null) {
+      content = Image.network(
+        asset['asset_url'].toString(),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.grey),
+      );
+    } else {
+      content = const Icon(Icons.image_not_supported, color: Colors.grey);
+    }
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.all(6),
+      child: content,
+    );
+  }
+
+  void _insertAsset(Map<String, dynamic> asset) {
+    if (asset['kind']?.toString() == 'svg') {
+      final svgData = asset['svg_data']?.toString();
+      if (svgData == null) return;
+      final size = math.min(_canvasWidth, _canvasHeight) * 0.4;
+      _addElement(FlyerElement(
+        id: _newId(),
+        type: FlyerElementType.svg,
+        x: (_canvasWidth - size) / 2,
+        y: (_canvasHeight - size) / 2,
+        width: size,
+        height: size,
+        svgData: svgData,
+        zIndex: _nextZIndex(),
+      ));
+      return;
+    }
+    final url = asset['asset_url']?.toString();
+    if (url == null) {
+      _showSnack('This asset\'s file is no longer available');
+      return;
+    }
+    final size = _canvasWidth * 0.6;
+    _addElement(FlyerElement(
+      id: _newId(),
+      type: FlyerElementType.image,
+      x: (_canvasWidth - size) / 2,
+      y: (_canvasHeight - size) / 2,
+      width: size,
+      height: size,
+      url: url,
+      zIndex: _nextZIndex(),
+    ));
+  }
+
+  Future<void> _saveSvgToLibrary(FlyerElement el) async {
+    if (el.svgData == null || el.svgData!.isEmpty) return;
+    final labelCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Save to Asset Library'),
+        content: TextField(
+          controller: labelCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+              hintText: 'Label (optional)', border: OutlineInputBorder(), isDense: true),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await _api.saveSvgAsset(
+        el.svgData!,
+        label: labelCtrl.text.trim().isEmpty ? null : labelCtrl.text.trim(),
+      );
+      _showSnack('Saved to Asset Library');
+    } catch (e) {
+      _showSnack('Could not save: $e');
+    }
   }
 
   void _duplicateSelected() {
@@ -825,21 +1285,47 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             children: [
               _sheetDragHandle(),
               ListTile(
-                leading: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: flyerHexToColor(_backgroundColor),
-                    border: Border.all(color: Colors.grey.shade400),
-                    shape: BoxShape.circle,
-                  ),
-                ),
+                leading: _backgroundColor == 'transparent'
+                    ? SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: ClipOval(child: CustomPaint(painter: const CheckerboardPainter(cellSize: 7))),
+                      )
+                    : Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: flyerHexToColor(_backgroundColor),
+                          border: Border.all(color: Colors.grey.shade400),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
                 title: const Text('Background colour'),
                 onTap: () {
                   Navigator.pop(ctx);
                   _changeBackgroundColor();
                 },
               ),
+              if (widget.isLogoMode)
+                ListTile(
+                  leading: Icon(
+                    _backgroundColor == 'transparent' ? Icons.check_circle : Icons.circle_outlined,
+                    color: _backgroundColor == 'transparent' ? Theme.of(context).colorScheme.primary : null,
+                  ),
+                  title: const Text('Transparent background'),
+                  subtitle: const Text('Recommended -- a logo usually composites onto other designs'),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    if (_projectId == null) return;
+                    setState(() => _backgroundColor = 'transparent');
+                    _markDirty();
+                    try {
+                      await _api.updateFlyerProject(_projectId!, backgroundColor: 'transparent');
+                    } catch (e) {
+                      _showSnack('Could not save background: $e');
+                    }
+                  },
+                ),
               ListTile(
                 leading: const Icon(Icons.wallpaper),
                 title: const Text('Background photo'),
@@ -921,9 +1407,11 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               controller: promptController,
               autofocus: true,
               maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'e.g. "MBBS admission open, navy and gold, urgent tone"',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: widget.isLogoMode
+                    ? 'e.g. "Medical education consultancy, navy and gold, a graduation-cap mark"'
+                    : 'e.g. "MBBS admission open, navy and gold, urgent tone"',
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 8),
@@ -964,7 +1452,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
 
     setState(() => _generatingAI = true);
     try {
-      final result = await _api.generateFlyerAI(_projectId!, prompt);
+      // Logo Studio gets a dedicated logo-composition prompt (icon + brand
+      // mark + minimal text, 2-4 elements) instead of the flyer prompt's
+      // promotional-layout style (headline/body/image placeholder) --
+      // reusing the flyer endpoint here would produce results that don't
+      // fit a logo at all. Both stay real, editable canvas_json though --
+      // same "propose, don't auto-save" validated pipeline either way.
+      final result = widget.isLogoMode
+          ? await _api.generateLogoAI(_projectId!, prompt, kFlyerIconLibrary.keys.toList())
+          : await _api.generateFlyerAI(_projectId!, prompt);
       final raw = (result['canvas_json'] as List?) ?? [];
       _pushUndo();
       setState(() {
@@ -1043,6 +1539,47 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     }
   }
 
+  /// Logo Studio's "done" action -- captures the canvas exactly like
+  /// _exportAndShare, but saves straight into the tenant's Brand Logos
+  /// library (the same upload endpoint the Upload and AI-Generate logo
+  /// flows already use) instead of opening the OS share sheet. A
+  /// transparent background here really does export as a transparent
+  /// PNG -- toImage() captures actual alpha, the checkerboard shown
+  /// while editing is a sibling widget outside this RepaintBoundary,
+  /// never part of what gets captured.
+  Future<void> _saveAsLogo() async {
+    if (_projectId == null) return;
+    setState(() {
+      _selectedId = null;
+      _exporting = true;
+    });
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    try {
+      final bytes = await _captureCanvasBytes();
+      if (bytes == null) return;
+      final file = await _writeCanvasPngFile(bytes);
+      await file.writeAsBytes(bytes);
+
+      await _api.uploadTenantLogo(filePath: file.path, label: _title, isDefault: false);
+
+      try {
+        await _api.uploadFlyerRender(_projectId!, bytes);
+      } catch (_) {
+        // Non-fatal -- the logo library save above is what matters here.
+      }
+
+      if (mounted) {
+        _showSnack('Saved to Brand Logos');
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      _showSnack('Could not save to Brand Logos: $e');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   /// Renders the current design at every canvas preset in one pass and
   /// shares them together -- Canva's "Download all sizes". Elements are
   /// rescaled the same proportional way manual size-switching already does
@@ -1109,6 +1646,245 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         });
       }
     }
+  }
+
+  /// Real multi-format export -- JPG/WebP/Favicon via the backend's sharp
+  /// pipeline (POST /flyer-projects/:id/export), on top of the plain-PNG
+  /// capture every other export path here uses. "Never rename one file
+  /// type as another" (master spec §17): each format is a genuine
+  /// conversion, not the same PNG bytes wearing a different extension --
+  /// see backend/routes/flyerProjects.js for the sharp calls and the
+  /// hand-rolled PNG-in-ICO container for 'favicon'.
+  Future<void> _showExportFormatSheet() async {
+    if (_projectId == null) return;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _sheetDragHandle(),
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('JPG'),
+              subtitle: const Text('Smaller file, no transparency'),
+              onTap: () => Navigator.pop(ctx, 'jpg'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('WebP'),
+              subtitle: const Text('Smaller file, keeps transparency'),
+              onTap: () => Navigator.pop(ctx, 'webp'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.web),
+              title: const Text('Favicon (.ico)'),
+              subtitle: const Text('32×32, for a website tab icon'),
+              onTap: () => Navigator.pop(ctx, 'favicon'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+    await _exportAsFormat(choice);
+  }
+
+  Future<void> _exportAsFormat(String format) async {
+    if (_projectId == null) return;
+    setState(() {
+      _selectedId = null;
+      _exporting = true;
+    });
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    try {
+      final pngBytes = await _captureCanvasBytes();
+      if (pngBytes == null) return;
+
+      final converted = await _api.exportFlyerFormat(
+        _projectId!,
+        pngBytes,
+        format,
+        width: format == 'favicon' ? 32 : null,
+        height: format == 'favicon' ? 32 : null,
+      );
+
+      final ext = format == 'favicon' ? 'ico' : format;
+      final dir = await getTemporaryDirectory();
+      final safeTitle = _title.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-');
+      final file = File('${dir.path}/$safeTitle-${DateTime.now().millisecondsSinceEpoch}.$ext');
+      await file.writeAsBytes(converted);
+
+      await Share.shareXFiles([XFile(file.path)], text: _title);
+    } catch (e) {
+      _showSnack('Export failed: $e');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  /// Logo Variations (master spec §15) -- mechanical transforms over the
+  /// existing document model, deliberately NOT new AI calls: a variant is
+  /// a colour/composition rule applied to the current elements, not a
+  /// fresh generation that could drift from the original mark. Each
+  /// variant becomes its own saved project (via the real duplicate
+  /// endpoint, so it's independently editable/reopenable afterwards),
+  /// linked back to this one only by both having started from the same
+  /// canvas -- there's no separate "variant group" concept to keep in
+  /// sync, which also means a variant surviving further hand-editing is
+  /// just... editing a normal project, no special-casing needed anywhere
+  /// else in the app.
+  Future<void> _generateVariants() async {
+    if (_projectId == null || _elements.isEmpty) {
+      _showSnack('Add some elements to the logo first');
+      return;
+    }
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(context.read<AppearanceSettings>().cornerRadius.clamp(0, 24))),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _sheetDragHandle(),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Generate variant', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.emoji_symbols_outlined),
+              title: const Text('Icon only'),
+              subtitle: const Text('Drops text -- for a social avatar / favicon'),
+              onTap: () => Navigator.pop(ctx, 'icon_only'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.title),
+              title: const Text('Text only (wordmark)'),
+              subtitle: const Text('Drops the icon/shape mark'),
+              onTap: () => Navigator.pop(ctx, 'text_only'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.circle, color: Colors.black),
+              title: const Text('Monochrome — black'),
+              onTap: () => Navigator.pop(ctx, 'mono_black'),
+            ),
+            ListTile(
+              leading: Icon(Icons.circle, color: Colors.grey.shade200),
+              title: const Text('Monochrome — white'),
+              subtitle: const Text('For a dark-background use'),
+              onTap: () => Navigator.pop(ctx, 'mono_white'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.dark_mode_outlined),
+              title: const Text('Dark-background version'),
+              subtitle: const Text('White elements on a navy canvas'),
+              onTap: () => Navigator.pop(ctx, 'dark_bg'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.light_mode_outlined),
+              title: const Text('Light-background version'),
+              subtitle: const Text('Navy elements on a white canvas'),
+              onTap: () => Navigator.pop(ctx, 'light_bg'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+
+    setState(() => _saving = true);
+    try {
+      final duplicated = await _api.duplicateFlyerProject(_projectId!);
+      final newId = duplicated['id']?.toString();
+      if (newId == null) throw Exception('Could not create a variant project');
+
+      List<FlyerElement> variantElements;
+      String? bgOverride;
+      switch (choice) {
+        case 'icon_only':
+          variantElements =
+              _elements.where((e) => e.type != FlyerElementType.text).map((e) => e.clone()).toList();
+          break;
+        case 'text_only':
+          variantElements =
+              _elements.where((e) => e.type == FlyerElementType.text).map((e) => e.clone()).toList();
+          break;
+        case 'mono_black':
+          variantElements = _recolorAllElements(_elements, '#000000');
+          break;
+        case 'mono_white':
+          variantElements = _recolorAllElements(_elements, '#FFFFFF');
+          break;
+        case 'dark_bg':
+          variantElements = _recolorAllElements(_elements, '#FFFFFF');
+          bgOverride = '#1B2A4A';
+          break;
+        case 'light_bg':
+          variantElements = _recolorAllElements(_elements, '#1B2A4A');
+          bgOverride = '#FFFFFF';
+          break;
+        default:
+          variantElements = _elements.map((e) => e.clone()).toList();
+      }
+
+      await _api.updateFlyerProjectCanvas(newId, variantElements.map((e) => e.toJson()).toList());
+      if (bgOverride != null) {
+        await _api.updateFlyerProject(newId, backgroundColor: bgOverride);
+      }
+
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FlyerStudioScreen(projectId: newId, isLogoMode: widget.isLogoMode),
+        ),
+      );
+    } catch (e) {
+      _showSnack('Could not generate variant: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  /// Forces every element's colour to [hex] -- text.color, shape/icon's
+  /// shapeColor, and an SVG element's recolour tint (turning svgRecolor on
+  /// if it wasn't already, since an un-recoloured multi-colour SVG can't
+  /// meaningfully participate in a one-colour monochrome variant).
+  /// Images/logos/QR codes are left untouched -- there's no single
+  /// "colour" to force on a photo, and forcing a QR's colours here would
+  /// silently desync it from the fg/bg it was actually generated with.
+  List<FlyerElement> _recolorAllElements(List<FlyerElement> source, String hex) {
+    return source.map((e) {
+      final copy = e.clone();
+      switch (copy.type) {
+        case FlyerElementType.text:
+          copy.color = hex;
+          break;
+        case FlyerElementType.shape:
+        case FlyerElementType.icon:
+          copy.shapeColor = hex;
+          break;
+        case FlyerElementType.svg:
+          copy.svgRecolor = true;
+          copy.shapeColor = hex;
+          break;
+        case FlyerElementType.image:
+        case FlyerElementType.logo:
+        case FlyerElementType.qrcode:
+          break;
+      }
+      return copy;
+    }).toList();
   }
 
   /// Share options. Sending straight to the lead is listed first and framed
@@ -1267,30 +2043,34 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                 if (v == 'save') _save();
                 if (v == 'rename') _renameFlyer();
                 if (v == 'exportAll') _exportAllSizes();
+                if (v == 'exportFormat') _showExportFormatSheet();
+                if (v == 'variants') _generateVariants();
               },
-              itemBuilder: (ctx) => const [
-                PopupMenuItem(value: 'layers', child: Text('Layers')),
-                PopupMenuItem(value: 'background', child: Text('Background & size')),
-                PopupMenuItem(value: 'rename', child: Text('Rename')),
-                PopupMenuItem(value: 'save', child: Text('Save now')),
-                PopupMenuItem(
+              itemBuilder: (ctx) => [
+                const PopupMenuItem(value: 'layers', child: Text('Layers')),
+                const PopupMenuItem(value: 'background', child: Text('Background & size')),
+                const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                const PopupMenuItem(value: 'save', child: Text('Save now')),
+                const PopupMenuItem(
                     value: 'exportAll', child: Text('Export all sizes (Story/Post/A4...)')),
+                const PopupMenuItem(
+                    value: 'exportFormat', child: Text('Export as (JPG/WebP/Favicon)')),
+                if (widget.isLogoMode)
+                  const PopupMenuItem(
+                      value: 'variants', child: Text('Generate variant (mono/dark/icon-only...)')),
               ],
             ),
           ],
         ),
-        floatingActionButton: _loading || _error != null
-            ? null
-            : FloatingActionButton.extended(
-                onPressed: _exporting ? null : _showShareOptions,
-                icon: _exporting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.share),
-                label: const Text('Share'),
-              ),
+        // Save/Share used to be a Scaffold floatingActionButton, which
+        // floats at a fixed screen position with no idea the bottom
+        // toolbar (a normal Column child, not a bottomNavigationBar
+        // slot) exists -- on Logo Studio's longer "Save to Brand Logos"
+        // label it visibly sat on top of and hid several toolbar icons.
+        // Making it a real block-level row in the Column instead (see
+        // _buildActionBar below) means it can never overlap anything;
+        // this fixes the same latent overlap risk for Flyer Studio's
+        // shorter "Share" label too, since both share this exact layout.
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null
@@ -1311,6 +2091,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                                 ? _buildStylePanel(selected)
                                 : const SizedBox(width: double.infinity, height: 0)),
                       ),
+                      _buildActionBar(),
                       _buildToolbar(),
                     ],
                   ),
@@ -1336,7 +2117,19 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         return Center(
           child: Padding(
             padding: const EdgeInsets.all(12),
-            child: RepaintBoundary(
+            // Checkerboard sits BEHIND the RepaintBoundary, as a sibling
+            // rather than inside it, so toImage() export never captures
+            // it -- only genuinely-transparent pixels do.
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (_backgroundColor == 'transparent')
+                  SizedBox(
+                    width: displayW,
+                    height: displayH,
+                    child: CustomPaint(painter: const CheckerboardPainter()),
+                  ),
+                RepaintBoundary(
               key: _canvasRepaintKey,
               child: GestureDetector(
                 onTap: () => _selectElement(null),
@@ -1426,6 +2219,9 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                               onDoubleTap: () {
                                 if (el.type == FlyerElementType.text) {
                                   _beginInlineEdit(el);
+                                } else if (el.type == FlyerElementType.qrcode) {
+                                  _selectElement(el.id);
+                                  _editQrCodeData(el);
                                 } else {
                                   _selectElement(el.id);
                                   _replaceElementImage(el);
@@ -1470,6 +2266,8 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                   ),
                 ),
               ),
+            ),
+              ],
             ),
           ),
         );
@@ -1662,6 +2460,29 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     );
   }
 
+  /// The former FloatingActionButton, now a normal full-width block
+  /// above the toolbar instead of an OS-level overlay -- see the "Save/
+  /// Share" comment at the Scaffold's body for why.
+  Widget _buildActionBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      child: SizedBox(
+        width: double.infinity,
+        height: 44,
+        child: FilledButton.icon(
+          onPressed: _exporting ? null : (widget.isLogoMode ? _saveAsLogo : _showShareOptions),
+          icon: _exporting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : Icon(widget.isLogoMode ? Icons.check : Icons.share, size: 18),
+          label: Text(widget.isLogoMode ? 'Save to Brand Logos' : 'Share'),
+        ),
+      ),
+    );
+  }
+
   Widget _buildToolbar() {
     final appearance = context.watch<AppearanceSettings>();
     final glass = context.watch<GlassSettings>();
@@ -1699,6 +2520,10 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                   Icons.add_photo_alternate, 'Photo', _addImageElement, appearance),
               _toolbarButton(Icons.workspace_premium, 'Logo', _addLogoElement, appearance),
               _toolbarButton(Icons.rectangle, 'Shape', _addShapeElement, appearance),
+              _toolbarButton(Icons.emoji_symbols_outlined, 'Icon', _openIconPicker, appearance),
+              _toolbarButton(Icons.polyline, 'SVG', _importSvgElement, appearance),
+              _toolbarButton(Icons.qr_code, 'QR Code', _addQrCodeElement, appearance),
+              _toolbarButton(Icons.perm_media_outlined, 'Assets', _openAssetLibrary, appearance),
               _toolbarButton(
                   Icons.wallpaper, 'Background', _showBackgroundSheet, appearance),
               _toolbarButton(Icons.layers, 'Layers', _showLayersSheet, appearance),
@@ -1869,6 +2694,9 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
                         el.type == FlyerElementType.logo)
                       ..._imageControls(el),
                     if (el.type == FlyerElementType.shape) ..._shapeControls(el),
+                    if (el.type == FlyerElementType.icon) ..._iconControls(el),
+                    if (el.type == FlyerElementType.svg) ..._svgControls(el),
+                    if (el.type == FlyerElementType.qrcode) ..._qrCodeControls(el),
                   ],
                 ),
               ),
@@ -2022,7 +2850,52 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
               _markDirty();
             },
           ),
+          IconButton(
+            icon: Icon(Icons.format_color_text,
+                color: el.outlineColor != null ? activeColor : null),
+            tooltip: 'Outline',
+            onPressed: () async {
+              if (el.outlineColor != null) {
+                setState(() => el.outlineColor = null);
+                _markDirty();
+                return;
+              }
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => const ColorPickerDialog(
+                    initial: Colors.black, title: 'Outline Colour'),
+              );
+              if (picked != null) {
+                setState(() {
+                  el.outlineColor = flyerColorToHex(picked);
+                  if (el.outlineWidth <= 0) el.outlineWidth = 2;
+                });
+                _markDirty();
+              }
+            },
+          ),
         ],
+      ),
+      if (el.outlineColor != null)
+        _sliderRow(
+          icon: Icons.line_weight,
+          value: el.outlineWidth.clamp(0.5, 12.0),
+          min: 0.5,
+          max: 12.0,
+          onChanged: (v) {
+            setState(() => el.outlineWidth = v);
+            _markDirty();
+          },
+        ),
+      _sliderRow(
+        icon: Icons.waves,
+        value: el.curveAmount.clamp(-100.0, 100.0),
+        min: -100.0,
+        max: 100.0,
+        onChanged: (v) {
+          setState(() => el.curveAmount = v);
+          _markDirty();
+        },
       ),
       _sliderRow(
         icon: Icons.format_size,
@@ -2102,6 +2975,57 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         max: 200,
         onChanged: (v) {
           setState(() => el.cornerRadius = v);
+          _markDirty();
+        },
+      ),
+      // Photo adjustments (Canva-parity Phase C) -- real ColorFilter.matrix
+      // math (see imageAdjustmentMatrix in flyer_canvas_element_widget.dart),
+      // not a fake/cosmetic control.
+      Row(
+        children: [
+          const Text('Adjust', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          const Spacer(),
+          if (el.brightness != 0 || el.contrast != 0 || el.saturation != 1)
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  el.brightness = 0;
+                  el.contrast = 0;
+                  el.saturation = 1;
+                });
+                _markDirty();
+              },
+              child: const Text('Reset', style: TextStyle(fontSize: 12)),
+            ),
+        ],
+      ),
+      _sliderRow(
+        icon: Icons.wb_sunny_outlined,
+        value: el.brightness.clamp(-100, 100),
+        min: -100,
+        max: 100,
+        onChanged: (v) {
+          setState(() => el.brightness = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.contrast,
+        value: el.contrast.clamp(-100, 100),
+        min: -100,
+        max: 100,
+        onChanged: (v) {
+          setState(() => el.contrast = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.invert_colors_outlined,
+        value: el.saturation.clamp(0, 2),
+        min: 0,
+        max: 2,
+        onChanged: (v) {
+          setState(() => el.saturation = v);
           _markDirty();
         },
       ),
@@ -2245,6 +3169,283 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
     ];
   }
 
+  List<Widget> _iconControls(FlyerElement el) {
+    return [
+      Row(
+        children: [
+          IconButton(
+            icon: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: flyerHexToColor(el.shapeColor),
+                border: Border.all(color: Colors.grey.shade400),
+                shape: BoxShape.circle,
+              ),
+            ),
+            tooltip: 'Icon colour',
+            onPressed: () async {
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(initial: flyerHexToColor(el.shapeColor), title: 'Icon Colour'),
+              );
+              if (picked != null) {
+                setState(() => el.shapeColor = flyerColorToHex(picked));
+                _markDirty();
+              }
+            },
+          ),
+          IconButton(
+            icon: Icon(kFlyerIconLibrary[el.iconKey] ?? Icons.star),
+            tooltip: 'Change icon',
+            onPressed: () => _openIconPicker(replaceTarget: el),
+          ),
+        ],
+      ),
+      _sliderRow(
+        icon: Icons.opacity,
+        value: el.opacity.clamp(0.1, 1.0),
+        min: 0.1,
+        max: 1.0,
+        onChanged: (v) {
+          setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+    ];
+  }
+
+  List<Widget> _svgControls(FlyerElement el) {
+    return [
+      Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.swap_horiz),
+            tooltip: 'Replace SVG',
+            onPressed: () => _importSvgElement(replaceTarget: el),
+          ),
+          IconButton(
+            icon: const Icon(Icons.bookmark_add_outlined),
+            tooltip: 'Save to Asset Library',
+            onPressed: () => _saveSvgToLibrary(el),
+          ),
+          const Spacer(),
+          const Text('Force single colour', style: TextStyle(fontSize: 12)),
+          Switch(
+            value: el.svgRecolor,
+            onChanged: (v) {
+              setState(() => el.svgRecolor = v);
+              _markDirty();
+            },
+          ),
+        ],
+      ),
+      if (el.svgRecolor)
+        Row(
+          children: [
+            const Text('Colour', style: TextStyle(fontSize: 12)),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: flyerHexToColor(el.shapeColor),
+                  border: Border.all(color: Colors.grey.shade400),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              tooltip: 'SVG colour',
+              onPressed: () async {
+                final picked = await showDialog<Color>(
+                  context: context,
+                  builder: (_) =>
+                      ColorPickerDialog(initial: flyerHexToColor(el.shapeColor), title: 'SVG Colour'),
+                );
+                if (picked != null) {
+                  setState(() => el.shapeColor = flyerColorToHex(picked));
+                  _markDirty();
+                }
+              },
+            ),
+          ],
+        ),
+      _sliderRow(
+        icon: Icons.opacity,
+        value: el.opacity.clamp(0.1, 1.0),
+        min: 0.1,
+        max: 1.0,
+        onChanged: (v) {
+          setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+    ];
+  }
+
+  // Canva-parity Phase G -- a QR code element renders through the same
+  // image codepath as a photo/logo (see FlyerCanvasElementWidget), but its
+  // controls edit the encoded data + colours and regenerate the PNG
+  // server-side rather than letting the user pick a replacement photo.
+  List<Widget> _qrCodeControls(FlyerElement el) {
+    return [
+      Row(
+        children: [
+          TextButton.icon(
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: const Text('Edit QR data'),
+            onPressed: () => _editQrCodeData(el),
+          ),
+          const Spacer(),
+          IconButton(
+            icon: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: flyerHexToColor(el.color),
+                border: Border.all(color: Colors.grey.shade400),
+                shape: BoxShape.circle,
+              ),
+            ),
+            tooltip: 'Foreground colour',
+            onPressed: () async {
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(
+                    initial: flyerHexToColor(el.color), title: 'QR Foreground'),
+              );
+              if (picked == null) return;
+              setState(() => el.color = flyerColorToHex(picked));
+              await _regenerateQrCode(el);
+            },
+          ),
+          IconButton(
+            icon: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: flyerHexToColor(el.backgroundColor ?? '#FFFFFF'),
+                border: Border.all(color: Colors.grey.shade400),
+                shape: BoxShape.circle,
+              ),
+            ),
+            tooltip: 'Background colour',
+            onPressed: () async {
+              final picked = await showDialog<Color>(
+                context: context,
+                builder: (_) => ColorPickerDialog(
+                    initial: flyerHexToColor(el.backgroundColor ?? '#FFFFFF'),
+                    title: 'QR Background'),
+              );
+              if (picked == null) return;
+              setState(() => el.backgroundColor = flyerColorToHex(picked));
+              await _regenerateQrCode(el);
+            },
+          ),
+        ],
+      ),
+      _sliderRow(
+        icon: Icons.rounded_corner,
+        value: el.cornerRadius.clamp(0.0, 60.0),
+        min: 0,
+        max: 60,
+        onChanged: (v) {
+          setState(() => el.cornerRadius = v);
+          _markDirty();
+        },
+      ),
+      _sliderRow(
+        icon: Icons.opacity,
+        value: el.opacity.clamp(0.1, 1.0),
+        min: 0.1,
+        max: 1.0,
+        onChanged: (v) {
+          setState(() => el.opacity = v);
+          _markDirty();
+        },
+      ),
+    ];
+  }
+
+  Future<String?> _promptQrData({String initial = ''}) {
+    final controller = TextEditingController(text: initial);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('QR code data'),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'URL or text to encode'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Generate'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _addQrCodeElement() async {
+    if (_projectId == null) return;
+    final data = await _promptQrData();
+    if (data == null || data.isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      final result = await _api.generateFlyerQrCode(_projectId!, data);
+      _addElement(FlyerElement(
+        id: _newId(),
+        type: FlyerElementType.qrcode,
+        x: _canvasWidth * 0.3,
+        y: _canvasHeight * 0.3,
+        width: _canvasWidth * 0.4,
+        height: _canvasWidth * 0.4,
+        text: data,
+        url: result['image_url']?.toString(),
+        fit: 'contain',
+        color: '#000000',
+        backgroundColor: '#FFFFFF',
+        zIndex: _nextZIndex(),
+      ));
+    } catch (e) {
+      _showSnack('QR code generation failed: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _editQrCodeData(FlyerElement el) async {
+    if (_projectId == null) return;
+    final data = await _promptQrData(initial: el.text ?? '');
+    if (data == null || data.isEmpty) return;
+    _pushUndo();
+    setState(() => el.text = data);
+    await _regenerateQrCode(el);
+  }
+
+  Future<void> _regenerateQrCode(FlyerElement el) async {
+    if (_projectId == null || el.text == null || el.text!.isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      final result = await _api.generateFlyerQrCode(
+        _projectId!,
+        el.text!,
+        fg: el.color,
+        bg: el.backgroundColor,
+      );
+      setState(() => el.url = result['image_url']?.toString());
+      _markDirty();
+    } catch (e) {
+      _showSnack('QR code generation failed: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Widget _sliderRow({
     required IconData icon,
     required double value,
@@ -2311,6 +3512,7 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         break;
       case FlyerElementType.image:
       case FlyerElementType.logo:
+      case FlyerElementType.qrcode:
         content = (el.url != null && el.url!.isNotEmpty)
             ? Image.network(el.url!,
                 fit: BoxFit.cover,
@@ -2327,6 +3529,21 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
             borderRadius: el.shapeKind == 'circle' ? null : BorderRadius.circular(4),
           ),
         );
+        break;
+      case FlyerElementType.icon:
+        content = Icon(kFlyerIconLibrary[el.iconKey] ?? Icons.star, color: flyerHexToColor(el.shapeColor), size: 22);
+        break;
+      case FlyerElementType.svg:
+        content = (el.svgData != null && el.svgData!.isNotEmpty)
+            ? SvgPicture.string(
+                el.svgData!,
+                fit: BoxFit.contain,
+                colorFilter: el.svgRecolor
+                    ? ColorFilter.mode(flyerHexToColor(el.shapeColor), BlendMode.srcIn)
+                    : null,
+                errorBuilder: (_, __, ___) => Icon(_iconFor(el.type), size: 18, color: Colors.grey),
+              )
+            : Icon(_iconFor(el.type), size: 18, color: Colors.grey);
         break;
     }
     return ClipRRect(
@@ -2514,6 +3731,12 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
         return Icons.workspace_premium;
       case FlyerElementType.shape:
         return Icons.rectangle;
+      case FlyerElementType.icon:
+        return Icons.emoji_symbols_outlined;
+      case FlyerElementType.svg:
+        return Icons.polyline;
+      case FlyerElementType.qrcode:
+        return Icons.qr_code;
     }
   }
 

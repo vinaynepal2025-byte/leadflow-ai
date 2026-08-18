@@ -1,13 +1,60 @@
 const express = require('express');
 const multer = require('multer');
 const { randomUUID } = require('crypto');
+const QRCode = require('qrcode');
 const db = require('../db');
 const { uploadFile, getSignedUrl } = require('../services/supabaseStorage');
 const { generateJson } = require('../services/aiProvider');
 const { buildWhatsAppLink } = require('../services/phone');
 
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+// sharp is loaded lazily -- same deliberate safety choice as
+// routes/tenantLogos.js: if sharp fails to load, only export conversion
+// fails, the rest of this route file (including autosave, the whole
+// editor) keeps working.
+let sharpModule = null;
+let sharpLoadError = null;
+function getSharp() {
+  if (sharpModule) return sharpModule;
+  if (sharpLoadError) throw sharpLoadError;
+  try {
+    sharpModule = require('sharp');
+    return sharpModule;
+  } catch (err) {
+    sharpLoadError = err;
+    throw err;
+  }
+}
+
+// Wraps a PNG buffer in a minimal single-image ICO container (the
+// Vista+ format, where an ICO entry can hold raw PNG bytes directly --
+// every modern browser/OS accepts this for a favicon). sharp has no ICO
+// encoder, and pulling in a new dependency for ~20 lines of binary
+// header-writing didn't clear the Dependency Policy bar (master spec
+// §36) -- this is a real, spec-correct ICO file, not a renamed PNG.
+function pngToIco(pngBuffer, size) {
+  const iconDir = Buffer.alloc(6);
+  iconDir.writeUInt16LE(0, 0); // reserved
+  iconDir.writeUInt16LE(1, 2); // type: icon
+  iconDir.writeUInt16LE(1, 4); // image count
+
+  const entry = Buffer.alloc(16);
+  const dim = size >= 256 ? 0 : size; // 0 means "256" in ICO's 1-byte field
+  entry.writeUInt8(dim, 0); // width
+  entry.writeUInt8(dim, 1); // height
+  entry.writeUInt8(0, 2); // color count (0 = not palette-based)
+  entry.writeUInt8(0, 3); // reserved
+  entry.writeUInt16LE(1, 4); // color planes
+  entry.writeUInt16LE(32, 6); // bits per pixel
+  entry.writeUInt32LE(pngBuffer.length, 8); // size of image data
+  entry.writeUInt32LE(6 + 16, 12); // offset of image data from file start
+
+  return Buffer.concat([iconDir, entry, pngBuffer]);
+}
 
 function tenantId(req) {
   return req.header('x-tenant-id') || 'demo-consultancy';
@@ -92,6 +139,29 @@ router.patch('/:id', async (req, res) => {
   res.json(await attachUrls(await db.prepare('SELECT * FROM flyer_projects WHERE id = ?').get(req.params.id)));
 });
 
+// POST /flyer-projects/:id/duplicate — copies title/canvas/elements/
+// background into a brand-new project (its own id, its own autosave
+// history from here on). Does not carry over rendered_image_path -- a
+// duplicate is a fresh editing session, not a copy of a specific past
+// export, and the two should never appear to share one exported image.
+router.post('/:id/duplicate', async (req, res) => {
+  const tid = tenantId(req);
+  const source = await db.prepare('SELECT * FROM flyer_projects WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!source) return res.status(404).json({ error: 'Flyer project not found' });
+
+  const id = randomUUID();
+  await db.prepare(`
+    INSERT INTO flyer_projects (id, tenant_id, lead_id, title, canvas_width, canvas_height, canvas_json, background_color, background_image_path, ai_generated, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, tid, source.lead_id, `Copy of ${source.title || 'Untitled'}`,
+    source.canvas_width, source.canvas_height, JSON.stringify(source.canvas_json),
+    source.background_color, source.background_image_path, source.ai_generated, source.created_by,
+  );
+
+  res.status(201).json(await attachUrls(await db.prepare('SELECT * FROM flyer_projects WHERE id = ?').get(id)));
+});
+
 // POST /flyer-projects/:id/background  (multipart: file=<image>)
 // Uploads a background image (photo behind the design elements).
 router.post('/:id/background', upload.single('file'), async (req, res) => {
@@ -136,6 +206,49 @@ router.post('/:id/element-image', upload.single('file'), async (req, res) => {
   res.status(201).json({ storage_path: storagePath, image_url: imageUrl });
 });
 
+// POST /flyer-projects/:id/qrcode  { data, fg?, bg? }
+// A QR code as a real, scannable, resizable canvas element (Canva-parity
+// Phase G) -- generated server-side with the `qrcode` package (already a
+// backend dependency, used for tracked-link QR codes in routes/social.js),
+// uploaded to storage, and returned the same shape as element-image above
+// so the client adds it to canvas_json exactly like any other image
+// element. Re-called whenever the user edits the encoded text/colours to
+// regenerate the PNG in place.
+router.post('/:id/qrcode', async (req, res) => {
+  const tid = tenantId(req);
+  const existing = await db.prepare('SELECT id FROM flyer_projects WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Flyer project not found' });
+
+  const data = (req.body.data || '').toString().trim();
+  if (!data) return res.status(400).json({ error: 'data is required' });
+  if (data.length > 2000) return res.status(400).json({ error: 'data is too long for a scannable QR code' });
+
+  const fg = HEX_COLOR_RE.test(req.body.fg) ? req.body.fg : '#000000';
+  const bg = HEX_COLOR_RE.test(req.body.bg) ? req.body.bg : '#FFFFFF';
+
+  let png;
+  try {
+    png = await QRCode.toBuffer(data, {
+      width: 600,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: fg, light: bg },
+    });
+  } catch (err) {
+    return res.status(400).json({ error: `Could not generate QR code: ${err.message}` });
+  }
+
+  const storagePath = `flyer-elements/${tid}/${req.params.id}-qr-${randomUUID()}.png`;
+  try {
+    await uploadFile(png, storagePath, 'image/png');
+  } catch (err) {
+    return res.status(502).json({ error: `Upload failed: ${err.message}` });
+  }
+
+  const imageUrl = await getSignedUrl(storagePath, 3600);
+  res.status(201).json({ storage_path: storagePath, image_url: imageUrl });
+});
+
 // POST /flyer-projects/:id/render  (multipart: file=<final PNG>)
 // The client renders the finished canvas locally (RepaintBoundary ->
 // toImage -> PNG bytes) and uploads the result here. No server-side
@@ -160,6 +273,89 @@ router.post('/:id/render', upload.single('file'), async (req, res) => {
     .run(storagePath, tid, req.params.id);
 
   res.json(await attachUrls(await db.prepare('SELECT * FROM flyer_projects WHERE id = ?').get(req.params.id)));
+});
+
+// POST /flyer-projects/:id/export  (multipart: file=<PNG>, format=png|jpg|webp|favicon, width?, height?)
+// Takes the client's captured canvas PNG and returns a genuinely
+// converted file -- real format conversion via sharp, never the same
+// bytes relabeled with a different extension. Also archives the result
+// to the tenant's Asset Library as a best-effort background step (never
+// blocks the response the counsellor is waiting on to actually share
+// the file), same "sharing is the actual intent" philosophy as /render.
+router.post('/:id/export', upload.single('file'), async (req, res) => {
+  const tid = tenantId(req);
+  const project = await db.prepare('SELECT id FROM flyer_projects WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!project) return res.status(404).json({ error: 'Flyer project not found' });
+  if (!req.file) return res.status(400).json({ error: 'file is required' });
+
+  const format = (req.body.format || 'png').toLowerCase();
+  if (!['png', 'jpg', 'webp', 'favicon'].includes(format)) {
+    return res.status(400).json({ error: 'format must be one of: png, jpg, webp, favicon' });
+  }
+  const width = req.body.width ? parseInt(req.body.width, 10) : null;
+  const height = req.body.height ? parseInt(req.body.height, 10) : null;
+
+  let sharpFn;
+  try {
+    sharpFn = getSharp();
+  } catch (err) {
+    return res.status(502).json({ error: 'Image engine unavailable' });
+  }
+
+  let outBuffer, ext, mime;
+  try {
+    if (format === 'favicon') {
+      const size = width || 32;
+      const pngBuf = await sharpFn(req.file.buffer)
+        .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toBuffer();
+      outBuffer = pngToIco(pngBuf, size);
+      ext = 'ico';
+      mime = 'image/x-icon';
+    } else {
+      let pipeline = sharpFn(req.file.buffer);
+      if (width && height) {
+        pipeline = pipeline.resize(width, height, {
+          fit: 'contain',
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        });
+      }
+      if (format === 'jpg') {
+        outBuffer = await pipeline.flatten({ background: '#FFFFFF' }).jpeg({ quality: 92 }).toBuffer();
+        ext = 'jpg';
+        mime = 'image/jpeg';
+      } else if (format === 'webp') {
+        outBuffer = await pipeline.webp({ quality: 92 }).toBuffer();
+        ext = 'webp';
+        mime = 'image/webp';
+      } else {
+        outBuffer = await pipeline.png().toBuffer();
+        ext = 'png';
+        mime = 'image/png';
+      }
+    }
+  } catch (err) {
+    return res.status(502).json({ error: `Export conversion failed: ${err.message}` });
+  }
+
+  // Fire-and-forget archive to the Asset Library.
+  (async () => {
+    try {
+      const storagePath = `flyer-exports/${tid}/${req.params.id}-${Date.now()}.${ext}`;
+      await uploadFile(outBuffer, storagePath, mime);
+      await db.prepare(`
+        INSERT INTO tenant_assets (id, tenant_id, kind, label, storage_path)
+        VALUES (?, ?, 'export', ?, ?)
+      `).run(randomUUID(), tid, req.body.label || null, storagePath);
+    } catch (_) {
+      // Silent -- this is a backup path, not the request's actual purpose.
+    }
+  })();
+
+  res.set('Content-Type', mime);
+  res.set('Content-Disposition', `attachment; filename="export.${ext}"`);
+  res.status(200).send(outBuffer);
 });
 
 // POST /flyer-projects/:id/ai-generate
@@ -238,6 +434,105 @@ Rules: 4-8 elements total. All x/y/width/height must fit within the ${canvasW}x$
         };
       }
       return { ...base, url: '', fit: 'cover' };
+    });
+
+  if (validated.length === 0) {
+    return res.status(502).json({ error: 'AI returned no usable elements' });
+  }
+
+  res.json({ canvas_json: validated });
+});
+
+// POST /flyer-projects/:id/ai-generate-logo  { prompt, iconKeys }
+// Logo-specific sibling of /ai-generate above -- same "propose, don't
+// auto-save" philosophy, but composes a minimal icon+shape+text logo
+// mark instead of a promotional flyer layout, so this is the real
+// generative gap the Phase 1 audit flagged ("today's AI generation is
+// parametric fill-in of 7 fixed templates, not AI-driven layout") --
+// the output is genuinely editable canvas_json, the same document model
+// every other Logo Studio element uses, never a raster image passed off
+// as an editable logo (master spec §14). iconKeys is the client's own
+// kFlyerIconLibrary key list (same pattern as POST /ai/find-icon), so
+// this route never carries its own copy that could drift out of sync.
+router.post('/:id/ai-generate-logo', async (req, res) => {
+  const tid = tenantId(req);
+  const project = await db.prepare('SELECT * FROM flyer_projects WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!project) return res.status(404).json({ error: 'Flyer project not found' });
+
+  const { prompt, iconKeys } = req.body;
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    return res.status(400).json({ error: 'prompt is required' });
+  }
+  if (!Array.isArray(iconKeys) || iconKeys.length === 0) {
+    return res.status(400).json({ error: 'iconKeys is required' });
+  }
+
+  const canvasW = project.canvas_width || 512;
+  const canvasH = project.canvas_height || 512;
+  const KNOWN_FONTS = ['SpaceGrotesk','Inter','PlayfairDisplay','Lato','Poppins','Roboto','Montserrat','OpenSans'];
+
+  const aiPrompt = `You are a logo designer for an education-admissions consultancy. Design a simple, professional logo mark as a JSON array of elements for a square canvas that is ${canvasW}x${canvasH} pixels.
+
+Brief: "${prompt.trim()}"
+
+Return ONLY a JSON array (no prose, no markdown fences). Each element must be one of:
+- Shape (a background mark, e.g. a circle/rounded badge behind the icon): {"type":"shape","x":<number>,"y":<number>,"width":<number>,"height":<number>,"shapeKind":"rect"|"circle","shapeColor":"<#RRGGBB hex>","cornerRadius":<0-100>}
+- Icon: {"type":"icon","x":<number>,"y":<number>,"width":<number>,"height":<number>,"iconKey":"<one of ${iconKeys.join(', ')}>","shapeColor":"<#RRGGBB hex>"}
+- Text (brand name or initials, short): {"type":"text","x":<number>,"y":<number>,"width":<number>,"height":<number>,"text":"<short brand name or initials, max 24 chars>","fontSize":<12-72>,"fontFamily":"<one of ${KNOWN_FONTS.join(', ')}>","color":"<#RRGGBB hex>","fontWeight":"normal"|"bold","textAlign":"center"}
+
+Rules: 2-4 elements total -- a logo mark is not a flyer, keep it minimal and iconic. All x/y/width/height must fit within the ${canvasW}x${canvasH} canvas (x>=0, y>=0, x+width<=${canvasW}, y+height<=${canvasH}). Use at most 2 colors total for a cohesive brand mark. Never include rotation. Center the composition.`;
+
+  let rawElements;
+  try {
+    rawElements = await generateJson(aiPrompt, { maxTokens: 2000 });
+  } catch (err) {
+    return res.status(502).json({ error: `AI generation failed: ${err.message}` });
+  }
+  if (!Array.isArray(rawElements)) {
+    return res.status(502).json({ error: 'AI returned an unexpected format' });
+  }
+
+  const hexRe = /^#[0-9A-Fa-f]{6}$/;
+  const iconKeySet = new Set(iconKeys);
+  const clampNum = (v, lo, hi, fallback) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(hi, Math.max(lo, n));
+  };
+
+  const validated = rawElements
+    .filter((el) => el && ['text', 'shape', 'icon'].includes(el.type))
+    .slice(0, 8)
+    .map((el, i) => {
+      const width = clampNum(el.width, 10, canvasW, 100);
+      const height = clampNum(el.height, 10, canvasH, 100);
+      const x = clampNum(el.x, 0, Math.max(0, canvasW - width), 0);
+      const y = clampNum(el.y, 0, Math.max(0, canvasH - height), 0);
+      const base = { id: `ai-logo-${Date.now()}-${i}`, type: el.type, x, y, width, height, rotation: 0, zIndex: i };
+      if (el.type === 'text') {
+        return {
+          ...base,
+          text: typeof el.text === 'string' ? el.text.slice(0, 24) : 'Brand',
+          fontSize: clampNum(el.fontSize, 12, 72, 24),
+          fontFamily: KNOWN_FONTS.includes(el.fontFamily) ? el.fontFamily : 'Montserrat',
+          color: hexRe.test(el.color) ? el.color : '#1B2A4A',
+          fontWeight: el.fontWeight === 'bold' ? 'bold' : 'normal',
+          textAlign: 'center',
+        };
+      }
+      if (el.type === 'icon') {
+        return {
+          ...base,
+          iconKey: iconKeySet.has(el.iconKey) ? el.iconKey : iconKeys[0],
+          shapeColor: hexRe.test(el.shapeColor) ? el.shapeColor : '#1B2A4A',
+        };
+      }
+      return {
+        ...base,
+        shapeKind: el.shapeKind === 'circle' ? 'circle' : 'rect',
+        shapeColor: hexRe.test(el.shapeColor) ? el.shapeColor : '#F2F2F2',
+        cornerRadius: clampNum(el.cornerRadius, 0, 100, 0),
+      };
     });
 
   if (validated.length === 0) {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/lead.dart';
@@ -69,6 +70,23 @@ class ApiService {
 
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
+        'x-tenant-id': tenantId,
+        if (authToken != null) 'Authorization': 'Bearer $authToken',
+      };
+
+  /// Real bug found while wiring Logo Studio's save flow: every
+  /// MultipartRequest (file uploads -- documents, voice notes, images,
+  /// flyer backgrounds/elements/renders, brand kit + tenant logos) built
+  /// its own headers map with only 'x-tenant-id', never the
+  /// 'Authorization' bearer token _headers above already carries. That
+  /// was silently fine before the backend's global enforceAuth gate
+  /// (middleware/auth.js) started requiring req.user on every
+  /// non-public route -- after that, every upload for a logged-in user
+  /// started failing with 401 "Authentication required. Please log in
+  /// again.", which is exactly the error Logo Studio's "Save to Brand
+  /// Logos" surfaced. Fixes all 11 call sites at once by having them
+  /// share this getter instead of each hand-building the same map.
+  Map<String, String> get _multipartHeaders => {
         'x-tenant-id': tenantId,
         if (authToken != null) 'Authorization': 'Bearer $authToken',
       };
@@ -366,6 +384,49 @@ class ApiService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  /// AI Quick Restyle -- interprets a plain-language instruction for ONE
+  /// already-identified button/section (which item is resolved on-device
+  /// by customize_registry.dart, not by this call) and returns just its
+  /// new colour/style-variant/gradient, never a whole-app theme.
+  Future<Map<String, dynamic>> aiRestyleSection(
+    String instruction, {
+    required String itemLabel,
+    String? currentColor,
+    String? currentStyleVariant,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/ai/restyle-section'),
+      headers: _headers,
+      body: jsonEncode({
+        'instruction': instruction,
+        'item_label': itemLabel,
+        'current_color': currentColor,
+        'current_style_variant': currentStyleVariant,
+      }),
+    );
+    if (res.statusCode == 502 || res.statusCode == 400) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'AI restyle failed');
+    }
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// AI Icon Finder (Flyer/Logo Studio) -- matches a plain-language
+  /// concept to the closest key in [availableKeys] (the app's own
+  /// curated icon set, kFlyerIconLibrary), plus a fitting colour.
+  Future<Map<String, dynamic>> aiFindIcon(String query, List<String> availableKeys) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/ai/find-icon'),
+      headers: _headers,
+      body: jsonEncode({'query': query, 'available_keys': availableKeys}),
+    );
+    if (res.statusCode == 502 || res.statusCode == 400) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Icon search failed');
+    }
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   // ---------- Reminders ----------
 
   Future<List<ReminderItem>> getReminders({String? status, String? leadId}) async {
@@ -473,7 +534,7 @@ class ApiService {
   }) async {
     final uri = Uri.parse('$baseUrl/documents');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..fields['lead_id'] = leadId
       ..fields['doc_type'] = docType
       ..fields['uploaded_by'] = uploadedBy ?? ''
@@ -799,7 +860,7 @@ class ApiService {
   Future<Map<String, dynamic>> importLeadsCsv(String filePath, String fileName) async {
     final uri = Uri.parse('$baseUrl/leads/import');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -939,7 +1000,7 @@ class ApiService {
   Future<void> uploadVoiceNote({required String leadId, required String filePath, required String fileName, String? recordedBy}) async {
     final uri = Uri.parse('$baseUrl/voice-notes');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..fields['lead_id'] = leadId
       ..fields['recorded_by'] = recordedBy ?? ''
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
@@ -983,7 +1044,7 @@ class ApiService {
   Future<String> uploadLogo(String filePath, String fileName) async {
     final uri = Uri.parse('$baseUrl/settings/logo');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -1054,7 +1115,7 @@ class ApiService {
   Future<Map<String, dynamic>> importLeadsExcel(String filePath, String fileName) async {
     final uri = Uri.parse('$baseUrl/leads/import-excel');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -1762,7 +1823,7 @@ class ApiService {
   Future<Map<String, dynamic>> previewLeadsExcelImport(String filePath, String fileName) async {
     final uri = Uri.parse('$baseUrl/leads-excel/import/preview');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -1779,7 +1840,7 @@ class ApiService {
   ) async {
     final uri = Uri.parse('$baseUrl/leads-excel/import/commit');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..fields['mapping'] = jsonEncode(mapping)
       ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
     final streamed = await request.send();
@@ -1923,7 +1984,7 @@ class ApiService {
   Future<Map<String, dynamic>> uploadFlyerElementImage(String projectId, String filePath) async {
     final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/element-image');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -1931,10 +1992,29 @@ class ApiService {
     return jsonDecode(body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> generateFlyerQrCode(
+    String projectId,
+    String data, {
+    String? fg,
+    String? bg,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/flyer-projects/$projectId/qrcode'),
+      headers: _headers,
+      body: jsonEncode({
+        'data': data,
+        if (fg != null) 'fg': fg,
+        if (bg != null) 'bg': bg,
+      }),
+    );
+    if (res.statusCode != 201) throw Exception('QR code generation failed: ${res.body}');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<void> uploadFlyerRender(String projectId, List<int> pngBytes) async {
     final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/render');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(http.MultipartFile.fromBytes('file', pngBytes, filename: 'flyer-render.png'));
     final streamed = await request.send();
     if (streamed.statusCode != 200) {
@@ -1967,7 +2047,7 @@ class ApiService {
   Future<Map<String, dynamic>> uploadFlyerBackground(String projectId, String filePath) async {
     final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/background');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..files.add(await http.MultipartFile.fromPath('file', filePath));
     final streamed = await request.send();
     final body = await streamed.stream.bytesToString();
@@ -2010,6 +2090,43 @@ class ApiService {
     _checkOk(res);
   }
 
+  /// Real format conversion via the backend's sharp pipeline (format: png,
+  /// jpg, webp, or favicon -- a genuine ICO container, not a relabeled
+  /// PNG). Returns the converted file's raw bytes for the caller to write
+  /// to a temp file and share/save -- see flyer_studio_screen.dart's
+  /// _exportAsFormat.
+  Future<Uint8List> exportFlyerFormat(
+    String projectId,
+    Uint8List pngBytes,
+    String format, {
+    int? width,
+    int? height,
+  }) async {
+    final uri = Uri.parse('$baseUrl/flyer-projects/$projectId/export');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll(_multipartHeaders)
+      ..fields['format'] = format
+      ..files.add(http.MultipartFile.fromBytes('file', pngBytes, filename: 'canvas.png'));
+    if (width != null) request.fields['width'] = width.toString();
+    if (height != null) request.fields['height'] = height.toString();
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode != 200) {
+      String message = 'Export failed (${response.statusCode})';
+      try {
+        message = jsonDecode(response.body)['error'] ?? message;
+      } catch (_) {}
+      throw Exception(message);
+    }
+    return response.bodyBytes;
+  }
+
+  Future<Map<String, dynamic>> duplicateFlyerProject(String id) async {
+    final res = await http.post(Uri.parse('$baseUrl/flyer-projects/$id/duplicate'), headers: _headers);
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> getTenantLogos() async {
     final res = await http.get(Uri.parse('$baseUrl/tenant-logos'), headers: _headers);
     _checkOk(res);
@@ -2024,7 +2141,7 @@ class ApiService {
   }) async {
     final uri = Uri.parse('$baseUrl/tenant-logos');
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll({'x-tenant-id': tenantId})
+      ..headers.addAll(_multipartHeaders)
       ..fields['label'] = label ?? ''
       ..fields['is_default'] = isDefault.toString()
       ..files.add(await http.MultipartFile.fromPath('file', filePath));
@@ -2052,11 +2169,129 @@ class ApiService {
     _checkOk(res);
   }
 
+  /// LeadFlow integration (Logo Studio master spec §20): sends a saved
+  /// brand logo straight to a specific lead's WhatsApp chat -- mirrors
+  /// getFlyerShareLink's shape exactly.
+  Future<Map<String, dynamic>> getLogoShareLink(String logoId, {required String leadId, String? message}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/tenant-logos/$logoId/share-link'),
+      headers: _headers,
+      body: jsonEncode({'lead_id': leadId, if (message != null) 'message': message}),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> getTenantAssets({String? kind, String? search}) async {
+    final qp = <String, String>{};
+    if (kind != null) qp['kind'] = kind;
+    if (search != null && search.isNotEmpty) qp['search'] = search;
+    final uri = Uri.parse('$baseUrl/tenant-assets')
+        .replace(queryParameters: qp.isEmpty ? null : qp);
+    final res = await http.get(uri, headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  /// Saves sanitized SVG markup (already run through svg_sanitizer.dart on
+  /// the client) as a reusable Asset Library entry.
+  Future<Map<String, dynamic>> saveSvgAsset(String svgData, {String? label}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/tenant-assets/svg'),
+      headers: _headers,
+      body: jsonEncode({'svgData': svgData, if (label != null) 'label': label}),
+    );
+    _checkOk(res, expected: 201);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> uploadTenantAsset({
+    required String filePath,
+    required String kind,
+    String? label,
+  }) async {
+    final uri = Uri.parse('$baseUrl/tenant-assets');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll(_multipartHeaders)
+      ..fields['kind'] = kind
+      ..files.add(await http.MultipartFile.fromPath('file', filePath));
+    if (label != null) request.fields['label'] = label;
+    final streamed = await request.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 201) throw Exception('Asset upload failed: $body');
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteTenantAsset(String id) async {
+    final res = await http.delete(Uri.parse('$baseUrl/tenant-assets/$id'), headers: _headers);
+    _checkOk(res);
+  }
+
+  /// Returns null if the tenant hasn't created a Brand Kit yet.
+  Future<Map<String, dynamic>?> getBrandKit() async {
+    final res = await http.get(Uri.parse('$baseUrl/brand-kit'), headers: _headers);
+    _checkOk(res);
+    final decoded = jsonDecode(res.body);
+    return decoded == null ? null : decoded as Map<String, dynamic>;
+  }
+
+  /// Upserts the tenant's Brand Kit. Every field is optional -- pass only
+  /// what changed (e.g. one role assignment) to avoid clobbering the rest.
+  Future<Map<String, dynamic>> saveBrandKit({
+    String? primaryLogoId,
+    String? secondaryLogoId,
+    String? monoLogoId,
+    String? darkBgLogoId,
+    String? lightBgLogoId,
+    String? iconMarkLogoId,
+    List<String>? palette,
+  }) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/brand-kit'),
+      headers: _headers,
+      body: jsonEncode({
+        if (primaryLogoId != null) 'primary_logo_id': primaryLogoId,
+        if (secondaryLogoId != null) 'secondary_logo_id': secondaryLogoId,
+        if (monoLogoId != null) 'mono_logo_id': monoLogoId,
+        if (darkBgLogoId != null) 'dark_bg_logo_id': darkBgLogoId,
+        if (lightBgLogoId != null) 'light_bg_logo_id': lightBgLogoId,
+        if (iconMarkLogoId != null) 'icon_mark_logo_id': iconMarkLogoId,
+        if (palette != null) 'palette': palette,
+      }),
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'Could not save Brand Kit');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> generateFlyerAI(String projectId, String prompt) async {
     final res = await http.post(
       Uri.parse('$baseUrl/flyer-projects/$projectId/ai-generate'),
       headers: _headers,
       body: jsonEncode({'prompt': prompt}),
+    );
+    if (res.statusCode != 200) {
+      throw Exception(jsonDecode(res.body)['error'] ?? 'AI generation failed');
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Logo Studio's AI generator -- composes an editable icon+shape+text
+  /// logo mark (canvas_json) instead of the flyer prompt's promotional-
+  /// layout style. [iconKeys] is the client's own icon library (same
+  /// pattern as aiFindIcon) so the backend never needs its own copy to
+  /// keep in sync.
+  Future<Map<String, dynamic>> generateLogoAI(
+    String projectId,
+    String prompt,
+    List<String> iconKeys,
+  ) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/flyer-projects/$projectId/ai-generate-logo'),
+      headers: _headers,
+      body: jsonEncode({'prompt': prompt, 'iconKeys': iconKeys}),
     );
     if (res.statusCode != 200) {
       throw Exception(jsonDecode(res.body)['error'] ?? 'AI generation failed');
@@ -2324,6 +2559,19 @@ class ApiService {
     );
     _checkOk(res);
     return jsonDecode(res.body);
+  }
+
+  /// Uploads a custom icon image for a More Menu tile, replacing its
+  /// built-in Material glyph -- "icon upload ka bhi option do".
+  Future<Map<String, dynamic>> uploadMoreMenuItemIcon(String itemKey, String filePath) async {
+    final uri = Uri.parse('$baseUrl/more-menu-items/$itemKey/icon-image');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll(_multipartHeaders)
+      ..files.add(await http.MultipartFile.fromPath('file', filePath));
+    final streamed = await request.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 200) throw Exception('Icon upload failed: $body');
+    return jsonDecode(body) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> createMoreMenuItem({

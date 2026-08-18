@@ -117,17 +117,14 @@ class _FlyerHistoryScreenState extends State<FlyerHistoryScreen> {
   }
 
   Future<void> _duplicate(Map<String, dynamic> project) async {
+    final id = project['id']?.toString();
+    if (id == null) return;
     try {
-      final rawElements = (project['canvas_json'] as List?) ?? [];
-      final created = await _api.createFlyerProject(
-        title: '${project['title'] ?? 'Flyer'} (copy)',
-        leadId: widget.leadId,
-        canvasJson: rawElements
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList(),
-        backgroundColor: project['background_color']?.toString(),
-      );
+      // Server-side duplicate (POST /flyer-projects/:id/duplicate) --
+      // copies every field including the background photo, which the
+      // old client-side reconstruction here silently dropped (it only
+      // ever copied canvas_json + background_color).
+      final created = await _api.duplicateFlyerProject(id);
       _showSnack('Duplicated');
       if (!mounted) return;
       await Navigator.push(

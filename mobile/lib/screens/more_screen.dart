@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../theme/edit_mode_settings.dart';
 import 'settings_screen.dart';
 import 'performance_screen.dart';
 import 'audit_screen.dart';
@@ -17,7 +19,10 @@ import 'scoring_config_screen.dart';
 import 'triage_test_screen.dart';
 import 'insights_overview_screen.dart';
 import 'customize_more_menu_screen.dart';
+import 'customize_registry.dart';
 import '../services/api_service.dart';
+import '../widgets/launcher_tile.dart';
+import '../widgets/quick_style_editor_sheet.dart';
 
 // Curated icon set for icon_override -- same string-key-to-IconData
 // pattern as kLeadDetailIconOptions/kShareTargetIconOptions.
@@ -158,6 +163,50 @@ class _MoreScreenState extends State<MoreScreen> {
     _load();
   }
 
+  // Built once, not per-build -- the registry is static data (labels/
+  // icons/screen builders), only the live _items list above changes.
+  late final List<CustomizeRegistryItem> _registry = buildCustomizeRegistry();
+
+  Future<void> _openQuickEditor(Map<String, dynamic> item) async {
+    final key = item['item_key'] as String;
+    CustomizeRegistryItem? regItem;
+    for (final r in _registry) {
+      if (r.source == CustomizeSource.moreMenu && r.key == key) {
+        regItem = r;
+        break;
+      }
+    }
+    if (regItem == null) return; // custom link items: no registry entry yet
+
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => QuickStyleEditorSheet(
+        item: regItem!,
+        currentColorHex: (item['color_override'] as String?) ?? '#1B2A4A',
+        currentStyleVariant: (item['style_variant'] as String?) ?? 'flat',
+        currentGradientEndHex: item['gradient_override'] as String?,
+        currentStyleJson: (item['style_json'] as Map?)?.cast<String, dynamic>(),
+        currentIconImageUrl: item['icon_image_url'] as String?,
+      ),
+    );
+    if (result == null) return;
+    // Live update -- reflect the new look immediately, no re-fetch wait.
+    setState(() {
+      final idx = _items.indexWhere((i) => i['item_key'] == key);
+      if (idx != -1) {
+        _items[idx] = {
+          ..._items[idx],
+          'color_override': result['color'],
+          'style_variant': result['styleVariant'],
+          'gradient_override': result['gradientEnd'],
+          'style_json': result['styleJson'],
+          'icon_image_url': result['iconImageUrl'],
+        };
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -169,10 +218,18 @@ class _MoreScreenState extends State<MoreScreen> {
 
     final visibleItems = _items.where((i) => i['enabled'] != false).toList();
 
+    final editMode = context.watch<EditModeSettings>();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('More'),
         actions: [
+          IconButton(
+            icon: Icon(editMode.enabled ? Icons.edit : Icons.edit_outlined),
+            tooltip: editMode.enabled ? 'Exit Edit Mode' : 'Edit Mode -- tap any tile to restyle it live',
+            color: editMode.enabled ? Theme.of(context).colorScheme.primary : null,
+            onPressed: editMode.toggle,
+          ),
           IconButton(
             icon: const Icon(Icons.tune),
             tooltip: 'Customize this menu',
@@ -187,131 +244,104 @@ class _MoreScreenState extends State<MoreScreen> {
       // (tinted/gradient/glow/glass background + colour-matched icon)
       // so every "grid of destinations" screen in the app looks like
       // one consistent, premium design system rather than two.
-      body: GridView.count(
-        padding: const EdgeInsets.all(14),
-        crossAxisCount: 3,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: 0.92,
-        children: visibleItems.map((item) {
-          final key = item['item_key'] as String;
-          final def = kMoreMenuDefaults[key];
-          final isCustom = item['is_custom'] == true;
-
-          final label = item['custom_label'] ?? def?.label ?? key;
-          final iconKey = item['icon_override'] ?? def?.icon ?? 'star';
-          final icon = kMoreMenuIconOptions[iconKey] ?? Icons.star;
-          final colorHex = item['color_override'] as String?;
-          final color = colorHex != null ? _hexToColor(colorHex) : (kMoreMenuDefaultColors[key] ?? Theme.of(context).colorScheme.primary);
-          final gradientHex = item['gradient_override'] as String?;
-          final gradientEnd = gradientHex != null ? _hexToColor(gradientHex) : null;
-          final styleVariant = item['style_variant'] as String? ?? 'flat';
-
-          return _MoreMenuTile(
-            label: label,
-            icon: icon,
-            color: color,
-            gradientEnd: gradientEnd,
-            styleVariant: styleVariant,
-            onTap: () {
-              if (isCustom) {
-                // Custom items are URL-only for now (matches backend
-                // validation) -- opening them in-app via a simple
-                // screen is a later slice; for now this is a
-                // clearly-scoped no-op rather than a silent failure.
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Custom link items will open in a later update')),
-                );
-                return;
-              }
-              if (def != null) {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => def.screenBuilder()));
-              }
-            },
-          );
-        }).toList(),
+      body: Column(
+        children: [
+          if (editMode.enabled)
+            Container(
+              width: double.infinity,
+              color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Text('Edit Mode is on -- tap any tile to restyle it live', style: TextStyle(fontSize: 12))),
+                ],
+              ),
+            ),
+          Expanded(child: _buildGrid(visibleItems)),
+        ],
       ),
     );
   }
-}
 
-/// A single More-menu destination tile -- tinted/gradient/glow/glass
-/// card background (per the item's style_variant) with a centred icon
-/// and label. Mirrors lead_detail_screen.dart's private _navTile/
-/// _tileDecoration pattern exactly, so both grids share one visual
-/// language; kept as its own widget here since that one is private to
-/// _LeadDetailScreenState.
-class _MoreMenuTile extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
-  final Color? gradientEnd;
-  final String styleVariant;
-  final VoidCallback onTap;
+  // A Wrap, not GridView.count -- a fixed 3-column grid forces every tile
+  // to the same cell size, which is exactly the "sirf width control diya
+  // hai" limitation reported: no way to make one tile full-width, another
+  // a tall square, another short and wide. Wrap lets each tile pick its
+  // own [widthFraction] (of the available row width) and [tileHeight] (in
+  // logical pixels) independently via style_json, flowing left-to-right
+  // and wrapping naturally -- genuinely free per-tile sizing, not another
+  // fixed preset. When neither override is set, the computed default here
+  // reproduces the exact width/height the old GridView.count(crossAxisCount:
+  // 3, childAspectRatio: 0.92) produced, so nothing visually changes for a
+  // tile until the user actually resizes it.
+  Widget _buildGrid(List<Map<String, dynamic>> visibleItems) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(14),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const spacing = 12.0;
+          final defaultCellWidth = (constraints.maxWidth - 2 * spacing) / 3;
 
-  const _MoreMenuTile({
-    required this.label,
-    required this.icon,
-    required this.color,
-    required this.gradientEnd,
-    required this.styleVariant,
-    required this.onTap,
-  });
+          return Wrap(
+            spacing: spacing,
+            runSpacing: spacing,
+            children: visibleItems.map((item) {
+              final key = item['item_key'] as String;
+              final def = kMoreMenuDefaults[key];
+              final isCustom = item['is_custom'] == true;
 
-  BoxDecoration _decoration(BorderRadius radius) {
-    switch (styleVariant) {
-      case 'gradient_badge':
-        return BoxDecoration(
-          gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [color, gradientEnd ?? color.withValues(alpha: 0.6)]),
-          borderRadius: radius,
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 4))],
-        );
-      case 'glow':
-        return BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: radius,
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.45), blurRadius: 14, spreadRadius: 1)],
-        );
-      case 'glass':
-        return BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
-          borderRadius: radius,
-          border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
-        );
-      default:
-        return BoxDecoration(
-          color: color.withValues(alpha: 0.09),
-          borderRadius: radius,
-          border: Border.all(color: color.withValues(alpha: 0.28)),
-        );
-    }
-  }
+              final label = item['custom_label'] ?? def?.label ?? key;
+              final iconKey = item['icon_override'] ?? def?.icon ?? 'star';
+              final icon = kMoreMenuIconOptions[iconKey] ?? Icons.star;
+              final iconImageUrl = item['icon_image_url'] as String?;
+              final colorHex = item['color_override'] as String?;
+              final color = colorHex != null ? _hexToColor(colorHex) : (kMoreMenuDefaultColors[key] ?? Theme.of(context).colorScheme.primary);
+              final gradientHex = item['gradient_override'] as String?;
+              final gradientEnd = gradientHex != null ? _hexToColor(gradientHex) : null;
+              final styleVariant = item['style_variant'] as String? ?? 'flat';
+              final styleJson = (item['style_json'] as Map?)?.cast<String, dynamic>();
 
-  @override
-  Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(16);
-    final onGradient = styleVariant == 'gradient_badge';
-    return InkWell(
-      onTap: onTap,
-      borderRadius: radius,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-        decoration: _decoration(radius),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 26, color: onGradient ? Colors.white : color),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, height: 1.2, color: onGradient ? Colors.white : null),
-            ),
-          ],
-        ),
+              final widthFraction = (styleJson?['widthFraction'] as num?)?.toDouble();
+              final tileWidth = widthFraction != null
+                  ? (constraints.maxWidth * widthFraction).clamp(60.0, constraints.maxWidth)
+                  : defaultCellWidth;
+              final explicitHeight = (styleJson?['tileHeight'] as num?)?.toDouble();
+              final tileHeight = explicitHeight ?? (tileWidth / 0.92);
+
+              return SizedBox(
+                width: tileWidth,
+                height: tileHeight,
+                child: LauncherTile(
+                  label: label,
+                  icon: icon,
+                  iconImageUrl: iconImageUrl,
+                  color: color,
+                  gradientEnd: gradientEnd,
+                  styleVariant: styleVariant,
+                  styleJson: styleJson,
+                  onEditTap: isCustom ? null : () => _openQuickEditor(item),
+                  onTap: () {
+                    if (isCustom) {
+                      // Custom items are URL-only for now (matches backend
+                      // validation) -- opening them in-app via a simple
+                      // screen is a later slice; for now this is a
+                      // clearly-scoped no-op rather than a silent failure.
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Custom link items will open in a later update')),
+                      );
+                      return;
+                    }
+                    if (def != null) {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => def.screenBuilder()));
+                    }
+                  },
+                ),
+              );
+            }).toList(),
+          );
+        },
       ),
     );
   }

@@ -4,6 +4,7 @@ const { randomUUID } = require('crypto');
 const db = require('../db');
 const { uploadFile, getSignedUrl } = require('../services/supabaseStorage');
 const { listTemplates, renderLogoTemplate } = require('../services/logoTemplates');
+const { buildWhatsAppLink } = require('../services/phone');
 
 // sharp is loaded LAZILY -- same deliberate safety choice as
 // routes/flyers.js: if sharp fails to load, only logo generation
@@ -102,6 +103,71 @@ router.delete('/:id', async (req, res) => {
   const result = await db.prepare('DELETE FROM tenant_logos WHERE tenant_id = ? AND id = ?').run(tid, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Logo not found' });
   res.status(200).json({ deleted: true });
+});
+
+// POST /tenant-logos/:id/share-link  { lead_id, message? }
+// LeadFlow integration (Logo Studio master spec §20: "Communication Hub
+// -> Share Logo", "WhatsApp -> Share exported asset") -- sends a saved
+// brand logo straight to a specific lead's WhatsApp chat, the exact
+// same pattern flyerProjects.js's /:id/share-link already established
+// (long-lived signed URL since this is going to a prospective student
+// who may open it hours later, and it only ever exposes a logo the
+// consultancy actively wants associated with its brand -- never lead
+// data). Kept as its own route rather than generalizing both into one
+// shared "share any asset" endpoint: the two source tables (flyer_
+// projects vs tenant_logos) have different columns and the small
+// duplication here is cheaper than a premature abstraction over them.
+router.post('/:id/share-link', async (req, res) => {
+  const tid = tenantId(req);
+  const logo = await db.prepare('SELECT * FROM tenant_logos WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!logo) return res.status(404).json({ error: 'Logo not found' });
+
+  const SEVEN_DAYS = 7 * 24 * 60 * 60;
+  let imageUrl;
+  try {
+    imageUrl = await getSignedUrl(logo.storage_path, SEVEN_DAYS);
+  } catch (err) {
+    return res.status(502).json({ error: `Could not create share link: ${err.message}` });
+  }
+
+  const leadId = req.body.lead_id;
+  if (!leadId) {
+    return res.json({ image_url: imageUrl, whatsapp_link: null, lead_id: null });
+  }
+
+  const lead = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, leadId);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+  if (!lead.phone) {
+    return res.json({
+      image_url: imageUrl,
+      whatsapp_link: null,
+      lead_id: lead.id,
+      lead_name: lead.full_name,
+      warning: 'This lead has no phone number on file',
+    });
+  }
+
+  const tenant = await db.prepare('SELECT default_country_code FROM tenants WHERE id = ?').get(tid);
+  const greeting = (req.body.message && String(req.body.message).trim())
+    || `Hi ${lead.full_name || 'there'}, here is our logo.`;
+  const message = `${greeting}\n\n${imageUrl}`;
+
+  const link = buildWhatsAppLink(
+    lead.phone,
+    lead.phone_country_code,
+    message,
+    tenant && tenant.default_country_code,
+  );
+
+  res.json({
+    image_url: imageUrl,
+    whatsapp_link: link,
+    message,
+    lead_id: lead.id,
+    lead_name: lead.full_name,
+    expires_in_days: 7,
+  });
 });
 
 // GET /tenant-logos/templates -- Phase 1 (template/parametric) logo
