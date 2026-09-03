@@ -3,6 +3,7 @@ const { randomUUID } = require('crypto');
 const db = require('../db');
 const { fireEvent } = require('../services/automationEngine');
 const { findDuplicates } = require('../services/duplicateDetection');
+const { generateText } = require('../services/aiProvider');
 
 const router = express.Router();
 
@@ -169,8 +170,12 @@ router.patch('/:id', async (req, res) => {
   const existing = await db.prepare('SELECT * FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Lead not found' });
 
-  const allowed = ['full_name', 'phone', 'phone_country_code', 'email', 'source', 'stage', 'assigned_to', 'notes', 'parent_name', 'parent_phone', 'parent_relation',
+  const allowed = ['full_name', 'phone', 'phone_country_code', 'alternate_phone', 'alternate_phone_country_code', 'email', 'source', 'stage', 'assigned_to', 'notes', 'parent_name', 'parent_phone', 'parent_relation',
                    'referred_by_lead_id', 'referrer_name', 'referrer_type'];
+  // Note: remarks_raw/remarks_final are NOT here -- those columns live on
+  // lead_notes, not leads (see POST /:id/remarks below). Adding them to
+  // this allowlist would target the wrong table (leads has no such
+  // columns) and fail with a Postgres "column does not exist" error.
   const updates = [];
   const values = [];
   for (const field of allowed) {
@@ -187,11 +192,23 @@ router.patch('/:id', async (req, res) => {
   // rows, or one created before this field existed) would otherwise leave
   // phone_country_code null and produce an unroutable wa.me link — the
   // exact class of bug fixed app-wide via services/phone.js. Apply the
-  // same tenant-default fallback POST already uses.
-  if (req.body.phone !== undefined && req.body.phone_country_code === undefined && !existing.phone_country_code) {
+  // same tenant-default fallback POST already uses. Same failure mode
+  // applies to alternate_phone/alternate_phone_country_code, just for the
+  // alternate contact pair -- both checked here, sharing one tenant lookup
+  // instead of querying it twice when a request sets both numbers at once.
+  const needsPrimaryFallback = req.body.phone !== undefined && req.body.phone_country_code === undefined && !existing.phone_country_code;
+  const needsAlternateFallback = req.body.alternate_phone !== undefined && req.body.alternate_phone_country_code === undefined && !existing.alternate_phone_country_code;
+  if (needsPrimaryFallback || needsAlternateFallback) {
     const tenant = await db.prepare('SELECT default_country_code FROM tenants WHERE id = ?').get(tid);
-    updates.push('phone_country_code = ?');
-    values.push(tenant?.default_country_code || '+91');
+    const fallbackCode = tenant?.default_country_code || '+91';
+    if (needsPrimaryFallback) {
+      updates.push('phone_country_code = ?');
+      values.push(fallbackCode);
+    }
+    if (needsAlternateFallback) {
+      updates.push('alternate_phone_country_code = ?');
+      values.push(fallbackCode);
+    }
   }
 
   if (req.body.custom_fields !== undefined) {
@@ -210,6 +227,58 @@ router.patch('/:id', async (req, res) => {
     await fireEvent('lead.stage_changed', { tenant_id: tid, lead_id: req.params.id, stage: req.body.stage });
   }
   res.json(withParsedCustomFields(updated));
+});
+
+// POST /leads/:id/remarks  { remarks_raw }
+// Rewrites a caller's raw note (Hindi/Nepali/English, or a mix) into a
+// polished, professional English CRM remark via AI, then saves it as a new
+// lead_notes row. remarks_raw is stored verbatim and never overwritten;
+// note_text mirrors remarks_final so the existing lead notes list/detail UI
+// (LeadNotesScreen, which reads note_text) displays it correctly with no
+// changes needed there.
+//
+// Unlike leadNotes.js's classifyNote() (tags/sentiment on a note that
+// already has real content -- best-effort, never blocks the save), the AI
+// call here IS the point of this endpoint: with no rewrite, there is no
+// remarks_final to save. A failed/empty AI response is therefore a real
+// 502, not silently swallowed.
+router.post('/:id/remarks', async (req, res) => {
+  const tid = tenantId(req);
+  const { remarks_raw } = req.body;
+  if (!remarks_raw) return res.status(400).json({ error: 'remarks_raw is required' });
+
+  const lead = await db.prepare('SELECT id FROM leads WHERE tenant_id = ? AND id = ?').get(tid, req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Lead not found for this tenant' });
+
+  // req.user is always set here: server.js mounts enforceAuth globally and
+  // this path isn't in the public allowlist. The JWT itself only carries
+  // { userId, tenantId, role } (see middleware/auth.js) -- no display name
+  // -- so author_name is resolved with one lookup against users.full_name
+  // rather than pulled directly off the token.
+  const user = await db.prepare('SELECT full_name FROM users WHERE id = ?').get(req.user.id);
+  const authorName = user?.full_name || null;
+
+  const prompt = `You convert a caller's raw spoken notes (Hindi, Nepali, English, or a mix) into a single short, professional, grammatically correct English statement for a CRM Remarks field. Translate everything to English. Write 1-3 concise, formal, neutral sentences, third person. Preserve every factual detail - do not invent or omit facts. Output ONLY the final statement, no preamble, no quotes.
+
+Raw note: "${remarks_raw}"`;
+
+  let remarksFinal;
+  try {
+    remarksFinal = (await generateText(prompt, { maxTokens: 300 })).trim();
+  } catch (err) {
+    return res.status(502).json({ error: `AI rewrite failed: ${err.message}` });
+  }
+  if (!remarksFinal) {
+    return res.status(502).json({ error: 'AI rewrite returned an empty result' });
+  }
+
+  const id = randomUUID();
+  await db.prepare(`
+    INSERT INTO lead_notes (id, tenant_id, lead_id, note_text, author_name, remarks_raw, remarks_final)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, tid, req.params.id, remarksFinal, authorName, remarks_raw, remarksFinal);
+
+  res.status(201).json(await db.prepare('SELECT * FROM lead_notes WHERE id = ?').get(id));
 });
 
 // DELETE /leads/:id — soft-delete (moves to Trash, recoverable).
