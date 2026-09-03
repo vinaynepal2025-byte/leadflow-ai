@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../models/lead.dart';
 import '../models/communication.dart';
 import '../services/api_service.dart';
@@ -126,10 +127,33 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
   Map<String, dynamic>? _lifecycle; // {lifecycle_status, allowed_next}
   bool _lifecycleLoading = false;
 
+  // Remarks (voice/typed note -> AI-polished English CRM remark). Kept as
+  // screen-level state, not a separate screen, since the whole point is a
+  // quick capture-and-see-the-rewrite loop right where the counselor is
+  // already looking at the lead. _speech is created lazily on first mic tap
+  // rather than in initState() -- unlike calls_voice_notes_screen.dart's
+  // dictation sheet (which only opens when the user already wants to
+  // dictate), this section is on-screen every time a lead is opened, so
+  // eagerly initializing here would trigger a mic-permission prompt on
+  // every visit even for counselors who never use it.
+  final TextEditingController _remarksController = TextEditingController();
+  stt.SpeechToText? _speech;
+  bool? _speechAvailable; // null = not checked yet
+  bool _listening = false;
+  bool _savingRemark = false;
+  String? _remarksError;
+  Map<String, dynamic>? _lastRemark; // last-saved note, shown inline
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _remarksController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -750,13 +774,16 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
 
             // Contact details grouped into one card instead of a loose run
             // of rows, so the eye can skip past it to the modules below.
-            if (lead.phone != null || lead.email != null || lead.source != null ||
-                (lead.notes?.isNotEmpty ?? false) || lead.parentName != null)
+            if (lead.phone != null || (lead.alternatePhone?.isNotEmpty ?? false) || lead.email != null ||
+                lead.source != null || (lead.notes?.isNotEmpty ?? false) || lead.parentName != null)
               GlassContainer(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 child: Column(
                   children: [
-                    if (lead.phone != null) _infoRow(Icons.phone, lead.phone!),
+                    if (lead.phone != null)
+                      _contactRow('Primary', lead.phone!, contact: 'primary'),
+                    if (lead.alternatePhone != null && lead.alternatePhone!.isNotEmpty)
+                      _contactRow('Alternate', lead.alternatePhone!, contact: 'alternate'),
                     if (lead.email != null) _infoRow(Icons.email, lead.email!),
                     if (lead.source != null) _infoRow(Icons.source, lead.source!),
                     if (lead.notes != null && lead.notes!.isNotEmpty) _infoRow(Icons.notes, lead.notes!),
@@ -766,6 +793,8 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
                   ],
                 ),
               ),
+            const SizedBox(height: 16),
+            _remarksSection(lead),
             if (_customFieldDefs.isNotEmpty) ...[
               const SizedBox(height: 12),
               const Text('Custom Fields', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
@@ -922,6 +951,198 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> {
         ],
       ),
     );
+  }
+
+  // ------------------------------------------------------------------
+  // Contact row: phone number + call (tel:) + WhatsApp (wa.me) icons.
+  // Ported from call_log_tab.dart's _callPhone/_callWhatsApp -- same tel:
+  // launch, same getWhatsAppChatLink + confirmWhatsAppSent pair so a
+  // WhatsApp open from here is logged to Communication Hub exactly like
+  // every other WhatsApp send in the app. Deliberately NOT porting that
+  // screen's call-duration tracking/outcome-prompt machinery (the
+  // WidgetsBindingObserver, _callStartedAt, _showOutcomeSheet flow) --
+  // that's the dedicated Calls & Voice Notes module's own feature
+  // (already one tile away on this same screen), not something this
+  // contact-info card needs to duplicate.
+  // ------------------------------------------------------------------
+
+  Widget _contactRow(String label, String phone, {required String contact}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          const Icon(Icons.phone, size: 18, color: Colors.grey),
+          const SizedBox(width: 10),
+          Expanded(child: Text('$label: $phone')),
+          IconButton(
+            icon: const Icon(Icons.call, size: 20),
+            color: Colors.blue,
+            tooltip: 'Call',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _callPhoneNumber(phone),
+          ),
+          IconButton(
+            icon: const Icon(Icons.chat, size: 20),
+            color: const Color(0xFF25D366),
+            tooltip: 'WhatsApp',
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _openWhatsAppChat(contact: contact),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _callPhoneNumber(String phone) async {
+    try {
+      final ok = await launchUrl(Uri(scheme: 'tel', path: phone));
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Could not open the dialer on this device')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open the dialer: $e')));
+      }
+    }
+  }
+
+  Future<void> _openWhatsAppChat({required String contact}) async {
+    final lead = _lead;
+    if (lead == null) return;
+    try {
+      final message = 'Hi ${lead.fullName}, this is regarding your enquiry.';
+      final link = await _api.getWhatsAppChatLink(lead.id, message, contact: contact);
+      await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
+      await _api.confirmWhatsAppSent(lead.id, message, 'Counselor');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open WhatsApp: $e')));
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Remarks: type or dictate a raw note, AI-rewrite it into a polished
+  // English CRM remark (POST /leads/:id/remarks), show both without a
+  // screen refetch. Mic button mirrors calls_voice_notes_screen.dart's
+  // established dictation pattern (SpeechToText.initialize/listen/stop).
+  // ------------------------------------------------------------------
+
+  Widget _remarksSection(Lead lead) {
+    final lastRemark = _lastRemark;
+    return GlassContainer(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Remarks', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _remarksController,
+                  maxLines: 3,
+                  minLines: 2,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    hintText: 'Type or dictate a remark — Hindi, Nepali, English, or a mix',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filledTonal(
+                icon: Icon(_listening ? Icons.stop : Icons.mic, color: _listening ? Colors.red : null),
+                tooltip: _speechAvailable == false
+                    ? 'Speech recognition not available on this device'
+                    : (_listening ? 'Stop dictating' : 'Dictate a remark'),
+                onPressed: _speechAvailable == false ? null : _toggleListening,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _savingRemark ? null : () => _saveRemark(lead.id),
+              child: _savingRemark
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Save'),
+            ),
+          ),
+          if (_remarksError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_remarksError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+            ),
+          if (lastRemark != null) ...[
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 10),
+            const Text('Original', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 4),
+            Text(lastRemark['remarks_raw']?.toString() ?? '', style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 10),
+            const Text('Professional Rewrite',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 4),
+            Text(lastRemark['remarks_final']?.toString() ?? '', style: const TextStyle(fontSize: 13)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _toggleListening() async {
+    _speech ??= stt.SpeechToText();
+    if (_speechAvailable == null) {
+      final available = await _speech!.initialize();
+      if (!mounted) return;
+      setState(() => _speechAvailable = available);
+      if (!available) return;
+    }
+    if (_listening) {
+      await _speech!.stop();
+      if (mounted) setState(() => _listening = false);
+    } else {
+      setState(() => _listening = true);
+      await _speech!.listen(
+        onResult: (result) {
+          if (mounted) setState(() => _remarksController.text = result.recognizedWords);
+        },
+      );
+    }
+  }
+
+  Future<void> _saveRemark(String leadId) async {
+    final raw = _remarksController.text.trim();
+    if (raw.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Type or dictate a remark first')));
+      return;
+    }
+    setState(() {
+      _savingRemark = true;
+      _remarksError = null;
+    });
+    try {
+      final note = await _api.addLeadRemark(leadId, raw);
+      if (!mounted) return;
+      setState(() {
+        _lastRemark = note;
+        _remarksController.clear();
+      });
+    } catch (e) {
+      if (mounted) setState(() => _remarksError = 'Could not save remark: $e');
+    } finally {
+      if (mounted) setState(() => _savingRemark = false);
+    }
   }
 
   Widget _commTile(Communication c) {

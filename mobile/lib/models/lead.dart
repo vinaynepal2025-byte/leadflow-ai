@@ -3,6 +3,12 @@ class Lead {
   final String tenantId;
   final String fullName;
   final String? phone;
+  // Alternate contact number, added for the WhatsApp/dialer icon pair on
+  // lead detail. No Dart-side country-code field is needed alongside it --
+  // backend/routes/whatsappLink.js resolves alternate_phone_country_code
+  // server-side from the stored lead row, the same way it already does for
+  // the primary phone.
+  final String? alternatePhone;
   final String? email;
   final String? source;
   final String stage;
@@ -26,6 +32,7 @@ class Lead {
     this.notes,
     this.parentName,
     this.parentPhone,
+    this.alternatePhone,
     this.customFields = const {},
     required this.createdAt,
     required this.updatedAt,
@@ -37,6 +44,7 @@ class Lead {
       tenantId: json['tenant_id'] as String,
       fullName: json['full_name'] as String,
       phone: json['phone'] as String?,
+      alternatePhone: json['alternate_phone'] as String?,
       email: json['email'] as String?,
       source: json['source'] as String?,
       stage: json['stage'] as String,
@@ -59,6 +67,7 @@ class Lead {
     String? tenantId,
     String? fullName,
     String? phone,
+    String? alternatePhone,
     String? email,
     String? source,
     String? stage,
@@ -75,6 +84,7 @@ class Lead {
       tenantId: tenantId ?? this.tenantId,
       fullName: fullName ?? this.fullName,
       phone: phone ?? this.phone,
+      alternatePhone: alternatePhone ?? this.alternatePhone,
       email: email ?? this.email,
       source: source ?? this.source,
       stage: stage ?? this.stage,

@@ -255,6 +255,20 @@ class ApiService {
     return Lead.fromJson(jsonDecode(res.body));
   }
 
+  // POST /leads/:id/remarks -- AI-rewrites remarksRaw (Hindi/Nepali/English,
+  // or a mix) into a polished English CRM remark and saves both as a new
+  // lead_notes row. Returns the created note, remarks_raw/remarks_final
+  // included, so the caller can display it without a refetch.
+  Future<Map<String, dynamic>> addLeadRemark(String leadId, String remarksRaw) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/leads/$leadId/remarks'),
+      headers: _headers,
+      body: jsonEncode({'remarks_raw': remarksRaw}),
+    );
+    _checkOk(res, expected: 201);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   // ---------- Lifecycle Status (Leads Ecosystem Phase 2) ----------
   // Deliberately separate from stage/pipeline_stages above -- see
   // backend/services/leadLifecycle.js. Both fields exist on a lead
@@ -320,10 +334,14 @@ class ApiService {
 
   // ---------- WhatsApp (free wa.me method) ----------
 
-  Future<String> getWhatsAppChatLink(String leadId, String message) async {
+  // contact: 'primary' (default) or 'alternate' -- selects which of the
+  // lead's two phone/country-code pairs backend/routes/whatsappLink.js
+  // builds the link from. Existing call sites that don't pass it keep
+  // getting the primary-number link, unchanged.
+  Future<String> getWhatsAppChatLink(String leadId, String message, {String contact = 'primary'}) async {
     final res = await http.get(
       Uri.parse('$baseUrl/whatsapp/chat-link/$leadId')
-          .replace(queryParameters: {'message': message}),
+          .replace(queryParameters: {'message': message, 'contact': contact}),
       headers: _headers,
     );
     _checkOk(res);
