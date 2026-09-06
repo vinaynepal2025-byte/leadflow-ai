@@ -46,8 +46,12 @@ jobs:
       - name: Bump minSdkVersion to 23 (required by record_android for mic recording)
         run: |
           python3 - <<'PYEOF4'
+          import os
           import re
-          path = 'android/app/build.gradle'
+          # Flutter's Android template switched from Groovy (build.gradle)
+          # to Kotlin DSL (build.gradle.kts) somewhere between 3.27 and
+          # 3.47 -- check both rather than assuming one.
+          path = 'android/app/build.gradle.kts' if os.path.exists('android/app/build.gradle.kts') else 'android/app/build.gradle'
           with open(path) as f:
               content = f.read()
 
