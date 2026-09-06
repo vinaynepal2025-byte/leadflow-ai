@@ -11,7 +11,7 @@ function tenantId(req) {
   return req.header('x-tenant-id') || 'demo-consultancy';
 }
 
-// The 17 built-in More-menu items and their defaults. Direct answer to
+// The 18 built-in More-menu items and their defaults. Direct answer to
 // Vinay's "har smallest visible section par control chahiye" -- same
 // proven pattern as lead_detail_sections.js / shareTargets.js (already
 // shipped and working elsewhere in this app), applied here so the More
@@ -36,9 +36,10 @@ const DEFAULTS = [
   { item_key: 'custom_fields',       default_label: 'Custom Fields',          sort_order: 15 },
   { item_key: 'settings',            default_label: 'Settings',               sort_order: 16 },
   { item_key: 'automation_center',   default_label: 'Automation Center',      sort_order: 17 },
+  { item_key: 'exam_intelligence',   default_label: 'Report Cards',           sort_order: 18 },
 ];
 
-// Ensures a tenant has all 17 built-in item rows. Safe to call every
+// Ensures a tenant has all 18 built-in item rows. Safe to call every
 // time -- ON CONFLICT DO NOTHING makes it a no-op after the first run.
 async function ensureSeeded(tid) {
   for (const def of DEFAULTS) {
@@ -96,7 +97,7 @@ router.post('/:item_key/icon-image', upload.single('file'), async (req, res) => 
 });
 
 // POST /more-menu-items -- create a custom item (opens a URL). Only
-// custom items can be created this way; the 17 built-ins are seeded
+// custom items can be created this way; the 18 built-ins are seeded
 // automatically and never created through this route.
 router.post('/', async (req, res) => {
   const tid = tenantId(req);
@@ -183,7 +184,7 @@ router.put('/reorder', async (req, res) => {
 
 // DELETE /more-menu-items/:item_key -- custom items only. Built-ins can
 // be hidden (enabled=false) but not removed, since the app's Dart code
-// expects all 17 built-in keys to exist.
+// expects all 18 built-in keys to exist.
 router.delete('/:item_key', async (req, res) => {
   const tid = tenantId(req);
   const existing = await db.prepare('SELECT is_custom FROM more_menu_items WHERE tenant_id = ? AND item_key = ?').get(tid, req.params.item_key);

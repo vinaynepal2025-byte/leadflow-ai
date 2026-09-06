@@ -20,6 +20,7 @@ import 'scoring_config_screen.dart';
 import 'triage_test_screen.dart';
 import 'insights_overview_screen.dart';
 import 'customize_more_menu_screen.dart';
+import 'exam_home_screen.dart';
 import 'customize_registry.dart';
 import '../services/api_service.dart';
 import '../widgets/launcher_tile.dart';
@@ -48,6 +49,7 @@ const Map<String, IconData> kMoreMenuIconOptions = {
   'star': Icons.star,
   'link': Icons.link,
   'hub_outlined': Icons.hub_outlined,
+  'assessment_outlined': Icons.assessment_outlined,
 };
 
 // Default label + icon + subtitle + navigation target per built-in
@@ -82,6 +84,7 @@ final Map<String, _MoreMenuItemDef> kMoreMenuDefaults = {
   'custom_fields': _MoreMenuItemDef('Custom Fields', 'Define your own lead fields', 'dashboard_customize_outlined', () => const CustomFieldsBuilderScreen()),
   'settings': _MoreMenuItemDef('Settings', 'Branding & contact info', 'settings_outlined', () => const SettingsScreen()),
   'automation_center': _MoreMenuItemDef('Automation Center', 'AI agents, auto mode, job queue', 'hub_outlined', () => const AutomationCenterScreen()),
+  'exam_intelligence': _MoreMenuItemDef('Report Cards', 'Exam results & report cards for enrolled students', 'assessment_outlined', () => const ExamHomeScreen()),
 };
 
 Color _hexToColor(String hex) {
@@ -115,6 +118,7 @@ const Map<String, Color> kMoreMenuDefaultColors = {
   'custom_fields': Color(0xFF558B2F),
   'settings': Colors.grey,
   'automation_center': Colors.lightGreen,
+  'exam_intelligence': Colors.indigoAccent,
 };
 
 /// The More screen now reads its own tile list from the tenant's

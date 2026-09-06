@@ -113,3 +113,105 @@ operational finding surfaced during verification and tracked separately in
 `NEXT_TASK.md`: `leads.assigned_to` is NULL on all 785 production leads
 today, so counselor-level visibility is currently a no-op in practice until
 leads are actually assigned.
+
+---
+
+## 2026-09-06 — Exam Intelligence + Report Card System: port, not rebuild
+
+**Decision:** the owner had this feature already built on a separate repo
+(`nepalmedtech-vinay/nepalmbbs-website`) and asked for the same capability
+inside leadflow-ai. Rather than adapting that implementation's code, it was
+rebuilt against leadflow-ai's own already-existing (but unused)
+`students`/`subjects`/`assessments`/`marks` schema and its own
+Node/Postgres/Flutter stack, reusing that other implementation only for its
+*lessons* (SQL-computed figures, blocked-not-guessed imports,
+logged-not-overwritten corrections, guardian-phone discipline, grounded AI
+narrative) — not its code, which was written for a completely different
+architecture (a static Astro site, Deno edge functions, a hand-rolled
+zero-dependency xlsx parser forced by that site's CSP).
+
+**Why:** the two codebases share nothing at the infrastructure level.
+leadflow-ai already has a real xlsx-reading dependency (`read-excel-file`),
+a real image library (`sharp`), a real WhatsApp Cloud API integration
+(`services/whatsapp.js`), and — critically — an existing CRM relationship
+(`students.lead_id → leads`) that already carries `parent_name`/
+`parent_phone`/`parent_relation`. Porting code written to route around a
+different project's constraints would have meant reintroducing constraints
+that don't exist here (e.g. a hand-written zero-dependency parser when a
+real one is already a dependency) while missing the integration this
+project actually has for free (guardian contact already lives in the CRM;
+the other implementation had to invent that from scratch).
+
+**Sheet-parsing redesign, mid-build, after inspecting a real file's
+structure.** The first draft assumed a simple two-row format (a header row
+plus a dedicated "MAX" row). The owner had a real college result sheet
+(Chitwan Medical College, MBBS 1st year 2nd internal assessment) whose
+*header structure only* was inspected (never student data, and that
+inspection was discarded once done) and found genuinely different: a
+merged multi-row header (a paper-group label spanning several subject
+columns, readable back only via forward-fill once the merge is gone), a
+max stated inline per subject (`ANA(20)`) rather than in a separate row,
+one paper's subjects with no max at all, per-paper `Total`/`Result`
+columns, and two columns both literally named "Cell Number". The parser
+was rebuilt around this real shape rather than kept simple and wrong.
+`Father's Name`/`Cell Number`/`Mother's Name` columns are recognized only
+so they can be safely ignored — guardian contact comes from the CRM's own
+`leads` record instead, not re-extracted from the sheet, which is the one
+place this port is deliberately *simpler* than the reference
+implementation (which had no CRM to draw that from).
+
+**Assessment edits are guarded, mark edits are logged, subject-label edits
+are free — three different rules for three different risk levels**, added
+after the owner's explicit follow-up requirement that marks/subjects be
+editable from the console, not just via re-import. A subject's name is a
+label with no downstream meaning — free edit, no log. A mark's value
+directly represents a fact already possibly shown/sent to a parent —
+always logged to `mark_revisions` with a required reason, never a silent
+UPDATE. An assessment's `max_marks`/`passing_marks` sit in between: free to
+edit until a mark exists against it, then blocked (409) until the caller
+passes `confirmed: true` + a reason — because changing a max after marks
+exist against it silently changes every one of those marks' percentage
+without changing a number in `marks` itself. Confirmed changes also reset
+any not-yet-sent (`status = 'ready'`) report card in that exam_group back
+to `'draft'`, so a stale percentage already computed under the old max can
+never be sent as though nothing changed. A *sent* card is left alone —
+it's a historical record of what was actually delivered, not something to
+retroactively rewrite.
+
+**Report templates are real per-tenant config, not a fixed layout, with a
+lazy default rather than a migration-time seed.** `report_templates.config`
+holds field selection/order, branding, footer/disclaimer. Rather than
+looping over every current tenant at migration time to insert a default
+row (fragile — a tenant created after the migration runs would get none),
+`getOrCreateDefaultTemplate()` creates one on first use, per tenant. A
+template a caller requests is shallow-merged over the default so an older
+or partial template config still renders every section correctly instead
+of a field silently going missing because a template predates it.
+
+**A brand-new, independent top-level mobile section — not folded into
+Leads.** First draft would have put an entry point somewhere inside the
+Leads flow; the owner corrected this explicitly: Leads is prospect
+follow-up, report cards are for already-enrolled students, and mixing the
+two mental models in one screen/navigation path was rejected outright. The
+fix was structural, not cosmetic — a new `exam_home_screen.dart` reachable
+only from the More menu (matching how every other top-level section
+already works, e.g. Parent CRM, Team, Colleges — see `more_screen.dart`'s
+`kMoreMenuDefaults`), and confirming `lead_detail_screen.dart`/the leads
+list were never touched. The database relationship
+(`students.lead_id → leads`) stays exactly as designed — that's a
+data-integrity link, not a UX one, and the owner was explicit that only
+the *product surface* needed separating.
+
+**`xlsx` (SheetJS) added as a devDependency, not a runtime one**, solely to
+generate a synthetic test fixture reproducing the real sheet's structure
+(fabricated data — see `backend/tests/lib/exam-sheet-fixture.js`). The
+app's own import path is unchanged: still `read-excel-file`, matching
+`routes/leadsImportExcel.js`'s existing convention. Adding a second reader
+library at runtime would have been real, unjustified duplication; adding a
+writer purely for tests is not the same thing.
+
+**Nothing was applied to the live database, and no git commit was made** —
+per explicit instruction, given this project's Supabase project also holds
+785 real production leads. The migration and its RLS are both draft files,
+reviewed against live schema via read-only `supabase-primary` calls but
+never executed with `apply_migration`.

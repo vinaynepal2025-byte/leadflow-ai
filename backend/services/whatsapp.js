@@ -42,4 +42,42 @@ async function sendWhatsAppMessage(toPhoneNumber, text) {
   return data;
 }
 
-module.exports = { sendWhatsAppMessage };
+// Sends an image (e.g. a rendered report card) with a text caption, via
+// the same Cloud API credentials as sendWhatsAppMessage. `imageUrl` must be
+// a URL Meta's servers can fetch — a Supabase Storage signed URL works
+// (short-lived, private bucket; see services/supabaseStorage.js), unlike a
+// raw local file path.
+async function sendWhatsAppImage(toPhoneNumber, imageUrl, caption) {
+  const token = process.env.WHATSAPP_TOKEN;
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+  if (!token || !phoneNumberId) {
+    throw new Error(
+      'WhatsApp not configured yet. Set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID in .env ' +
+      '(from Meta Business Suite) to enable sending.'
+    );
+  }
+
+  const url = `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: toPhoneNumber,
+      type: 'image',
+      image: { link: imageUrl, caption: caption || undefined },
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(`WhatsApp image send failed: ${JSON.stringify(data)}`);
+  }
+  return data;
+}
+
+module.exports = { sendWhatsAppMessage, sendWhatsAppImage };

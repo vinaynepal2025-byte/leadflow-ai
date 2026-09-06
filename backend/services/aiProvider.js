@@ -11,7 +11,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 
 const DEFAULT_MODELS = {
   claude: 'claude-sonnet-4-5',
-  gemini: 'gemini-2.0-flash',
+  gemini: 'gemini-3.6-flash',
   openrouter: 'anthropic/claude-3.5-sonnet',
 };
 

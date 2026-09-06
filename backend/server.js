@@ -109,6 +109,7 @@ app.use('/meetings', meetingsRouter);
 app.use('/journey', journeyRouter);
 app.use('/capture', captureRouter);
 app.use('/students', studentsRouter);
+app.use('/exams', require('./routes/exams'));
 app.use('/scoring', scoringRouter);
 app.use('/social', socialRouter);
 app.use('/alumni', alumniRouter);

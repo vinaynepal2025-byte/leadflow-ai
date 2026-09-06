@@ -2726,4 +2726,162 @@ class ApiService {
       throw Exception(message);
     }
   }
+
+  // =========================================================================
+  // Exam Intelligence + Report Card System
+  // =========================================================================
+
+  /// Uploads a result spreadsheet for one named exam sitting. A 422 means
+  /// the backend blocked the import (a subject with no stated max, marks
+  /// above their max, or unmatched student names) — this is a normal,
+  /// expected outcome the UI shows inline, not a thrown error.
+  Future<Map<String, dynamic>> importExamMarks({
+    required String filePath,
+    required String fileName,
+    required String examGroup,
+    String mode = 'strict',
+    String? reason,
+  }) async {
+    final uri = Uri.parse('$baseUrl/exams/import');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll(_multipartHeaders)
+      ..fields['exam_group'] = examGroup
+      ..fields['mode'] = mode
+      ..files.add(await http.MultipartFile.fromPath('file', filePath, filename: fileName));
+    if (reason != null) request.fields['reason'] = reason;
+
+    final streamed = await request.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 200 && streamed.statusCode != 422) {
+      String message = 'Import failed (${streamed.statusCode})';
+      try {
+        message = jsonDecode(body)['error'] ?? message;
+      } catch (_) {}
+      throw Exception(message);
+    }
+    return jsonDecode(body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> getExamGroups() async {
+    final res = await http.get(Uri.parse('$baseUrl/exams/groups'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<List<Map<String, dynamic>>> getExamCohort(String examGroup) async {
+    final res = await http.get(Uri.parse('$baseUrl/exams/${Uri.encodeComponent(examGroup)}/cohort'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> getExamReport(String examGroup, String studentId) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/exams/${Uri.encodeComponent(examGroup)}/students/$studentId/report'),
+      headers: _headers,
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Computes, renders and stores the report card image (does not send
+  /// anything). Returns everything a review screen needs pre-filled —
+  /// student meta, guardian phone (with a suspect flag), narrative — none
+  /// of it should need re-typing before send.
+  Future<Map<String, dynamic>> generateExamReportCard(String examGroup, String studentId, {String? templateId}) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/exams/${Uri.encodeComponent(examGroup)}/students/$studentId/generate'),
+      headers: _headers,
+      body: jsonEncode({if (templateId != null) 'template_id': templateId}),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// `confirmed: true` must only be sent after a human has actually read
+  /// the guardian phone number shown on screen — see docs on the backend
+  /// route for why. `phoneOverride` lets the coordinator correct a
+  /// `suspect`-flagged number inline before sending, without editing the
+  /// lead record from this screen.
+  Future<Map<String, dynamic>> sendExamReportCard(
+    String examGroup,
+    String studentId, {
+    required bool confirmed,
+    String? phoneOverride,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/exams/${Uri.encodeComponent(examGroup)}/students/$studentId/send'),
+      headers: _headers,
+      body: jsonEncode({'confirmed': confirmed, if (phoneOverride != null) 'phone_override': phoneOverride}),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Amends a single mark inline from the report view — same conflict path
+  /// as a bulk re-import (a written reason is required; the old value is
+  /// preserved in `mark_revisions`, never silently overwritten).
+  Future<void> amendExamMark(String markId, {required num newValue, required String reason}) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/exams/marks/$markId'),
+      headers: _headers,
+      body: jsonEncode({'new_value': newValue, 'reason': reason}),
+    );
+    _checkOk(res);
+  }
+
+  Future<void> updateExamSubject(String subjectId, Map<String, dynamic> changes) async {
+    final res = await http.patch(Uri.parse('$baseUrl/exams/subjects/$subjectId'), headers: _headers, body: jsonEncode(changes));
+    _checkOk(res);
+  }
+
+  /// A 409 means the assessment already has marks recorded and the change
+  /// would invalidate them — retry with `confirmed: true` and a `reason`
+  /// once the caller has actually decided that's intended.
+  Future<Map<String, dynamic>> updateExamAssessment(
+    String assessmentId,
+    Map<String, dynamic> changes, {
+    bool confirmed = false,
+    String? reason,
+  }) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/exams/assessments/$assessmentId'),
+      headers: _headers,
+      body: jsonEncode({...changes, 'confirmed': confirmed, if (reason != null) 'reason': reason}),
+    );
+    if (res.statusCode == 409) return jsonDecode(res.body) as Map<String, dynamic>;
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> getExamReportTemplates() async {
+    final res = await http.get(Uri.parse('$baseUrl/exams/templates'), headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> createExamReportTemplate(String name, Map<String, dynamic> config) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/exams/templates'),
+      headers: _headers,
+      body: jsonEncode({'name': name, 'config': config}),
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> updateExamReportTemplate(String id, {String? name, Map<String, dynamic>? config, bool? isDefault}) async {
+    final res = await http.patch(
+      Uri.parse('$baseUrl/exams/templates/$id'),
+      headers: _headers,
+      body: jsonEncode({
+        if (name != null) 'name': name,
+        if (config != null) 'config': config,
+        if (isDefault != null) 'is_default': isDefault,
+      }),
+    );
+    _checkOk(res);
+  }
 }
