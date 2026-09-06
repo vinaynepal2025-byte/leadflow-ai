@@ -43,7 +43,7 @@ jobs:
         run: |
           sed -i 's#<manifest xmlns:android="http://schemas.android.com/apk/res/android">#<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />#' android/app/src/main/AndroidManifest.xml
 
-      - name: Bump minSdkVersion to 23 (required by record_android for mic recording)
+      - name: Bump minSdk/compileSdk (required by current plugin AARs)
         run: |
           python3 - <<'PYEOF4'
           import os
@@ -55,23 +55,34 @@ jobs:
           with open(path) as f:
               content = f.read()
 
-          new_content, count = re.subn(
-              r'^(\s*minSdk\s*=\s*)[^\n]*',
-              r'\g<1>23',
-              content,
-              count=1,
-              flags=re.MULTILINE,
-          )
-          if count == 0:
+          def bump(content, name, value):
               new_content, count = re.subn(
-                  r'^(\s*minSdkVersion\s+)[^\n]*',
-                  r'\g<1>23',
+                  rf'^(\s*{name}\s*=\s*)[^\n]*',
+                  rf'\g<1>{value}',
                   content,
                   count=1,
                   flags=re.MULTILINE,
               )
-          if count == 0:
-              raise SystemExit('minSdk line not found in either known format')
+              if count == 0:
+                  new_content, count = re.subn(
+                      rf'^(\s*{name}\s+)[^\n]*',
+                      rf'\g<1>{value}',
+                      content,
+                      count=1,
+                      flags=re.MULTILINE,
+                  )
+              if count == 0:
+                  raise SystemExit(f'{name} line not found in either known format')
+              return new_content
+
+          content = bump(content, 'minSdk', 23)
+          # flutter_plugin_android_lifecycle's current AAR requires
+          # compiling against API 36+ (file_picker's checkReleaseAarMetadata
+          # failed against the default flutter.compileSdkVersion, which
+          # still resolves to 34 on 3.47.2) -- override explicitly rather
+          # than trust the Flutter-computed default.
+          content = bump(content, 'compileSdk', 36)
+          new_content = content
 
           with open(path, 'w') as f:
               f.write(new_content)
