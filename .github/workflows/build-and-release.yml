@@ -162,11 +162,20 @@ jobs:
       - name: DEBUG - print AndroidManifest.xml
         run: cat android/app/src/main/AndroidManifest.xml
 
-      - name: Build Android APK
-        run: flutter build apk --release
-
+      # Web build/deploy runs before the APK build so a broken Android
+      # build (plugin/AAR version drift, etc.) never blocks shipping the
+      # web app -- the two targets don't depend on each other.
       - name: Build Web app (installable PWA)
         run: flutter build web --release --base-href /${{ github.event.repository.name }}/
+
+      - name: Deploy web app to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: mobile/build/web
+
+      - name: Build Android APK
+        run: flutter build apk --release
 
       - name: Publish APK to a GitHub Release
         uses: softprops/action-gh-release@v2
@@ -178,9 +187,3 @@ jobs:
             Automatic build from the latest code.
             **Android**: download `app-release.apk` below, open it on your phone, allow "install from unknown sources" if asked.
             **Any phone/browser**: use the web install link instead — see the repository's GitHub Pages URL.
-
-      - name: Deploy web app to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: mobile/build/web

@@ -2,6 +2,36 @@
 
 Ordered roughly by how much they'll bite once AI Workforce OS work starts.
 
+## 0. CI Android APK build is currently broken (web build unaffected)
+
+`flutter build apk --release` fails in `build-and-release.yml`: `file_picker`
+(pinned `^8.1.2`, resolves to 8.3.7) was compiled against Android API 34, but
+`flutter_plugin_android_lifecycle` (pulled in transitively) now requires
+consumers to compile against API 36+. Bumping `file_picker` straight to the
+latest (`^12.2.0`) cascades into a second conflict — `file_picker
+>=12.2.0`'s `windows_file_picker` needs `win32 ^6.3.0`, which collides with
+`share_plus`'s current `win32 <6.0.0` constraint — so fixing this properly
+means upgrading `share_plus` too (`^13.3.0`+), and both are major-version
+jumps that need real regression testing, not a one-line bump mid-CI-triage.
+
+**Not blocking web deployment**: `build-and-release.yml` now builds/deploys
+the web app (GitHub Pages) *before* attempting the Android APK, specifically
+so this doesn't hold up shipping the web build. The Android Release step and
+GitHub Release publish will keep failing until someone does the file_picker
++ share_plus upgrade as its own reviewed piece of work.
+
+Also fixed in the same pass (all were pre-existing, surfaced together
+because this was apparently the first real CI run since a prior session
+bumped the local dev machine to Flutter 3.47.2 without also updating what
+CI itself was pinned to): CI's `flutter-version` was still `3.27.0` (bumped
+to `3.47.2` to match `intl ^0.20.3`'s SDK requirement), the minSdk-bump
+step assumed Groovy `build.gradle` when 3.47.2 generates Kotlin DSL
+`build.gradle.kts` (now checks both), and the same step now also bumps
+`compileSdk` (kept at 23/34 by default, though this particular fix turned
+out not to be what the file_picker error actually needed — the AAR-level
+conflict is between two plugins' own compiled-against versions, not the
+app's own compileSdk).
+
 ## 1. No tracked schema — most tables live only as inline `CREATE TABLE IF NOT EXISTS`
 
 Only 11 files in `backend/migrations/`, but ~60+ tables exist in production. The rest are created the first time their owning route file loads (confirmed pattern in `dashboardSections.js`, `leadListFields.js`, and almost certainly most others). This means:
