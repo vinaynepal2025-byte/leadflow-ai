@@ -86,7 +86,7 @@ jobs:
 
           with open(path, 'w') as f:
               f.write(new_content)
-          print('minSdk bumped to 23, replacements made:', count)
+          print('minSdk bumped to 23 and compileSdk to 36 in', path)
           PYEOF4
 
       - name: Add package-visibility queries (UPI payment apps)
