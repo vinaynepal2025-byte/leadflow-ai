@@ -2,23 +2,41 @@
 
 Ordered roughly by how much they'll bite once AI Workforce OS work starts.
 
-## 0. CI Android APK build is currently broken (web build unaffected)
+## 0. RESOLVED 2026-09-07 — CI Android APK build was broken, now fixed
 
-`flutter build apk --release` fails in `build-and-release.yml`: `file_picker`
-(pinned `^8.1.2`, resolves to 8.3.7) was compiled against Android API 34, but
-`flutter_plugin_android_lifecycle` (pulled in transitively) now requires
-consumers to compile against API 36+. Bumping `file_picker` straight to the
-latest (`^12.2.0`) cascades into a second conflict — `file_picker
->=12.2.0`'s `windows_file_picker` needs `win32 ^6.3.0`, which collides with
-`share_plus`'s current `win32 <6.0.0` constraint — so fixing this properly
-means upgrading `share_plus` too (`^13.3.0`+), and both are major-version
-jumps that need real regression testing, not a one-line bump mid-CI-triage.
+`flutter build apk --release` was failing in `build-and-release.yml`:
+`file_picker` (pinned `^8.1.2`, resolved to 8.3.7) was compiled against
+Android API 34, but `flutter_plugin_android_lifecycle` (pulled in
+transitively) requires consumers to compile against API 36+. Bumped
+`file_picker` to `^12.2.0` and `share_plus` to `^13.3.0` together (the
+straight file_picker bump alone cascades into a second conflict —
+`file_picker`'s `windows_file_picker` needs `win32 ^6.3.0`, colliding with
+the old `share_plus`'s `win32 <6.0.0` constraint; `flutter pub get` now
+resolves `win32` to 6.4.0 cleanly). Confirmed this fixes the actual root
+cause, not just the pub conflict: file_picker 12.x split its Android
+implementation into a separate `android_file_picker` package whose
+`build.gradle.kts` uses `compileSdk = flutter.compileSdkVersion` (36 for
+Flutter 3.47.2) instead of the old hardcoded value.
 
-**Not blocking web deployment**: `build-and-release.yml` now builds/deploys
-the web app (GitHub Pages) *before* attempting the Android APK, specifically
-so this doesn't hold up shipping the web build. The Android Release step and
-GitHub Release publish will keep failing until someone does the file_picker
-+ share_plus upgrade as its own reviewed piece of work.
+**Breaking API change from the bump**: file_picker 12.x removed
+`FilePicker.platform` — `FilePicker` is static methods now, and every one
+of this app's 6 call sites (only ever wanted one file) was switched to the
+new `FilePicker.pickFile()` (singular), which returns `PlatformFile?`
+directly instead of a `FilePickerResult` wrapper. `flutter analyze`: 0
+errors. CI run `34095950139` succeeded end-to-end — real APK published to
+`build-201` (69MB, `app-release.apk`).
+
+**Also discovered and fixed the same day**: GitHub Pages was never actually
+enabled in the repo's Settings (`has_pages: false`) even though the
+`gh-pages` branch had been deploying correctly the whole time — the web app
+URL was 404ing despite the workflow "succeeding." Enabled via the API
+(`POST /repos/.../pages`, source: `gh-pages` branch, root) — now genuinely
+live at `https://vinaynepal2025-byte.github.io/leadflow-ai/`.
+
+**Follow-up, not urgent**: `share_plus`'s `Share`/`shareXFiles` are now
+deprecated in favor of `SharePlus.instance.share()` (info-level notices
+only, not breakage) — worth migrating next time those call sites are
+touched, not a standalone task.
 
 Also fixed in the same pass (all were pre-existing, surfaced together
 because this was apparently the first real CI run since a prior session
