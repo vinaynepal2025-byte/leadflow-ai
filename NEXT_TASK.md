@@ -6,7 +6,57 @@ were, `TECH_DEBT.md` for known issues not yet addressed.
 
 ---
 
-## Newest — Gemini narrative fixed + report card branding separated (2026-09-07, later still)
+## Newest — Ultra Premium Exam Intelligence ecosystem (2026-09-07, evening)
+
+Full plan (research + design rationale) at the time of writing:
+`C:\Users\pc\.claude\plans\purrfect-hatching-noodle.md`. Built and verified live
+end-to-end (throwaway fixtures, cleaned up after — see that verification in the
+commit `42c9077`):
+
+- **Logo templates**: `report_templates.branding.logoUrl` — real image compositing
+  into the rendered PNG (base64 SVG `<image>`, one `sharp()` pass). Reuses the
+  existing `tenant_logos` table/upload flow as-is, no new upload endpoint.
+- **Real WYSIWYG live preview**: `POST /exams/templates/preview` — renders any
+  template config (saved or not) against real student data or built-in sample
+  data, skipping AI/upload/DB-write, cheap enough for per-keystroke preview.
+  New mobile screen `exam_template_editor_screen.dart` uses it.
+- **Academic risk analysis, student- and batch-wise**: new
+  `backend/routes/academicAnalysis.js` (`GET /exams/analysis/students/:id`,
+  `GET /exams/analysis/batch/:batchYear`) — revives the intent of an abandoned
+  2026-08-15 "Student Success & Academic Monitoring OS" effort (documented in
+  Notion) that created `subjects`/`assessments`/`marks`/`attendance_records`/
+  `academic_risk_config`/`academic_risk_scores` in this exact project, then
+  pivoted into building the separate standalone `student-monitor-os` product
+  instead — these tables sat empty ever since. Deterministic risk score first
+  (blocks with "No marks recorded for this student yet" below minimum data —
+  verified live), then one `generateJson` call to narrate it, same
+  grounded-or-fallback discipline as the report card narrative. Verified live:
+  a declining 2-exam student correctly flagged `high` risk with an accurate AI
+  insight; a batch of 3 correctly aggregated to the right average/risk-band
+  counts.
+- **Dashboard rework**: `exam_home_screen.dart` now has student search (jumps
+  straight to a report card) and a batch picker with stat tiles + risk
+  breakdown + AI summary — no new charting library, matches the app's existing
+  dashboard style.
+- **Send row redesign**: `exam_report_screen.dart`'s send section is now
+  `Student name | F | M | Message` as requested — F/M unchanged (WhatsApp
+  hyperlink, built earlier today), Message opens the OS share sheet
+  (`share_plus`) for a local plain-text send.
+
+**Not built (explicitly scoped out in the plan, flagged to Vinay, not silently
+skipped):** batch-wide trend graphs/charts (no charting lib in this app —
+stat tiles only), PDF export (separate existing item below), cohort/bulk send
+(send to a whole class at once — this pass is per-student only).
+
+**Not yet done:** the "describe a change in plain language" AI template editor
+enhancement (🟣 bonus in the plan, recovered from Vinay's own prior Notion
+roadmap) — flagged as optional/last-if-time in the plan, not built this pass.
+Real on-device click-through of the new screens is still needed — this
+session cannot reliably run `flutter run` (hit memory limits twice today).
+
+---
+
+## Gemini narrative fixed + report card branding separated (2026-09-07, later still)
 
 **Root cause of "Render doesn't have GEMINI_API_KEY working" (from the entry
 below) found: it wasn't Render's env var at all.** The actual
