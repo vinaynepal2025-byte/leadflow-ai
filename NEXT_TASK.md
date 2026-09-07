@@ -6,7 +6,48 @@ were, `TECH_DEBT.md` for known issues not yet addressed.
 
 ---
 
-## Newest — Ultra Premium Exam Intelligence ecosystem (2026-09-07, evening)
+## Newest — Two remaining gaps closed against Vinay's original spec (2026-09-07, later)
+
+A final pass against the original request (which explicitly listed "remark"
+and "maximum marks subject wise" among the customizable report-card fields)
+found two real gaps, both closed and verified live:
+
+1. **Teacher's own remark** — `report_cards.teacher_remark` (new column),
+   distinct from the computed/AI narrative, rendered as its own "Remark:"
+   line. Mobile: a text field on the report screen, plus a "Regenerate with
+   this remark" button once already generated.
+2. **Max-marks editing UI** — the backend guard (`confirmed`+`reason` once
+   marks exist) and even the mobile API method already existed; just no
+   screen called it. Added a "rule" icon next to each subject row.
+
+**One real bug found and fixed while verifying #1**: the rendered PNG and
+the persisted database value had silently diverged — a regenerate that
+omitted `teacher_remark` correctly kept the old value in the database (via
+the intended COALESCE) but rendered/uploaded an image with **no remark at
+all**, because the image was rendered from the raw (unresolved) request
+value earlier in the same function, before the DB write resolved it. Fixed
+by resolving the final value first, then rendering and persisting the same
+resolved value — reproduced and re-verified live (downloaded and viewed the
+actual PNG before and after: before showed no remark despite the DB having
+one, after correctly showed "Remark: Verify remark v3 persists on
+regenerate").
+
+**Second bug found during the same verification pass**: the report card
+narrative's `generateText` call still used `maxTokens: 300` (never revisited
+when `thinkingBudget: 0` was added earlier today) — reproduced live, a
+narrative got cut off mid-sentence again ("We are delighted to share that
+SM") even with thinking disabled, apparently because Gemini can still spend
+a handful of tokens on reasoning even with the budget set to 0. Bumped to
+600 (matching the more generous budget already used for the risk-insight
+call) and re-verified: multiple complete, correctly-grounded narratives in a
+row afterward.
+
+All CI runs since (`34105501576` through `34108373372`) completed
+successfully — Android APK build is healthy on every commit today.
+
+---
+
+## Ultra Premium Exam Intelligence ecosystem (2026-09-07, evening)
 
 Full plan (research + design rationale) at the time of writing:
 `C:\Users\pc\.claude\plans\purrfect-hatching-noodle.md`. Built and verified live
