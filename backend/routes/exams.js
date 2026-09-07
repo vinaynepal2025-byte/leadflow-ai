@@ -20,6 +20,7 @@ const {
 const { renderReportCardPng } = require('../services/reportCardImage');
 const { uploadFile, getSignedUrl } = require('../services/supabaseStorage');
 const { sendWhatsAppImage } = require('../services/whatsapp');
+const { buildWhatsAppLink } = require('../services/phone');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -326,6 +327,102 @@ router.post('/:examGroup/students/:studentId/send', async (req, res) => {
   } catch (err) {
     return res.status(400).json({ error: `Send failed: ${err.message}` });
   }
+});
+
+// GET /exams/:examGroup/students/:studentId/whatsapp-link?guardian=father|mother
+// FREE, semi-automatic method — no Meta Cloud API, no cost, no approval
+// needed. Same wa.me "click to chat" pattern already used for leads
+// (routes/whatsappLink.js) and flyers (routes/flyerProjects.js's
+// /share-link): a human still taps Send in WhatsApp. The report card image
+// can't be attached to a wa.me link directly (text only), so the message
+// carries a long-lived (7-day, same trade-off flyerProjects.js already made
+// for a link a parent may open hours later) signed link to it instead.
+// This is deliberately separate from POST .../send below — that one calls
+// the Meta Cloud API directly (sendWhatsAppImage) and is the future paid-tier
+// path once WHATSAPP_TOKEN/WHATSAPP_PHONE_NUMBER_ID are actually configured;
+// this route needs neither and is today's real send path.
+router.get('/:examGroup/students/:studentId/whatsapp-link', async (req, res) => {
+  const tid = tenantId(req);
+  const { examGroup, studentId } = req.params;
+  const guardian = req.query.guardian === 'mother' ? 'mother' : 'father';
+  if (!(await canAccessStudent(req, studentId))) {
+    return res.status(404).json({ error: 'Student not found' });
+  }
+
+  const card = await db
+    .prepare('SELECT * FROM report_cards WHERE tenant_id = ? AND student_id = ? AND exam_group = ?')
+    .get(tid, studentId, examGroup);
+  if (!card || card.status === 'draft') {
+    return res.status(400).json({ error: 'Generate the report card first (POST .../generate)' });
+  }
+
+  const lead = await db
+    .prepare(
+      `SELECT l.full_name, l.father_name, l.father_phone, l.mother_name, l.mother_phone
+       FROM students s JOIN leads l ON l.id = s.lead_id WHERE s.id = ?`
+    )
+    .get(studentId);
+  const guardianName = guardian === 'mother' ? lead.mother_name : lead.father_name;
+  const guardianPhone = guardian === 'mother' ? lead.mother_phone : lead.father_phone;
+  if (!guardianPhone) {
+    return res.status(400).json({ error: `No ${guardian}'s phone number on file for this student` });
+  }
+
+  const SEVEN_DAYS = 7 * 24 * 60 * 60;
+  let imageUrl;
+  try {
+    imageUrl = await getSignedUrl(card.image_storage_path, SEVEN_DAYS);
+  } catch (err) {
+    return res.status(502).json({ error: `Could not create share link: ${err.message}` });
+  }
+
+  const tenant = await db.prepare('SELECT default_country_code FROM tenants WHERE id = ?').get(tid);
+  const greeting = (req.body && req.body.message) || `Hi${guardianName ? ' ' + guardianName : ''}, sharing ${lead.full_name}'s ${examGroup} report card with you.`;
+  const message = `${greeting}\n\n${imageUrl}`;
+  const link = buildWhatsAppLink(guardianPhone, null, message, tenant && tenant.default_country_code);
+  if (!link) return res.status(400).json({ error: `Could not build a WhatsApp link for ${guardian}'s number on file` });
+
+  return res.json({
+    whatsapp_link: link,
+    image_url: imageUrl,
+    guardian,
+    guardian_name: guardianName,
+    message,
+    expires_in_days: 7,
+  });
+});
+
+// POST /exams/:examGroup/students/:studentId/whatsapp-link/confirm-sent
+// Call this after the counselor taps Send in WhatsApp, to log it in
+// Communication Hub and mark the report card sent — the free wa.me method
+// has no delivery webhook of its own, same limitation whatsappLink.js
+// already documents for lead chat-links.
+router.post('/:examGroup/students/:studentId/whatsapp-link/confirm-sent', async (req, res) => {
+  const tid = tenantId(req);
+  const { examGroup, studentId } = req.params;
+  const guardian = req.body.guardian === 'mother' ? 'mother' : 'father';
+  if (!(await canAccessStudent(req, studentId))) {
+    return res.status(404).json({ error: 'Student not found' });
+  }
+
+  const card = await db
+    .prepare('SELECT id FROM report_cards WHERE tenant_id = ? AND student_id = ? AND exam_group = ?')
+    .get(tid, studentId, examGroup);
+  if (!card) return res.status(400).json({ error: 'Generate the report card first (POST .../generate)' });
+
+  await db.transaction(async (tx) => {
+    await tx
+      .prepare(`UPDATE report_cards SET status = 'sent', sent_at = now(), sent_to_phone = ? WHERE id = ?`)
+      .run(req.body.phone || null, card.id);
+    await tx
+      .prepare(
+        `INSERT INTO communications (id, tenant_id, lead_id, channel, direction, body, created_by)
+         VALUES (gen_random_uuid(), ?, (SELECT lead_id FROM students WHERE id = ?), 'whatsapp-link', 'outbound', ?, ?)`
+      )
+      .run(tid, studentId, `Report card sent to ${guardian}: ${examGroup}`, req.user?.id || 'unknown');
+  });
+
+  return res.status(201).json({ logged: true });
 });
 
 // PATCH /exams/marks/:markId — amend a single mark (reason required).

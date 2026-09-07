@@ -50,13 +50,17 @@ const { digitsOnly, toWhatsAppNumber } = require('./phone');
 //             header text) at the end.
 //   Data rows: one per student, aligned to the header row's columns.
 //
-// Deliberately NOT extracted from the sheet: guardian name/phone. Unlike
-// the reference implementation (a standalone site with no CRM behind it),
-// leadflow-ai already has `leads.parent_name`/`parent_phone`/
-// `parent_relation` for every student via `students.lead_id` — reusing
-// that existing CRM data is the whole point of building this inside
-// leadflow-ai, so "Father's Name"/"Cell Number"/"Mother's Name" columns
-// are recognized only so they can be safely ignored, not parsed.
+// "Father's Name"/"Cell Number"/"Mother's Name"/"Cell Number" ARE extracted
+// (2026-09-07 — the WhatsApp-hyperlink report-card feature needs both
+// guardians' numbers, not just the single leads.parent_phone this sheet
+// import originally deferred to). "Cell Number" appears twice with the
+// identical header text, so the two occurrences are told apart positionally
+// — whichever guardian-name column most recently preceded a "Cell Number"
+// column owns it, matching the real sheet's left-to-right layout. Backfilled
+// onto the matched lead's father_name/father_phone/mother_name/mother_phone
+// only when those columns are currently empty (see resolveStudents) — never
+// overwrites a value a counselor already corrected in the CRM, same rule as
+// parent_phone.
 //
 // "Student Code" is matched first when present; otherwise the student is
 // matched by exact, case-insensitive `full_name` within the tenant's leads
@@ -64,7 +68,32 @@ const { digitsOnly, toWhatsAppNumber } = require('./phone');
 // as this code.
 // ---------------------------------------------------------------------------
 
-const IGNORED_HEADER_COLS = /^(s\.?n\.?|batch|category|total\s*(\(|$)|result|father'?s?\s*name|mother'?s?\s*name|cell\s*number)/i;
+const IGNORED_HEADER_COLS = /^(s\.?n\.?|batch|category|total\s*(\(|$)|result)/i;
+const FATHER_NAME_RE = /^father'?s?\s*name$/i;
+const MOTHER_NAME_RE = /^mother'?s?\s*name$/i;
+const CELL_NUMBER_RE = /^cell\s*number$/i;
+
+/// Walks the header left-to-right once, associating each "Cell Number"
+/// column with whichever guardian-name column most recently preceded it
+/// (both share the exact same "Cell Number" text, so order is the only
+/// signal). Returns column indices only — undefined for any not present.
+function findGuardianCols(header) {
+  const cols = {};
+  let current = null;
+  header.forEach((h, i) => {
+    const text = String(h ?? '').trim();
+    if (FATHER_NAME_RE.test(text)) {
+      cols.fatherNameCol = i;
+      current = 'father';
+    } else if (MOTHER_NAME_RE.test(text)) {
+      cols.motherNameCol = i;
+      current = 'mother';
+    } else if (CELL_NUMBER_RE.test(text) && current) {
+      cols[`${current}PhoneCol`] = i;
+    }
+  });
+  return cols;
+}
 
 /// "ANA(20)" -> { name: "ANA", max: 20 }. "HP&E" (no parenthetical, or one
 /// that isn't a single plain number like a paper's "(120/60)") -> max: null.
@@ -114,10 +143,12 @@ function parseMarksSheetBuffer(buffer) {
     const nameColIdx = header.findIndex((h) => /^student\s*name$/i.test(h));
     if (nameColIdx === -1) throw new Error('No "Student Name" column found on the header row');
     const codeColIdx = header.findIndex((h) => /^student\s*(id|code)$/i.test(h));
+    const guardianCols = findGuardianCols(header);
+    const guardianColIdxSet = new Set(Object.values(guardianCols));
 
     const subjectCols = [];
     header.forEach((h, i) => {
-      if (i === nameColIdx || i === codeColIdx || !h || IGNORED_HEADER_COLS.test(h)) return;
+      if (i === nameColIdx || i === codeColIdx || guardianColIdxSet.has(i) || !h || IGNORED_HEADER_COLS.test(h)) return;
       const { name, max } = extractSubjectAndMax(h);
       if (!name) return;
       subjectCols.push({ colIdx: i, subjectName: name, maxMarks: max, paperGroup: paperGroupRow[i] || null });
@@ -143,10 +174,15 @@ function parseMarksSheetBuffer(buffer) {
         const val = r[c.colIdx];
         marksBySubject[c.subjectName] = val === null || val === undefined || val === '' ? null : Number(val);
       });
+      const cell = (colIdx) => (colIdx === undefined || r[colIdx] === null || r[colIdx] === undefined ? null : String(r[colIdx]).trim() || null);
       return {
         name: String(r[nameColIdx]).trim(),
         code: codeColIdx === -1 ? null : (r[codeColIdx] ? String(r[codeColIdx]).trim() : null),
         marksBySubject,
+        fatherName: cell(guardianCols.fatherNameCol),
+        fatherPhone: cell(guardianCols.fatherPhoneCol),
+        motherName: cell(guardianCols.motherNameCol),
+        motherPhone: cell(guardianCols.motherPhoneCol),
       };
     });
 
@@ -302,6 +338,25 @@ async function importMarks({ tenantId, examGroup, parsed, mode, reason, recorded
           summary.revised++;
         }
       }
+    }
+
+    // Backfill father/mother name+phone onto the lead, sheet-provided value
+    // only where the CRM's own column is still empty — never overwrites
+    // something a counselor already entered/corrected, same rule as
+    // parent_phone elsewhere in this file.
+    for (const student of resolved) {
+      if (!student.fatherName && !student.fatherPhone && !student.motherName && !student.motherPhone) continue;
+      await tx
+        .prepare(
+          `UPDATE leads SET
+             father_name = COALESCE(father_name, ?),
+             father_phone = COALESCE(father_phone, ?),
+             mother_name = COALESCE(mother_name, ?),
+             mother_phone = COALESCE(mother_phone, ?),
+             updated_at = to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
+           WHERE id = ? AND tenant_id = ?`
+        )
+        .run(student.fatherName, student.fatherPhone, student.motherName, student.motherPhone, student.leadId, tenantId);
     }
   });
 

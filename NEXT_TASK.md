@@ -6,36 +6,62 @@ were, `TECH_DEBT.md` for known issues not yet addressed.
 
 ---
 
-## Newest — Exam Intelligence + Report Card System needs review before anything goes live
+## Newest — Exam Intelligence + Report Card System: end-to-end smoke test done (2026-09-07)
 
-**Landed:** 2026-09-06, on the working tree only — nothing committed, nothing
-applied to the database. See `IMPLEMENTATION_PROGRESS.md` (2026-09-06 entry)
-for exactly what was built and verified, and `DECISION_LOG.md`'s matching
-entry for why it's shaped the way it is.
+**Landed:** 2026-09-06, committed (`1ebb93c`). Migration and RLS are both
+**applied and live** — confirmed 2026-09-07 via the `supabase-primary` MCP:
+`subjects`/`assessments`/`marks`/`report_cards`/`mark_imports`/etc. all exist
+in `qovaakuithekhotkrrdi` with `rls_enabled = true`. (Earlier note below this
+one previously said "nothing committed, nothing applied" — that was true as
+of 2026-09-06 but is now stale; superseded by this entry.)
 
-**Before this can be used at all:**
-1. Review `backend/migrations/2026-09-06-exam-intelligence-report-cards.js`
-   and `01_PROJECT_REGISTRY/security-fixes/rls_exam_intelligence_tables.sql`
-   — both draft-only. Apply the migration first, then the RLS, then verify
-   (structural checks + role-simulation, same pattern as the 54-table fix)
-   before trusting either is live.
-2. Review the actual code changes (`git status`/`git diff` — nothing was
-   committed) and decide what to commit.
-3. **Gemini key**: `backend/.env` has `GEMINI_API_KEY`/`AI_PROVIDER=gemini`
-   set locally and was smoke-tested directly against Google's API
-   (`gemini-3.6-flash` — note `gemini-2.0-flash`, `aiProvider.js`'s old
-   default, is retired; already fixed in code). This key was pasted into a
-   chat window earlier in this session and should be treated as public —
-   rotate it before relying on it for anything real.
-4. **WhatsApp**: `sendWhatsAppImage` reuses the existing
-   `WHATSAPP_TOKEN`/`WHATSAPP_PHONE_NUMBER_ID` — if those aren't set, every
-   send attempt fails with a clear "not configured" error rather than
-   silently doing nothing; nothing new to configure beyond what the
-   existing WhatsApp integration already needed.
-5. **No end-to-end run yet.** Nothing here has touched a real database, a
-   real WhatsApp send, or a real device/emulator screen — see
-   IMPLEMENTATION_PROGRESS.md's "what was NOT verified" list. The first
-   real import + generate + send should be watched closely.
+**2026-09-07 smoke test (real import → compute → generate → send, against
+the live Render backend + Supabase, using a throwaway `smoke-test-lead-001`/
+`smoke-test-student-001` fixture, cleaned up afterward — all tables back to
+0 rows):**
+
+1. **Import + compute: PASS.** POST `/exams/import` with a 2-subject xlsx
+   (Anatomy 78/100, Physiology 84/100) inserted cleanly. GET `.../report`
+   computed 81% / grade A / rank 1 of 1 — arithmetic verified by hand,
+   correct.
+2. **Report card generation: PASS.** POST `.../generate` rendered the PNG
+   and uploaded it to Supabase Storage with no error; `report_cards` row
+   landed with `status: 'ready'`.
+3. **Gemini narrative: FAILING SILENTLY IN PRODUCTION.** `narrativeIsFallback`
+   was `true` — the deterministic fallback sentence was used, not a real
+   Gemini call. `GET /ai/provider` on the live backend reports
+   `configured: true` (Render has *some* value in `GEMINI_API_KEY`), so the
+   key itself is rejected/invalid, not simply absent. Separately: **local**
+   `backend/.env`'s `GEMINI_API_KEY` is now blank (looks like a first step
+   toward rotating the key that was pasted into a chat earlier — see the
+   original note preserved below — already happened), but whatever value
+   Render has was never updated to match and doesn't work either. **Action
+   needed:** get a fresh Gemini key from aistudio.google.com/apikey and set
+   it as `GEMINI_API_KEY` in Render's dashboard env vars (not just locally).
+   This is a real product gap, not a crash — the fallback sentence is
+   accurate and safe to send, just not the "AI-written note" the feature is
+   meant to provide.
+4. **WhatsApp send: NOT CONFIGURED, confirmed by a real attempt.** POST
+   `.../send` returned `"Send failed: WhatsApp not configured yet."`
+   Checked why: **every existing WhatsApp feature in this app
+   (`routes/whatsappLink.js`, the 38 existing `communications` rows) sends
+   via a `wa.me` click-to-chat link opened manually in the counselor's own
+   WhatsApp app — never Meta's Cloud API.** `WHATSAPP_TOKEN`/
+   `WHATSAPP_PHONE_NUMBER_ID` (the Cloud API credentials `sendWhatsAppImage`
+   needs) have never actually been set up anywhere in this project. The
+   original note below ("nothing new to configure beyond what the existing
+   integration already needed") was **wrong** — this feature is the first
+   thing that needs a real Meta WhatsApp Business Cloud API setup.
+   **Action needed:** create a Meta Business/WhatsApp Cloud API app, get a
+   permanent token + phone number ID, set both in Render's env vars, then
+   re-test the send step specifically (steps 1–2 above don't need
+   re-running).
+
+**Original 2026-09-06 note on Gemini/WhatsApp (kept for the paper trail,
+now superseded by the smoke test above):**
+- Gemini key was pasted into a chat window earlier that session and should
+  be treated as public — rotate it before relying on it for anything real.
+- WhatsApp assumption ("nothing new to configure") — **disproven above.**
 
 **Next chunk, if this continues (in the order the value falls):**
 1. A template-editing UI — the backend (`GET/POST/PATCH /exams/templates`)
