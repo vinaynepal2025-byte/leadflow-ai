@@ -9,6 +9,7 @@
 // what's already imported/recorded.
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import '../widgets/glass_widgets.dart';
 
@@ -30,19 +31,10 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
   bool _busy = false;
   String? _error;
 
-  bool _phoneConfirmed = false;
-  final _phoneOverrideController = TextEditingController();
-
   @override
   void initState() {
     super.initState();
     _load();
-  }
-
-  @override
-  void dispose() {
-    _phoneOverrideController.dispose();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -123,8 +115,6 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
       final generated = await _api.generateExamReportCard(widget.examGroup, widget.studentId);
       setState(() {
         _generated = generated;
-        _phoneConfirmed = false;
-        _phoneOverrideController.text = generated['guardianPhone']?.toString() ?? '';
         _busy = false;
       });
     } catch (e) {
@@ -135,24 +125,38 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
     }
   }
 
-  Future<void> _send() async {
-    if (!_phoneConfirmed) return;
+  /// Free, semi-automatic send: opens WhatsApp with the report card link
+  /// already filled in for the chosen guardian; a human still taps Send.
+  /// The paid Meta Cloud API path (ApiService.sendExamReportCard) stays
+  /// dormant until a paid WhatsApp Business tier is actually taken.
+  Future<void> _sendToGuardian(String guardian) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await _api.sendExamReportCard(
-        widget.examGroup,
-        widget.studentId,
-        confirmed: true,
-        phoneOverride: _phoneOverrideController.text.trim().isEmpty ? null : _phoneOverrideController.text.trim(),
-      );
-      setState(() => _busy = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report card sent')));
-        Navigator.of(context).pop();
+      final link = await _api.getExamWhatsAppLink(widget.examGroup, widget.studentId, guardian: guardian);
+      final url = link['whatsapp_link']?.toString();
+      if (url == null || url.isEmpty) {
+        throw Exception('Could not build a WhatsApp link');
       }
+      final launched = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      if (!launched) {
+        throw Exception('Could not open WhatsApp');
+      }
+      // wa.me gives no delivery callback, so record the hand-off ourselves --
+      // otherwise the send never appears in Communication Hub. Best-effort:
+      // WhatsApp has already opened either way, so a logging failure here
+      // shouldn't read as "the send failed" to the counselor.
+      try {
+        await _api.confirmExamWhatsAppSent(widget.examGroup, widget.studentId, guardian: guardian);
+      } catch (_) {}
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Opened WhatsApp for ${guardian == 'father' ? "father" : "mother"}${link['guardian_name'] != null ? ' (${link['guardian_name']})' : ''}')),
+        );
+      }
+      setState(() => _busy = false);
     } catch (e) {
       setState(() {
         _error = e.toString().replaceFirst('Exception: ', '');
@@ -218,7 +222,7 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
           _stat('${summary['overallPercentage']}%', 'Overall'),
           _stat('${summary['overallGrade']}', 'Grade'),
           _stat('${summary['rank']}/${summary['cohortSize']}', 'Rank'),
-          _stat('${summary['batchAverage']}%', 'Batch avg'),
+          _stat('${summary['batchAverage']}/${summary['maxTotal']}', 'Batch avg'),
         ],
       ),
     );
@@ -279,31 +283,35 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
   }
 
   Widget _sendCard() {
-    final suspect = _generated!['guardianPhoneSuspect'] == true;
     return GlassContainer(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Send to: ${_generated!['parentName'] ?? 'Parent/Guardian'}', style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _phoneOverrideController,
-            decoration: InputDecoration(
-              labelText: 'WhatsApp number',
-              helperText: suspect ? (_generated!['guardianPhoneReason']?.toString() ?? 'This number looks unusual — please check it') : null,
-              helperStyle: TextStyle(color: suspect ? Colors.orange[800] : null),
-            ),
+          const Text('Send on WhatsApp', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          const Text(
+            'Opens WhatsApp with the report card link ready — you confirm and tap Send.',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
-          CheckboxListTile(
-            value: _phoneConfirmed,
-            contentPadding: EdgeInsets.zero,
-            title: const Text('I have checked this is the correct number', style: TextStyle(fontSize: 13)),
-            onChanged: (v) => setState(() => _phoneConfirmed = v ?? false),
-          ),
-          GlassButton(
-            onPressed: !_phoneConfirmed || _busy ? null : _send,
-            icon: Icons.send,
-            child: const Text('Send via WhatsApp'),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : () => _sendToGuardian('father'),
+                  icon: const Icon(Icons.send, size: 16),
+                  label: const Text('To Father'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : () => _sendToGuardian('mother'),
+                  icon: const Icon(Icons.send, size: 16),
+                  label: const Text('To Mother'),
+                ),
+              ),
+            ],
           ),
         ],
       ),

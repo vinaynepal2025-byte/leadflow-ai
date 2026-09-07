@@ -2819,6 +2819,43 @@ class ApiService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  /// FREE semi-automatic send — no Meta Cloud API, no cost, no approval
+  /// needed (per owner's direction: build this path now, leave the paid
+  /// sendExamReportCard/Cloud API path above dormant until a paid WhatsApp
+  /// Business tier is actually taken). Returns a `wa.me` link with a 7-day
+  /// signed report-card image link already embedded in the message —
+  /// open it with url_launcher, then call confirmExamWhatsAppSent once the
+  /// counselor has actually tapped Send in WhatsApp.
+  Future<Map<String, dynamic>> getExamWhatsAppLink(
+    String examGroup,
+    String studentId, {
+    required String guardian, // 'father' or 'mother'
+  }) async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/exams/${Uri.encodeComponent(examGroup)}/students/$studentId/whatsapp-link?guardian=$guardian'),
+      headers: _headers,
+    );
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Logs the free-method send to Communication Hub and marks the report
+  /// card sent — the free wa.me method has no delivery webhook of its own,
+  /// so this call is the only record that it happened.
+  Future<void> confirmExamWhatsAppSent(
+    String examGroup,
+    String studentId, {
+    required String guardian,
+    String? phone,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/exams/${Uri.encodeComponent(examGroup)}/students/$studentId/whatsapp-link/confirm-sent'),
+      headers: _headers,
+      body: jsonEncode({'guardian': guardian, if (phone != null) 'phone': phone}),
+    );
+    _checkOk(res);
+  }
+
   /// Amends a single mark inline from the report view — same conflict path
   /// as a bulk re-import (a written reason is required; the old value is
   /// preserved in `mark_revisions`, never silently overwritten).
