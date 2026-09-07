@@ -23,7 +23,7 @@
 
 const readXlsxFile = require('read-excel-file/node');
 const db = require('../db');
-const { generateText } = require('./aiProvider');
+const { generateText, generateJson } = require('./aiProvider');
 const { digitsOnly, toWhatsAppNumber } = require('./phone');
 
 // ---------------------------------------------------------------------------
@@ -578,7 +578,7 @@ function normalizeGuardianPhone(phone, countryCode) {
 const DEFAULT_TEMPLATE_CONFIG = {
   fields: ['subjects', 'total', 'rank', 'batchAverage', 'previousDelta', 'narrative'],
   subjectOrder: null, // null = natural order (as returned by computeReportCard); or an explicit array of subject names
-  branding: { headerColor: '#1e3a8a', title: null }, // null title -> tenant name is used
+  branding: { headerColor: '#1e3a8a', title: null, logoUrl: null }, // null title -> student's own institution is used
   footerText: null,
   disclaimer: 'Marks are provisional until countersigned by the examination office.',
 };
@@ -657,6 +657,249 @@ async function updateAssessment(tenantId, assessmentId, changes, { confirmed, re
   return { blocked: false, updated: true };
 }
 
+// ---------------------------------------------------------------------------
+// Academic risk analysis (student-wise + batch-wise) — 2026-09-07.
+//
+// `subjects`/`assessments`/`marks`/`attendance_records`/`academic_risk_config`/
+// `academic_risk_scores` were created back on 2026-08-15 for an earlier
+// "Student Success & Academic Monitoring OS" effort that pivoted into a
+// separate standalone product instead, leaving these tables live but
+// completely unused. This revives the intent (a deterministic, explainable
+// risk score first — never an AI guess — then one AI call to narrate it)
+// against exam intelligence's real schema, mirroring the exact two-step
+// pattern already proven by routes/scoring.js's /briefing endpoint and this
+// file's own generateNarrative(): compute first, ask the model to describe
+// the computed numbers, ground-or-fallback if it invents anything.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_RISK_WEIGHTS = {
+  criticalPercentage: 40, // latest exam % below this -> academic risk 'high'
+  warningPercentage: 50, // latest exam % below this -> academic risk 'medium'
+  decliningTrendPoints: 10, // a drop of this many points vs the previous exam also -> 'medium'
+};
+
+async function loadRiskConfig(tenantId) {
+  const row = await db.prepare('SELECT * FROM academic_risk_config WHERE tenant_id = ?').get(tenantId);
+  return {
+    weights: { ...DEFAULT_RISK_WEIGHTS, ...(row?.weights || {}) },
+    attendanceThresholdWarning: row?.attendance_threshold_warning ?? 75,
+    attendanceThresholdCritical: row?.attendance_threshold_critical ?? 60,
+  };
+}
+
+/// One row per exam_group this student has at least one recorded mark in,
+/// oldest first. Deliberately lighter than computeReportCard (no rank/cohort/
+/// narrative) -- this is a trend calculation across many exams, not a single
+/// report render.
+async function fetchStudentExamHistory(tenantId, studentId) {
+  return db
+    .prepare(
+      `SELECT a.exam_group, SUM(m.marks_obtained) AS total, SUM(a.max_marks) AS max_total, MIN(a.assessment_date) AS first_date
+       FROM assessments a
+       JOIN marks m ON m.assessment_id = a.id AND m.student_id = ?
+       WHERE a.tenant_id = ? AND a.exam_group IS NOT NULL
+       GROUP BY a.exam_group
+       ORDER BY first_date ASC NULLS LAST`
+    )
+    .all(studentId, tenantId);
+}
+
+async function fetchStudentAttendance(tenantId, studentId) {
+  const rows = await db
+    .prepare(`SELECT status, count(*) AS c FROM attendance_records WHERE tenant_id = ? AND student_id = ? GROUP BY status`)
+    .all(tenantId, studentId);
+  const total = rows.reduce((sum, r) => sum + Number(r.c), 0);
+  if (!total) return null;
+  const present = rows.filter((r) => r.status === 'present').reduce((sum, r) => sum + Number(r.c), 0);
+  return { total, present, percentage: Math.round((present / total) * 1000) / 10 };
+}
+
+function riskBand(value, warningThreshold, criticalThreshold) {
+  if (value < criticalThreshold) return 'high';
+  if (value < warningThreshold) return 'medium';
+  return 'low';
+}
+
+/// Deterministic first -- never guesses. Blocks with a clear reason (same
+/// "ask, don't guess" philosophy as findMissingMaxSubjects) if this student
+/// has no marks recorded anywhere yet.
+async function computeStudentRisk(tenantId, studentId) {
+  const history = await fetchStudentExamHistory(tenantId, studentId);
+  if (!history.length) {
+    return { blocked: true, reason: 'No marks recorded for this student yet' };
+  }
+
+  const config = await loadRiskConfig(tenantId);
+  const percentages = history.map((h) => Math.round((Number(h.total) / Number(h.max_total)) * 1000) / 10);
+  const latestExamGroup = history[history.length - 1].exam_group;
+  const latestPercentage = percentages[percentages.length - 1];
+  const trend = percentages.length >= 2 ? Math.round((percentages[percentages.length - 1] - percentages[percentages.length - 2]) * 10) / 10 : null;
+
+  const decliningSharply = trend !== null && trend <= -config.weights.decliningTrendPoints;
+  const academicRisk =
+    latestPercentage < config.weights.criticalPercentage
+      ? 'high'
+      : latestPercentage < config.weights.warningPercentage || decliningSharply
+        ? 'medium'
+        : 'low';
+
+  const attendance = await fetchStudentAttendance(tenantId, studentId);
+  const attendanceRisk = attendance
+    ? riskBand(attendance.percentage, config.attendanceThresholdWarning, config.attendanceThresholdCritical)
+    : 'unknown';
+
+  const RISK_RANK = { low: 0, medium: 1, high: 2, unknown: -1 };
+  const overallRisk = RISK_RANK[attendanceRisk] > RISK_RANK[academicRisk] ? attendanceRisk : academicRisk;
+
+  // Confidence grows with how much history backs the score -- 3+ exams is
+  // treated as fully confident; fewer is honestly reported as less certain
+  // rather than presenting a 1-exam snapshot with the same confidence as a
+  // real trend.
+  const confidence = Math.min(1, history.length / 3);
+
+  const evidence = {
+    examCount: history.length,
+    latestExamGroup,
+    latestPercentage,
+    trend,
+    attendancePercentage: attendance ? attendance.percentage : null,
+    weightsUsed: config.weights,
+  };
+
+  return { blocked: false, academicRisk, attendanceRisk, overallRisk, confidence, evidence };
+}
+
+/// Persists a snapshot (one row per computation, not an upsert) so risk can
+/// later be viewed as a history/trend of its own, not just a single
+/// overwritten "current" value.
+async function recordStudentRisk(tenantId, studentId, risk) {
+  await db
+    .prepare(
+      `INSERT INTO academic_risk_scores (id, tenant_id, student_id, academic_risk, attendance_risk, overall_risk, confidence, evidence)
+       VALUES (gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(tenantId, studentId, risk.academicRisk, risk.attendanceRisk, risk.overallRisk, risk.confidence, JSON.stringify(risk.evidence));
+}
+
+function fallbackRiskInsight(studentName, risk) {
+  const hasAttendance = risk.evidence.attendancePercentage !== null;
+  return {
+    insight:
+      `Deterministic risk for ${studentName}: ${risk.overallRisk} overall, based on ${risk.evidence.examCount} exam(s)` +
+      `${hasAttendance ? ' and attendance records' : ''}. Latest exam (${risk.evidence.latestExamGroup}): ${risk.evidence.latestPercentage}%` +
+      `${risk.evidence.trend !== null ? `, ${risk.evidence.trend >= 0 ? '+' : ''}${risk.evidence.trend} points vs the previous exam` : ''}.`,
+    recommendation:
+      risk.overallRisk === 'high'
+        ? 'Recommend a check-in with this student soon.'
+        : risk.overallRisk === 'medium'
+          ? 'Worth keeping an eye on this student\'s next exam.'
+          : 'No urgent action needed based on current data.',
+  };
+}
+
+/// Same grounding discipline as generateNarrative: one generateJson call,
+/// strict "use only these numbers" prompt, deterministic fallback (never a
+/// blank/broken insight) on any failure.
+async function generateStudentRiskInsight(studentName, risk) {
+  const e = risk.evidence;
+  const prompt = `You are writing a short, factual academic risk insight for a counselor reviewing one student.
+Use ONLY the figures given below — do not calculate, estimate, or restate any number that is not listed here.
+
+Student: ${studentName}
+Exams recorded: ${e.examCount}
+Latest exam (${e.latestExamGroup}): ${e.latestPercentage}%
+${e.trend !== null ? `Trend vs previous exam: ${e.trend >= 0 ? '+' : ''}${e.trend} points` : 'Trend: not enough exams yet to compute'}
+Academic risk band: ${risk.academicRisk}
+${e.attendancePercentage !== null ? `Attendance: ${e.attendancePercentage}%, band: ${risk.attendanceRisk}` : 'Attendance: no data recorded'}
+Overall risk band: ${risk.overallRisk}
+
+Respond ONLY with valid JSON, no other text, in exactly this shape:
+{ "insight": "2-3 sentence factual observation about this student's trajectory, using only the numbers given", "recommendation": "one concrete suggested action for the counselor" }`;
+
+  try {
+    const result = await generateJson(prompt, { maxTokens: 400 });
+    if (result && typeof result.insight === 'string' && typeof result.recommendation === 'string') {
+      return { ...result, isFallback: false };
+    }
+  } catch (err) {
+    // provider unavailable/failed -- fall through
+  }
+  return { ...fallbackRiskInsight(studentName, risk), isFallback: true };
+}
+
+/// Aggregates every student in one batch_year across all their exam groups.
+/// No aggregation like this existed anywhere before this function.
+/// `assignedTo`, when given, scopes to only students whose lead is assigned
+/// to that user -- same owner/admin-see-all-else-see-own-caseload rule the
+/// cohort endpoint already enforces.
+async function computeBatchAnalysis(tenantId, batchYear, { assignedTo } = {}) {
+  const students = assignedTo
+    ? await db
+        .prepare(
+          `SELECT s.id, s.lead_id FROM students s JOIN leads l ON l.id = s.lead_id
+           WHERE s.tenant_id = ? AND s.batch_year = ? AND l.tenant_id = ? AND l.assigned_to = ?`
+        )
+        .all(tenantId, batchYear, tenantId, assignedTo)
+    : await db
+        .prepare(`SELECT id, lead_id FROM students WHERE tenant_id = ? AND batch_year = ?`)
+        .all(tenantId, batchYear);
+  if (!students.length) {
+    return { blocked: true, reason: `No students found for batch ${batchYear}` };
+  }
+
+  const perStudent = [];
+  for (const s of students) {
+    const risk = await computeStudentRisk(tenantId, s.id);
+    if (!risk.blocked) perStudent.push(risk);
+  }
+
+  if (!perStudent.length) {
+    return { blocked: true, reason: `No exam marks recorded yet for any student in batch ${batchYear}` };
+  }
+
+  const avgPercentage = Math.round((perStudent.reduce((sum, r) => sum + r.evidence.latestPercentage, 0) / perStudent.length) * 10) / 10;
+  const riskCounts = { low: 0, medium: 0, high: 0 };
+  perStudent.forEach((r) => { riskCounts[r.overallRisk] = (riskCounts[r.overallRisk] || 0) + 1; });
+
+  return {
+    blocked: false,
+    batchYear,
+    studentCount: students.length,
+    analyzedCount: perStudent.length,
+    averageLatestPercentage: avgPercentage,
+    riskCounts,
+  };
+}
+
+function fallbackBatchInsight(batch) {
+  return {
+    insight: `Batch ${batch.batchYear}: ${batch.analyzedCount} of ${batch.studentCount} students have recorded marks, averaging ${batch.averageLatestPercentage}% on their latest exam. Risk breakdown — high: ${batch.riskCounts.high}, medium: ${batch.riskCounts.medium}, low: ${batch.riskCounts.low}.`,
+  };
+}
+
+async function generateBatchInsight(batch) {
+  const prompt = `You are writing a short, factual summary for a college coordinator reviewing one batch's academic performance.
+Use ONLY the figures given below.
+
+Batch: ${batch.batchYear}
+Students with marks recorded: ${batch.analyzedCount} of ${batch.studentCount}
+Average latest-exam percentage: ${batch.averageLatestPercentage}%
+Risk breakdown: ${batch.riskCounts.high} high, ${batch.riskCounts.medium} medium, ${batch.riskCounts.low} low
+
+Respond ONLY with valid JSON, no other text, in exactly this shape:
+{ "insight": "2-4 sentence factual summary of this batch's performance, using only the numbers given" }`;
+
+  try {
+    const result = await generateJson(prompt, { maxTokens: 400 });
+    if (result && typeof result.insight === 'string') {
+      return { insight: result.insight, isFallback: false };
+    }
+  } catch (err) {
+    // provider unavailable/failed -- fall through
+  }
+  return { ...fallbackBatchInsight(batch), isFallback: true };
+}
+
 module.exports = {
   DEFAULT_TEMPLATE_CONFIG,
   getOrCreateDefaultTemplate,
@@ -671,4 +914,9 @@ module.exports = {
   generateNarrative,
   numbersAreGrounded,
   normalizeGuardianPhone,
+  computeStudentRisk,
+  recordStudentRisk,
+  generateStudentRiskInsight,
+  computeBatchAnalysis,
+  generateBatchInsight,
 };

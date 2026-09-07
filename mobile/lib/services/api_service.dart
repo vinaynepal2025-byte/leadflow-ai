@@ -2921,4 +2921,59 @@ class ApiService {
     );
     _checkOk(res);
   }
+
+  /// Renders a template config (not necessarily saved yet) as a real PNG --
+  /// against a real student's real marks if studentId+examGroup are given,
+  /// otherwise built-in sample data -- so the template editor's preview is
+  /// pixel-real (WYSIWYG), not a mocked approximation. No AI narrative call,
+  /// no storage upload, no DB write -- cheap enough for every edit.
+  Future<Uint8List> previewExamReportCard(
+    Map<String, dynamic> config, {
+    String? studentId,
+    String? examGroup,
+  }) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/exams/templates/preview'),
+      headers: _headers,
+      body: jsonEncode({
+        'config': config,
+        if (studentId != null) 'student_id': studentId,
+        if (examGroup != null) 'exam_group': examGroup,
+      }),
+    );
+    if (res.statusCode != 200) {
+      String message = 'Could not render preview';
+      try {
+        message = jsonDecode(res.body)['error'] ?? message;
+      } catch (_) {}
+      throw Exception(message);
+    }
+    return res.bodyBytes;
+  }
+
+  // ---------- Academic risk analysis (student-wise + batch-wise) ----------
+
+  Future<Map<String, dynamic>> getStudentAnalysis(String studentId) async {
+    final res = await http.get(Uri.parse('$baseUrl/exams/analysis/students/$studentId'), headers: _headers);
+    if (res.statusCode == 422) throw Exception(jsonDecode(res.body)['reason'] ?? 'Not enough data yet');
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getBatchAnalysis(String batchYear) async {
+    final res = await http.get(Uri.parse('$baseUrl/exams/analysis/batch/${Uri.encodeComponent(batchYear)}'), headers: _headers);
+    if (res.statusCode == 422) throw Exception(jsonDecode(res.body)['reason'] ?? 'Not enough data yet');
+    _checkOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  // ---------- Students (enrolled, post-admission) ----------
+
+  Future<List<Map<String, dynamic>>> getStudents({String? status}) async {
+    final uri = Uri.parse('$baseUrl/students').replace(queryParameters: status != null ? {'status': status} : null);
+    final res = await http.get(uri, headers: _headers);
+    _checkOk(res);
+    final List data = jsonDecode(res.body);
+    return data.cast<Map<String, dynamic>>();
+  }
 }

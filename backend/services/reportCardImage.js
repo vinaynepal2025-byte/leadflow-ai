@@ -38,6 +38,25 @@ function orderedSubjects(summary, subjectOrder) {
 /// fields actually provided, never inventing a placeholder. Returns a PNG
 /// buffer.
 async function renderReportCardPng(summary, { studentName, narrative, template = {}, studentMeta = {} }) {
+  // Logo compositing -- fetched and base64-embedded as an SVG <image> so the
+  // whole card still rasterizes in one sharp() pass (no sharp().composite(),
+  // no second image buffer to align). A failed fetch (expired signed URL,
+  // network hiccup) degrades to no logo rather than failing the report card.
+  const logoUrl = template.branding && template.branding.logoUrl;
+  let logoDataUri = null;
+  if (logoUrl) {
+    try {
+      const res = await fetch(logoUrl);
+      if (res.ok) {
+        const buf = Buffer.from(await res.arrayBuffer());
+        const contentType = res.headers.get('content-type') || 'image/png';
+        logoDataUri = `data:${contentType};base64,${buf.toString('base64')}`;
+      }
+    } catch (err) {
+      // ignore -- render without the logo
+    }
+  }
+
   const fields = template.fields || ['subjects', 'total', 'rank', 'batchAverage', 'previousDelta', 'narrative'];
   const has = (f) => fields.includes(f);
   const subjects = has('subjects') ? orderedSubjects(summary, template.subjectOrder) : [];
@@ -122,10 +141,16 @@ async function renderReportCardPng(summary, { studentName, narrative, template =
        <text x="${width - 48}" y="${tableBottom + 26}" font-size="16" fill="#ffffff" font-weight="bold" text-anchor="end">${summary.overallPercentage}% — Grade ${summary.overallGrade}</text>`
     : '';
 
+  const logoSize = 70;
+  const logoBlock = logoDataUri
+    ? `<image href="${logoDataUri}" x="${width - 32 - logoSize}" y="20" width="${logoSize}" height="${logoSize}" preserveAspectRatio="xMidYMid meet"/>`
+    : '';
+
   const svg = `
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <rect width="${width}" height="${height}" fill="#ffffff"/>
       <rect width="${width}" height="110" fill="${headerColor}"/>
+      ${logoBlock}
       <text x="32" y="46" font-size="22" fill="#ffffff" font-weight="bold">${escapeXml(title)}</text>
       <text x="32" y="76" font-size="16" fill="#dbeafe">${escapeXml(summary.examGroup)}</text>
       <text x="32" y="140" font-size="20" fill="#0f172a" font-weight="bold">${escapeXml(studentName)}</text>

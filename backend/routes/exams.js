@@ -560,4 +560,65 @@ router.patch('/templates/:id', async (req, res) => {
   return res.json({ updated: true });
 });
 
+// POST /exams/templates/preview — renders a template config (not necessarily
+// saved yet) against either a real student's real marks (student_id +
+// exam_group) or built-in sample data, WITHOUT the AI narrative call,
+// storage upload, or report_cards write that POST .../generate does —
+// cheap enough to call on every edit in the template editor, so the preview
+// is a real rendered PNG (WYSIWYG) rather than a client-side mock.
+const SAMPLE_PREVIEW_SUMMARY = {
+  examGroup: 'Sample Exam',
+  subjects: [
+    { subject: 'ANATOMY', marksObtained: 78, maxMarks: 100, percentage: 78 },
+    { subject: 'PHYSIOLOGY', marksObtained: 84, maxMarks: 100, percentage: 84 },
+    { subject: 'BIOCHEMISTRY', marksObtained: 65, maxMarks: 100, percentage: 65 },
+  ],
+  total: 227,
+  maxTotal: 300,
+  overallPercentage: 75.7,
+  overallGrade: 'B+',
+  rank: 3,
+  cohortSize: 42,
+  batchAverage: 210,
+  previousDelta: { comparedTo: 'Previous Exam', previousPercentage: 71, change: 4.7 },
+};
+
+router.post('/templates/preview', async (req, res) => {
+  const tid = tenantId(req);
+  const { config = {}, student_id: studentId, exam_group: examGroup } = req.body;
+  const mergedConfig = {
+    ...DEFAULT_TEMPLATE_CONFIG,
+    ...config,
+    branding: { ...DEFAULT_TEMPLATE_CONFIG.branding, ...(config.branding || {}) },
+  };
+
+  let summary = SAMPLE_PREVIEW_SUMMARY;
+  let studentName = 'Sample Student';
+  let studentMeta = { studentCode: 'SMP-001', batch: '2026', course: 'Sample Course', institution: 'Sample Institution' };
+  let narrative = 'This is a sample computed summary shown for preview only.';
+
+  if (studentId && examGroup) {
+    if (!(await canAccessStudent(req, studentId))) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    try {
+      summary = await computeReportCard(tid, studentId, examGroup);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    const meta = await fetchStudentMeta(studentId);
+    studentName = meta.full_name;
+    studentMeta = { studentCode: meta.student_code, batch: meta.batch_year, course: meta.course_name, institution: meta.institution_name };
+    narrative = 'Preview only — the real report uses a computed or AI-written narrative.';
+  }
+
+  try {
+    const png = await renderReportCardPng(summary, { studentName, narrative, template: mergedConfig, studentMeta });
+    res.set('Content-Type', 'image/png');
+    return res.send(png);
+  } catch (err) {
+    return res.status(400).json({ error: `Could not render preview: ${err.message}` });
+  }
+});
+
 module.exports = router;

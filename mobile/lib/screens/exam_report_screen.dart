@@ -10,6 +10,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 import '../services/api_service.dart';
 import '../widgets/glass_widgets.dart';
 
@@ -27,6 +28,7 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
 
   Map<String, dynamic>? _report; // from getExamReport
   Map<String, dynamic>? _generated; // from generateExamReportCard (guardian phone, narrative, etc.)
+  Map<String, dynamic>? _analysis; // from getStudentAnalysis -- best-effort, missing is not an error
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -54,6 +56,12 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
         _loading = false;
       });
     }
+    // Best-effort: a student with only one exam recorded, or no attendance
+    // data, still gets a full report -- the analysis card just doesn't show.
+    try {
+      final analysis = await _api.getStudentAnalysis(widget.studentId);
+      if (mounted) setState(() => _analysis = analysis);
+    } catch (_) {}
   }
 
   Future<void> _editMark(Map<String, dynamic> subject) async {
@@ -165,6 +173,29 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
     }
   }
 
+  /// "Message" button: local plain-text send when WhatsApp isn't the
+  /// choice -- opens the OS share sheet (SMS/any app), same proven pattern
+  /// already used for flyer/document sharing elsewhere in this app. No
+  /// specific recipient is pre-filled (the share sheet doesn't target one
+  /// contact), unlike the WhatsApp buttons which go straight to a saved
+  /// guardian number.
+  Future<void> _sendPlainMessage() async {
+    final meta = _report?['studentMeta'] as Map<String, dynamic>?;
+    final summary = _report?['summary'] as Map<String, dynamic>?;
+    final name = meta?['name']?.toString() ?? 'your child';
+    final pct = summary?['overallPercentage'];
+    final grade = summary?['overallGrade'];
+    final examGroup = summary?['examGroup']?.toString() ?? widget.examGroup;
+    final message = pct != null
+        ? 'Hi, sharing $name\'s $examGroup result: $pct% (grade $grade).'
+        : 'Hi, sharing $name\'s $examGroup report card with you.';
+    try {
+      await SharePlus.instance.share(ShareParams(text: message));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open share sheet: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final summary = _report?['summary'] as Map<String, dynamic>?;
@@ -181,6 +212,10 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
                     padding: const EdgeInsets.all(16),
                     children: [
                       if (meta != null) _studentMetaCard(meta),
+                      if (_analysis != null) ...[
+                        const SizedBox(height: 12),
+                        _analysisCard(),
+                      ],
                       if (summary != null) ...[
                         const SizedBox(height: 12),
                         _summaryCard(summary),
@@ -283,36 +318,91 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
   }
 
   Widget _sendCard() {
+    final meta = _report?['studentMeta'] as Map<String, dynamic>?;
     return GlassContainer(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Send on WhatsApp', style: TextStyle(fontWeight: FontWeight.bold)),
+          const Text('Send result', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           const Text(
-            'Opens WhatsApp with the report card link ready — you confirm and tap Send.',
+            'F/M open WhatsApp with the report card link ready for that guardian — you confirm and tap Send. Message opens your phone\'s normal share options.',
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _sendToGuardian('father'),
-                  icon: const Icon(Icons.send, size: 16),
-                  label: const Text('To Father'),
+                child: Text(
+                  meta?['name']?.toString() ?? '',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
+              _sendChip('F', 'Send to Father', _busy ? null : () => _sendToGuardian('father')),
               const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _busy ? null : () => _sendToGuardian('mother'),
-                  icon: const Icon(Icons.send, size: 16),
-                  label: const Text('To Mother'),
+              _sendChip('M', 'Send to Mother', _busy ? null : () => _sendToGuardian('mother')),
+              const SizedBox(width: 8),
+              _sendChip('✉', 'Message (SMS / other app)', _busy ? null : _sendPlainMessage),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sendChip(String label, String tooltip, VoidCallback? onPressed) {
+    return Tooltip(
+      message: tooltip,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(minimumSize: const Size(44, 40), padding: const EdgeInsets.symmetric(horizontal: 12)),
+        child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
+      ),
+    );
+  }
+
+  Widget _analysisCard() {
+    final risk = _analysis!['overallRisk']?.toString() ?? 'unknown';
+    final riskColor = risk == 'high' ? Colors.red : (risk == 'medium' ? Colors.orange : Colors.green);
+    final evidence = (_analysis!['evidence'] as Map?)?.cast<String, dynamic>();
+    final trend = evidence?['trend'];
+    return GlassContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('Academic analysis', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(color: riskColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
+                child: Text(
+                  '${risk[0].toUpperCase()}${risk.substring(1)} risk',
+                  style: TextStyle(color: riskColor, fontWeight: FontWeight.bold, fontSize: 12),
                 ),
               ),
             ],
           ),
+          if (trend != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              '${trend >= 0 ? '▲' : '▼'} ${trend.abs()} points vs previous exam',
+              style: TextStyle(fontSize: 12, color: trend >= 0 ? Colors.green[700] : Colors.red[700]),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Text(_analysis!['insight']?.toString() ?? '', style: const TextStyle(fontSize: 13)),
+          if (_analysis!['recommendation'] != null) ...[
+            const SizedBox(height: 6),
+            Text('→ ${_analysis!['recommendation']}', style: const TextStyle(fontSize: 13, fontStyle: FontStyle.italic)),
+          ],
+          if (_analysis!['insightIsFallback'] == true)
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text('(computed summary — AI insight unavailable)', style: TextStyle(fontSize: 11, color: Colors.grey)),
+            ),
         ],
       ),
     );
