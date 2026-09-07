@@ -218,9 +218,10 @@ router.post('/:examGroup/students/:studentId/generate', async (req, res) => {
     const meta = await fetchStudentMeta(studentId);
     const { narrative, isFallback } = await generateNarrative(summary, meta.full_name);
     const { template, config } = await resolveTemplate(tid, req.body.template_id);
+    const tenant = await db.prepare('SELECT name FROM tenants WHERE id = ?').get(tid);
     const png = await renderReportCardPng(summary, {
       studentName: meta.full_name,
-      tenantName: tid,
+      tenantName: (tenant && tenant.name) || tid,
       narrative,
       template: config,
       studentMeta: { studentCode: meta.student_code, batch: meta.batch_year, course: meta.course_name },

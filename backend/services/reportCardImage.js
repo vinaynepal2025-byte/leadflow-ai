@@ -76,7 +76,7 @@ async function renderReportCardPng(summary, { studentName, tenantName, narrative
     has('previousDelta') && summary.previousDelta
       ? `${summary.previousDelta.change >= 0 ? '▲' : '▼'} ${Math.abs(summary.previousDelta.change)} pts vs ${escapeXml(summary.previousDelta.comparedTo)}`
       : '';
-  const batchAverageText = has('batchAverage') && summary.batchAverage !== null ? `Batch average: ${summary.batchAverage}%` : '';
+  const batchAverageText = has('batchAverage') && summary.batchAverage !== null ? `Batch average: ${summary.batchAverage}/${summary.maxTotal}` : '';
 
   let footerY = tableBottom + (has('total') ? 56 : 16);
   const footerBlocks = [];
