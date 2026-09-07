@@ -6,7 +6,65 @@ were, `TECH_DEBT.md` for known issues not yet addressed.
 
 ---
 
-## Newest — Exam Intelligence + Report Card System: end-to-end smoke test done (2026-09-07)
+## Newest — WhatsApp hyperlink send for report cards, built + verified (2026-09-07, later same day)
+
+**Decision (Vinay, 2026-09-07):** the paid Meta Cloud API path (`POST
+.../send`, `sendWhatsAppImage`) stays dormant/future — only build it once a
+paid WhatsApp Business tier is actually taken. For now, report cards use the
+same free semi-automatic `wa.me` hyperlink pattern already proven for leads
+(`routes/whatsappLink.js`) and flyers (`routes/flyerProjects.js`'s
+`/share-link`): a button prepares everything, a human taps Send in WhatsApp.
+
+**Built and verified end-to-end against the live backend (commits `d5455f7`,
+`3969e86`), smoke-tested with a throwaway fixture then fully cleaned up
+(all exam-intelligence tables back to 0 rows):**
+- `leads.father_name`/`father_phone`/`mother_name`/`mother_phone` added
+  (migration `2026-09-07-lead-father-mother-contacts.js`, applied live).
+- The sheet parser now actually extracts Father's/Mother's Name+Cell Number
+  (previously recognized but deliberately ignored) and backfills them onto
+  the matched lead **only where empty** — never overwrites a counselor's
+  correction. Verified: import with real father/mother columns correctly
+  populated `leads.father_phone = '+917080800888'` etc.
+- `GET /exams/:examGroup/students/:studentId/whatsapp-link?guardian=father|mother`
+  returns a working `wa.me` link with a 7-day signed image URL embedded in
+  the pre-filled message. Verified against a real number — link resolved
+  correctly to `wa.me/917080800888` with the right message text.
+- `POST .../whatsapp-link/confirm-sent` logs to `communications` and marks
+  the report card `sent`, mirroring `whatsappLink.js`'s confirm-sent pattern.
+- **Two real bugs found and fixed during this test:**
+  1. Report card header showed the raw `tenant_id` ("demo-consultancy")
+     instead of `tenants.name` ("Demo Consultancy") — fixed in
+     `routes/exams.js`'s `/generate`.
+  2. "Batch average: 162%" was mislabeled — `batchAverage` is a raw total
+     (sum of `marks_obtained`), not a percentage. Now renders as "162/200"
+     matching each subject row's style. Fixed in `services/reportCardImage.js`.
+  Both fixed and visually re-verified (downloaded and viewed the actual
+  rendered PNG before and after).
+- **One real infrastructure bug found and fixed (with Vinay's explicit
+  approval — this one needed it, a production RLS policy change):** the
+  `leadflow-uploads` Supabase Storage bucket only had `INSERT`/`SELECT`
+  policies, no `UPDATE` — so re-uploading to an already-used storage path
+  (regenerating any report card, or re-rendering a flyer/logo) failed with
+  `AccessDenied`. Fixed by adding a matching `UPDATE` policy (same scope:
+  `bucket_id = 'leadflow-uploads'`, same `public` role) — additive only,
+  nothing existing changed. This was blocking more than just report cards.
+
+**Still open:**
+1. **Mobile UI not built yet.** The per-student "Send to Father"/"Send to
+   Mother" buttons only exist as backend endpoints today — no screen calls
+   them. This is the next real chunk: a cohort/report-card list screen
+   (`GET /exams/:examGroup/cohort` already exists) with Generate + the two
+   WhatsApp buttons per row, `launchUrl` on the returned `whatsapp_link`,
+   then `confirm-sent` after the user returns to the app.
+2. **Gemini narrative still broken in production** (see the entry below) —
+   unrelated to this feature; the safe fallback sentence is used either way.
+3. Cloud API auto-send (`WHATSAPP_TOKEN`/`WHATSAPP_PHONE_NUMBER_ID`) stays
+   deliberately unconfigured — only revisit when a paid WhatsApp Business
+   tier is actually purchased.
+
+---
+
+## Exam Intelligence + Report Card System: end-to-end smoke test done (2026-09-07)
 
 **Landed:** 2026-09-06, committed (`1ebb93c`). Migration and RLS are both
 **applied and live** — confirmed 2026-09-07 via the `supabase-primary` MCP:
