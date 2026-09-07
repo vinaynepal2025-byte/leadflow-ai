@@ -185,10 +185,14 @@ router.get('/:examGroup/students/:studentId/report', async (req, res) => {
     const summary = await computeReportCard(tid, studentId, examGroup);
     const meta = await fetchStudentMeta(studentId);
     const { narrative, isFallback } = await generateNarrative(summary, meta.full_name);
+    const existingCard = await db
+      .prepare('SELECT teacher_remark FROM report_cards WHERE tenant_id = ? AND student_id = ? AND exam_group = ?')
+      .get(tid, studentId, examGroup);
     return res.json({
       summary,
       narrative,
       narrativeIsFallback: isFallback,
+      teacherRemark: existingCard?.teacher_remark || null,
       studentMeta: {
         name: meta.full_name,
         studentCode: meta.student_code,
@@ -218,9 +222,14 @@ router.post('/:examGroup/students/:studentId/generate', async (req, res) => {
     const meta = await fetchStudentMeta(studentId);
     const { narrative, isFallback } = await generateNarrative(summary, meta.full_name);
     const { template, config } = await resolveTemplate(tid, req.body.template_id);
+    // A teacher's own written remark, distinct from the computed/AI
+    // narrative -- omitting it on a regenerate (e.g. after correcting a
+    // mark) keeps whatever remark was already saved rather than blanking it.
+    const teacherRemark = req.body.teacher_remark !== undefined ? (req.body.teacher_remark || null) : null;
     const png = await renderReportCardPng(summary, {
       studentName: meta.full_name,
       narrative,
+      teacherRemark,
       template: config,
       studentMeta: {
         studentCode: meta.student_code,
@@ -240,19 +249,20 @@ router.post('/:examGroup/students/:studentId/generate', async (req, res) => {
 
     const row = await db
       .prepare(
-        `INSERT INTO report_cards (id, tenant_id, student_id, exam_group, template_id, computed_summary, ai_narrative, ai_narrative_is_fallback, image_storage_path, status, generated_at, generated_by)
-         VALUES (gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, ?, 'ready', now(), ?)
+        `INSERT INTO report_cards (id, tenant_id, student_id, exam_group, template_id, computed_summary, ai_narrative, ai_narrative_is_fallback, teacher_remark, image_storage_path, status, generated_at, generated_by)
+         VALUES (gen_random_uuid(), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', now(), ?)
          ON CONFLICT (student_id, exam_group) DO UPDATE SET
            template_id = EXCLUDED.template_id,
            computed_summary = EXCLUDED.computed_summary,
            ai_narrative = EXCLUDED.ai_narrative,
            ai_narrative_is_fallback = EXCLUDED.ai_narrative_is_fallback,
+           teacher_remark = COALESCE(EXCLUDED.teacher_remark, report_cards.teacher_remark),
            image_storage_path = EXCLUDED.image_storage_path,
            status = 'ready', generated_at = now(), generated_by = EXCLUDED.generated_by,
            updated_at = now()
-         RETURNING id`
+         RETURNING id, teacher_remark`
       )
-      .get(tid, studentId, examGroup, template.id, JSON.stringify(summary), narrative, isFallback, storagePath, req.user?.id || 'unknown');
+      .get(tid, studentId, examGroup, template.id, JSON.stringify(summary), narrative, isFallback, teacherRemark, storagePath, req.user?.id || 'unknown');
 
     // Everything the coordinator needs to review before sending — nothing
     // here should require re-typing anything already on file.
@@ -261,6 +271,7 @@ router.post('/:examGroup/students/:studentId/generate', async (req, res) => {
       summary,
       narrative,
       narrativeIsFallback: isFallback,
+      teacherRemark: row.teacher_remark,
       templateId: template.id,
       templateName: template.name,
       studentMeta: {

@@ -33,10 +33,18 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
   bool _busy = false;
   String? _error;
 
+  final _remarkController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _remarkController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -48,6 +56,7 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
       final report = await _api.getExamReport(widget.examGroup, widget.studentId);
       setState(() {
         _report = report;
+        _remarkController.text = report['teacherRemark']?.toString() ?? '';
         _loading = false;
       });
     } catch (e) {
@@ -114,13 +123,76 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
     }
   }
 
+  /// Editing a subject's own maximum marks (not a student's obtained mark) --
+  /// e.g. the sheet's header didn't state one, or the college corrected it
+  /// after import. Once any mark already exists against this assessment,
+  /// the backend requires confirmed:true + a reason (a stale percentage
+  /// already shown to a parent under the old max is a real risk), so this
+  /// always asks for a reason and only skips confirming twice if the first
+  /// attempt comes back blocked.
+  Future<void> _editMaxMarks(Map<String, dynamic> subject) async {
+    final assessmentId = subject['assessmentId'];
+    if (assessmentId == null) return;
+    final valueController = TextEditingController(text: subject['maxMarks']?.toString() ?? '');
+    final reasonController = TextEditingController();
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Edit max marks — ${subject['subject']}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: valueController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Maximum marks for this subject'),
+            ),
+            TextField(
+              controller: reasonController,
+              decoration: const InputDecoration(labelText: 'Reason (required if marks are already recorded)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (result != true) return;
+    final newValue = num.tryParse(valueController.text.trim());
+    if (newValue == null) return;
+    try {
+      final res = await _api.updateExamAssessment(assessmentId, {'max_marks': newValue}, reason: reasonController.text.trim().isEmpty ? null : reasonController.text.trim());
+      if (res['blocked'] == true) {
+        if (reasonController.text.trim().isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res['reason']?.toString() ?? 'A reason is required')));
+          }
+          return;
+        }
+        await _api.updateExamAssessment(assessmentId, {'max_marks': newValue}, confirmed: true, reason: reasonController.text.trim());
+      }
+      await _load();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Max marks updated')));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))));
+      }
+    }
+  }
+
   Future<void> _generate() async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final generated = await _api.generateExamReportCard(widget.examGroup, widget.studentId);
+      final generated = await _api.generateExamReportCard(
+        widget.examGroup,
+        widget.studentId,
+        teacherRemark: _remarkController.text.trim(),
+      );
       setState(() {
         _generated = generated;
         _busy = false;
@@ -223,11 +295,22 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
                         _subjectsCard(summary),
                         const SizedBox(height: 12),
                         _narrativeCard(),
+                        const SizedBox(height: 12),
+                        _remarkCard(),
                       ],
                       if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: Colors.red))),
                       const SizedBox(height: 16),
                       if (_generated == null)
                         GlassButton(onPressed: _busy ? null : _generate, icon: Icons.picture_as_pdf, child: const Text('Generate report card')),
+                      if (_generated != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: OutlinedButton.icon(
+                            onPressed: _busy ? null : _generate,
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('Regenerate with this remark'),
+                          ),
+                        ),
                       if (_generated != null) _sendCard(),
                       if (_busy) const Padding(padding: EdgeInsets.only(top: 16), child: Center(child: CircularProgressIndicator())),
                     ],
@@ -290,6 +373,11 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
                         onPressed: () => _editMark(s),
                         tooltip: 'Correct this mark',
                       ),
+                    IconButton(
+                      icon: const Icon(Icons.rule, size: 16),
+                      onPressed: () => _editMaxMarks(s),
+                      tooltip: 'Edit max marks for this subject',
+                    ),
                   ],
                 ),
               )),
@@ -312,6 +400,30 @@ class _ExamReportScreenState extends State<ExamReportScreen> {
               padding: EdgeInsets.only(top: 6),
               child: Text('(computed summary — AI narrative unavailable)', style: TextStyle(fontSize: 11, color: Colors.grey)),
             ),
+        ],
+      ),
+    );
+  }
+
+  /// A teacher's own free-text note for this specific student's card --
+  /// distinct from the computed/AI narrative above. Printed on the card as
+  /// its own labeled "Remark:" line (services/reportCardImage.js).
+  Widget _remarkCard() {
+    return GlassContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("Teacher's remark (optional)", style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _remarkController,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              hintText: 'e.g. "Needs to focus more on Anatomy this term."',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
         ],
       ),
     );

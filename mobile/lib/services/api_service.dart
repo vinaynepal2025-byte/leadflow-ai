@@ -2789,11 +2789,19 @@ class ApiService {
   /// anything). Returns everything a review screen needs pre-filled —
   /// student meta, guardian phone (with a suspect flag), narrative — none
   /// of it should need re-typing before send.
-  Future<Map<String, dynamic>> generateExamReportCard(String examGroup, String studentId, {String? templateId}) async {
+  Future<Map<String, dynamic>> generateExamReportCard(
+    String examGroup,
+    String studentId, {
+    String? templateId,
+    String? teacherRemark,
+  }) async {
     final res = await http.post(
       Uri.parse('$baseUrl/exams/${Uri.encodeComponent(examGroup)}/students/$studentId/generate'),
       headers: _headers,
-      body: jsonEncode({if (templateId != null) 'template_id': templateId}),
+      body: jsonEncode({
+        if (templateId != null) 'template_id': templateId,
+        if (teacherRemark != null) 'teacher_remark': teacherRemark,
+      }),
     );
     _checkOk(res);
     return jsonDecode(res.body) as Map<String, dynamic>;

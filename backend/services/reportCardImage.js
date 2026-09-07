@@ -37,7 +37,7 @@ function orderedSubjects(summary, subjectOrder) {
 /// `studentMeta` may include studentCode/batch/course — shown only for the
 /// fields actually provided, never inventing a placeholder. Returns a PNG
 /// buffer.
-async function renderReportCardPng(summary, { studentName, narrative, template = {}, studentMeta = {} }) {
+async function renderReportCardPng(summary, { studentName, narrative, teacherRemark, template = {}, studentMeta = {} }) {
   // Logo compositing -- fetched and base64-embedded as an SVG <image> so the
   // whole card still rasterizes in one sharp() pass (no sharp().composite(),
   // no second image buffer to align). A failed fetch (expired signed URL,
@@ -75,6 +75,7 @@ async function renderReportCardPng(summary, { studentName, narrative, template =
   const tableHeaderHeight = subjects.length ? 40 : 0;
   const footerLines =
     (has('narrative') && narrative ? wrapText(narrative, 78) : []).length +
+    (teacherRemark ? wrapText(teacherRemark, 78).length : 0) +
     (template.footerText ? wrapText(template.footerText, 90).length : 0) +
     (template.disclaimer ? wrapText(template.disclaimer, 90).length : 0);
   const footerHeight = footerLines ? footerLines * 20 + 40 : 20;
@@ -112,6 +113,15 @@ async function renderReportCardPng(summary, { studentName, narrative, template =
     const lines = wrapText(narrative, 78);
     footerBlocks.push(
       `<text x="32" y="${footerY}" font-size="14" fill="#334155">${lines
+        .map((line, i) => `<tspan x="32" dy="${i === 0 ? 0 : 20}">${escapeXml(line)}</tspan>`)
+        .join('')}</text>`
+    );
+    footerY += lines.length * 20 + 10;
+  }
+  if (teacherRemark) {
+    const lines = wrapText(`Remark: ${teacherRemark}`, 78);
+    footerBlocks.push(
+      `<text x="32" y="${footerY}" font-size="14" fill="#334155" font-weight="bold">${lines
         .map((line, i) => `<tspan x="32" dy="${i === 0 ? 0 : 20}">${escapeXml(line)}</tspan>`)
         .join('')}</text>`
     );
