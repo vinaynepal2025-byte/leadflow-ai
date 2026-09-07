@@ -530,7 +530,7 @@ Use ONLY the figures given below — do not calculate, estimate, or restate any 
 Student: ${studentName}
 Overall: ${summary.overallPercentage}% (grade ${summary.overallGrade})
 Rank: ${summary.rank} of ${summary.cohortSize}
-Batch average: ${summary.batchAverage}%
+Batch average: ${summary.batchAverage}/${summary.maxTotal}
 ${summary.previousDelta ? `Change since ${summary.previousDelta.comparedTo}: ${summary.previousDelta.change >= 0 ? '+' : ''}${summary.previousDelta.change} points` : ''}
 Per-subject: ${summary.subjects.map((s) => `${s.subject} ${s.marksObtained ?? 'N/A'}/${s.maxMarks}`).join(', ')}
 
