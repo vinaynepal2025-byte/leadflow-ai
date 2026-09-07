@@ -91,7 +91,15 @@ async function generateText(prompt, { maxTokens = 600 } = {}) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: maxTokens },
+        // thinkingBudget: 0 -- without this, current "thinking" Gemini models
+        // (confirmed live: gemini-flash-latest) spend most/all of
+        // maxOutputTokens on an internal reasoning trace before writing the
+        // actual answer, which then gets cut off mid-sentence by the same
+        // budget (finishReason: MAX_TOKENS with thoughtsTokenCount close to
+        // the full budget, candidatesTokenCount near zero -- reproduced
+        // directly against the API before this fix). None of this app's
+        // prompts need extended reasoning.
+        generationConfig: { maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } },
       }),
     });
     const data = await res.json();
@@ -101,7 +109,10 @@ async function generateText(prompt, { maxTokens = 600 } = {}) {
       }
       throw new Error(`Gemini request failed: ${JSON.stringify(data)}`);
     }
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    // The answer can come back split across multiple `parts` (reproduced
+    // live: a 2-sentence note split into 2 parts) -- reading only parts[0]
+    // silently truncated every response that split this way.
+    return (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('');
   }
 
   if (provider === 'openrouter') {
