@@ -40,11 +40,11 @@ class _ExamImportScreenState extends State<ExamImportScreen> {
   }
 
   Future<void> _pickFile() async {
-    final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['xlsx']);
-    if (picked == null || picked.files.single.path == null) return;
+    final picked = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['xlsx']);
+    if (picked == null || picked.path == null) return;
     setState(() {
-      _filePath = picked.files.single.path;
-      _fileName = picked.files.single.name;
+      _filePath = picked.path;
+      _fileName = picked.name;
       _result = null;
       _error = null;
     });

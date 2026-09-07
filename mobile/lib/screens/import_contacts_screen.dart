@@ -16,11 +16,11 @@ class _ImportContactsScreenState extends State<ImportContactsScreen> {
   String? _error;
 
   Future<void> _pickAndImport({required bool isExcel}) async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFile(
       type: FileType.custom,
       allowedExtensions: isExcel ? ['xlsx'] : ['csv'],
     );
-    if (result == null || result.files.single.path == null) return;
+    if (result == null || result.path == null) return;
 
     setState(() {
       _importing = true;
@@ -29,8 +29,8 @@ class _ImportContactsScreenState extends State<ImportContactsScreen> {
     });
     try {
       final res = isExcel
-          ? await _api.importLeadsExcel(result.files.single.path!, result.files.single.name)
-          : await _api.importLeadsCsv(result.files.single.path!, result.files.single.name);
+          ? await _api.importLeadsExcel(result.path!, result.name)
+          : await _api.importLeadsCsv(result.path!, result.name);
       setState(() => _result = res);
     } catch (e) {
       setState(() => _error = e.toString().replaceFirst('Exception: ', ''));

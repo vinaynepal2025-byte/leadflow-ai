@@ -768,15 +768,15 @@ class _FlyerStudioScreenState extends State<FlyerStudioScreen> {
   /// [replaceTarget] set swaps an existing SVG element's artwork in place
   /// (its "Replace SVG" button) instead of adding a new element.
   Future<void> _importSvgElement({FlyerElement? replaceTarget}) async {
-    final picked = await FilePicker.platform.pickFiles(
+    final picked = await FilePicker.pickFile(
       type: FileType.custom,
       allowedExtensions: ['svg'],
     );
-    if (picked == null || picked.files.single.path == null) return;
+    if (picked == null || picked.path == null) return;
 
     String raw;
     try {
-      raw = await File(picked.files.single.path!).readAsString();
+      raw = await File(picked.path!).readAsString();
     } catch (e) {
       _showSnack('Could not read that file: $e');
       return;

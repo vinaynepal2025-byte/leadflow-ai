@@ -56,9 +56,9 @@ class _VoiceNotesTabState extends State<_VoiceNotesTab> {
   void _refresh() => setState(() => _future = _api.getVoiceNotes(widget.leadId));
 
   Future<void> _upload() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.audio);
-    if (result == null || result.files.single.path == null) return;
-    await _api.uploadVoiceNote(leadId: widget.leadId, filePath: result.files.single.path!, fileName: result.files.single.name, recordedBy: 'Counselor');
+    final result = await FilePicker.pickFile(type: FileType.audio);
+    if (result == null || result.path == null) return;
+    await _api.uploadVoiceNote(leadId: widget.leadId, filePath: result.path!, fileName: result.name, recordedBy: 'Counselor');
     _refresh();
   }
 

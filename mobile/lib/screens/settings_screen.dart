@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'brand_kit_screen.dart';
 import 'emoji_generator_screen.dart';
-import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 import 'customize_appearance_screen.dart';
 import 'customize_dashboard_screen.dart';

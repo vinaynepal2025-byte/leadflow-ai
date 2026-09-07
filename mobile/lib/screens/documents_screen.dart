@@ -33,10 +33,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   void _refresh() => setState(() => _future = _api.getDocuments(widget.leadId));
 
   Future<void> _pickAndUpload() async {
-    final result = await FilePicker.platform.pickFiles();
-    if (result == null || result.files.single.path == null) return;
-
-    final file = result.files.single;
+    final file = await FilePicker.pickFile();
+    if (file == null || file.path == null) return;
     final picked = await _askDocTypeAndExpiry();
     if (picked == null) return;
 

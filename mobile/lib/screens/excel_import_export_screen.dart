@@ -81,15 +81,15 @@ class _ImportTabState extends State<_ImportTab> {
   Map<String, dynamic>? _result; // commit result
 
   Future<void> _pickAndPreview() async {
-    final picked = await FilePicker.platform.pickFiles(
+    final picked = await FilePicker.pickFile(
       type: FileType.custom,
       allowedExtensions: ['xlsx', 'csv'],
     );
-    if (picked == null || picked.files.single.path == null) return;
+    if (picked == null || picked.path == null) return;
 
     setState(() {
-      _filePath = picked.files.single.path;
-      _fileName = picked.files.single.name;
+      _filePath = picked.path;
+      _fileName = picked.name;
       _loading = true;
       _error = null;
       _preview = null;
