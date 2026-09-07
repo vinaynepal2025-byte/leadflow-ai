@@ -537,7 +537,14 @@ Per-subject: ${summary.subjects.map((s) => `${s.subject} ${s.marksObtained ?? 'N
 Write only the message text, no preamble.`;
 
   try {
-    const text = await generateText(prompt, { maxTokens: 300 });
+    // 600, not 300 -- confirmed live this session that even with
+    // thinkingBudget: 0, Gemini occasionally still spends a handful of
+    // tokens on reasoning, and a tight budget makes that enough to cut the
+    // visible narrative off mid-sentence (reproduced: "We are delighted to
+    // share that SM" with narrativeIsFallback still false). More headroom
+    // here than the risk-insight call's 400 since this prompt runs the
+    // per-subject breakdown through too.
+    const text = await generateText(prompt, { maxTokens: 600 });
     if (text && numbersAreGrounded(text, summary)) {
       return { narrative: text.trim(), isFallback: false };
     }
