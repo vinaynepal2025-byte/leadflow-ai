@@ -6,7 +6,56 @@ were, `TECH_DEBT.md` for known issues not yet addressed.
 
 ---
 
-## Newest — WhatsApp hyperlink send for report cards, built + verified (2026-09-07, later same day)
+## Newest — Gemini narrative fixed + report card branding separated (2026-09-07, later still)
+
+**Root cause of "Render doesn't have GEMINI_API_KEY working" (from the entry
+below) found: it wasn't Render's env var at all.** The actual
+`leadflow-ai-backend` Render service was hard to find because Vinay's
+Render account has TWO unrelated things in it — an unrelated
+`student-monitor-os` service sitting in "Ungrouped Services", and
+`leadflow-ai-backend` itself grouped inside a project literally named
+"My project" (easy to miss). Once located and a fresh key set
+(`aistudio.google.com` key, tested working directly against the API before
+touching Render), two more real bugs surfaced:
+
+1. **Report card header showed the CRM tenant name at all** — Vinay:
+   Exam Intelligence is a completely separate platform from Leads/CRM, so
+   the tenant's business name must never appear as report-card branding.
+   Fixed: header now shows `studentMeta.institution` (the student's actual
+   college, e.g. "Chitwan Medical College") — `tenantName` removed
+   entirely from both the renderer and the `/generate` route, not just
+   deprioritized. Verified visually (downloaded and viewed the PNG).
+2. **Gemini narrative was truncated mid-sentence even once a working key
+   was set** — `narrativeIsFallback: false` but text like "We are delighted
+   to share that" with nothing after it. Reproduced directly against the
+   live API and found two stacked causes: (a) `gemini-flash-latest` is a
+   "thinking" model that was spending nearly the entire `maxOutputTokens`
+   budget (300) on hidden reasoning — `thoughtsTokenCount: 310`,
+   `finishReason: MAX_TOKENS`, only 11 tokens left for the actual answer;
+   fixed with `generationConfig.thinkingConfig.thinkingBudget: 0` (none of
+   this app's prompts need reasoning). (b) Even with thinking disabled, a
+   response can still split across multiple `parts` — the code only read
+   `parts[0].text`, silently dropping the rest; fixed to join every part.
+   Verified live: got one full, correctly-grounded narrative before hitting
+   the key's free-tier quota (20 req limit) from repeated testing.
+3. Also found the same "Batch average: 162%" mislabeling bug (fixed in the
+   image renderer earlier) was **also** baked into the text prompt sent to
+   Gemini — the model was literally repeating "against the batch average of
+   162%" to a parent. Fixed to say "162/200" in the prompt too, matching
+   the image. Not yet re-confirmed with a live AI call (quota ran out right
+   after deploying this one) — high confidence given it's a one-line text
+   change validated through the same code path that already worked, but
+   worth a quick real check once the key's quota resets (~24h).
+
+**Free-tier Gemini quota note:** this key is on a free tier with a low
+daily request limit (hit `429` after ~20 calls during today's testing).
+Fine for continued development, but a real per-student "generate for a
+whole cohort" workflow will need a paid Gemini tier before it's usable at
+any real scale — worth knowing before building the cohort/bulk-send screen.
+
+---
+
+## WhatsApp hyperlink send for report cards, built + verified (2026-09-07, later same day)
 
 **Decision (Vinay, 2026-09-07):** the paid Meta Cloud API path (`POST
 .../send`, `sendWhatsAppImage`) stays dormant/future — only build it once a
