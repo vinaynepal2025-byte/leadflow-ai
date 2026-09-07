@@ -37,12 +37,17 @@ function orderedSubjects(summary, subjectOrder) {
 /// `studentMeta` may include studentCode/batch/course — shown only for the
 /// fields actually provided, never inventing a placeholder. Returns a PNG
 /// buffer.
-async function renderReportCardPng(summary, { studentName, tenantName, narrative, template = {}, studentMeta = {} }) {
+async function renderReportCardPng(summary, { studentName, narrative, template = {}, studentMeta = {} }) {
   const fields = template.fields || ['subjects', 'total', 'rank', 'batchAverage', 'previousDelta', 'narrative'];
   const has = (f) => fields.includes(f);
   const subjects = has('subjects') ? orderedSubjects(summary, template.subjectOrder) : [];
   const headerColor = (template.branding && template.branding.headerColor) || '#1e3a8a';
-  const title = (template.branding && template.branding.title) || tenantName || 'Report Card';
+  // Exam Intelligence is a separate product from the Leads/CRM side of the
+  // app -- the report card header must never show the CRM tenant's business
+  // name. It shows the student's own college/institution (real per-student
+  // data) unless a template explicitly overrides the title, falling back to
+  // a generic label only when neither is available.
+  const title = (template.branding && template.branding.title) || studentMeta.institution || 'Report Card';
 
   const metaLine = [studentMeta.studentCode, studentMeta.batch, studentMeta.course].filter(Boolean).join(' · ');
 
