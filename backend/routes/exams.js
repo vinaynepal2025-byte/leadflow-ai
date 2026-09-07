@@ -225,7 +225,14 @@ router.post('/:examGroup/students/:studentId/generate', async (req, res) => {
     // A teacher's own written remark, distinct from the computed/AI
     // narrative -- omitting it on a regenerate (e.g. after correcting a
     // mark) keeps whatever remark was already saved rather than blanking it.
-    const teacherRemark = req.body.teacher_remark !== undefined ? (req.body.teacher_remark || null) : null;
+    // Resolved BEFORE rendering (not left to the DB's own COALESCE) so the
+    // image that actually gets rendered/uploaded reflects the same value
+    // that ends up persisted -- rendering with the raw request value and
+    // separately COALESCE-ing in SQL let the two silently diverge.
+    const existingCard = await db
+      .prepare('SELECT teacher_remark FROM report_cards WHERE tenant_id = ? AND student_id = ? AND exam_group = ?')
+      .get(tid, studentId, examGroup);
+    const teacherRemark = req.body.teacher_remark !== undefined ? (req.body.teacher_remark || null) : (existingCard?.teacher_remark || null);
     const png = await renderReportCardPng(summary, {
       studentName: meta.full_name,
       narrative,
@@ -256,7 +263,7 @@ router.post('/:examGroup/students/:studentId/generate', async (req, res) => {
            computed_summary = EXCLUDED.computed_summary,
            ai_narrative = EXCLUDED.ai_narrative,
            ai_narrative_is_fallback = EXCLUDED.ai_narrative_is_fallback,
-           teacher_remark = COALESCE(EXCLUDED.teacher_remark, report_cards.teacher_remark),
+           teacher_remark = EXCLUDED.teacher_remark,
            image_storage_path = EXCLUDED.image_storage_path,
            status = 'ready', generated_at = now(), generated_by = EXCLUDED.generated_by,
            updated_at = now()
