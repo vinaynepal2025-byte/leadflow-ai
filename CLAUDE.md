@@ -1,5 +1,9 @@
 # CLAUDE.md — LeadFlow AI
 
+> Global rules, reuse catalog and approvals live in the Meta OS control plane:
+> https://github.com/vinaynepal2025-byte/meta-os-control-plane (read CLAUDE.md, policies/OWNER_WORKING_RULES.md, registries/REUSE_CATALOG.yaml).
+> Project rules below add detail and never weaken them. Legacy `vinay-ai-control-center` is read-only history.
+
 Lead Intelligence & Consultancy Operating System ("VertiCore MetaOS"),
 built for education/career/medical-admission consultancies.
 
